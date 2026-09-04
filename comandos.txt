@@ -1,0 +1,57 @@
+npm i -D typescript ts-node-dev @types/node : esto para inicializar typescript
+
+npx tsc --init: inicia el archivo de configuracion de typescript
+
+instalacion de express:
+
+npm i express
+npm i -D @types/express
+
+npm i -D tsx : este comando es para correr proyectos node como ES y no con COMMONJS
+
+
+Instalar Prisma
+
+comandos: 
+    npm i -D prisma : Es el CLI (herramienta de comandos)
+    para generar el cliente,migraciones,visor de datos
+    npm i @prisma/client : es la libreria que el codigo en produccion realmente
+    importa
+
+    npx prisma init
+
+    iniciar migraciones:
+    npx prisma migrate dev --name init
+    crear cliente prisma:
+    npx prisma generate
+    
+
+    --para usar ES y no Commonjs
+    npm i -D tsx
+
+    ademas configirar el generate client en schema.prisma
+    generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  moduleFormat = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension = "ts"
+}
+
+adaptador postrgress.
+npm i @prisma/adapter-pg
+ 
+
+npm i dotenv :Para que process.env.DATABASE_URL no 
+llegue como undefined, necesitas que las variables del 
+.env ya estén cargadas en memoria antes de que este archivo se ejecute. 
+Esto se logra con el paquete dotenv, llamando a su función de configuración lo más
+ temprano posible en tu aplicación
+
+
+ hashear contraseñas y usar en autenticacion:
+ npm i bcrypt
+npm i -D @types/bcrypt
+
+para el script para crear datos de inicio.
+npx prisma db seed

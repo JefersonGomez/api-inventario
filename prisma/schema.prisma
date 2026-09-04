@@ -1,0 +1,71 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  moduleFormat = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+  
+}
+
+model User{
+  id String @id @default(uuid())
+  name String 
+  email String @unique
+  passwordHash String
+  role Role @default(EMPLOYE)
+  createAt DateTime @default(now())
+  movements StockMovement[]
+}
+
+enum Role {
+  ADMIN
+  EMPLOYE
+}
+
+model Category {
+  id String @id @default(uuid())
+  name String @unique
+  products Product[]
+}
+
+model Product {
+  id String @id @default(uuid())
+  sku String @unique
+  name String
+  description String?
+  price Decimal @db.Decimal(10,2)
+  stock Int @default(0)
+  minStock Int @default(0)
+  categoryId String 
+  category Category @relation(fields: [categoryId],references: [id])
+  createAt DateTime @default(now())
+  updateAt DateTime @updatedAt
+  movements StockMovement[]
+}
+
+model StockMovement{
+  id String @id @default(uuid())
+  productId String
+  product Product @relation(fields: [productId],references: [id])
+  userId String
+  user User @relation(fields: [userId],references: [id])
+  type MovementType 
+  quantity Int
+  reason String?
+  createdAt DateTime @default(now())
+}
+
+enum MovementType{
+  IN //entrada de stock
+  OUT //salidad de stock
+  ADJUSTMENT //ajuste de stock
+}

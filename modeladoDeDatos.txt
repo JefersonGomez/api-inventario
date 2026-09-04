@@ -1,0 +1,53 @@
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(EMPLOYEE)
+  createdAt    DateTime @default(now())
+  movements    StockMovement[]
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  products Product[]
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  sku           String   @unique
+  name          String
+  description   String?
+  price         Decimal  @db.Decimal(10, 2)
+  stock         Int      @default(0)
+  minStock      Int      @default(0)   // para alertas de stock bajo
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  movements     StockMovement[]
+}
+
+model StockMovement {
+  id         String       @id @default(uuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id])
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  type       MovementType
+  quantity   Int
+  reason     String?
+  createdAt  DateTime     @default(now())
+}
+
+enum MovementType {
+  IN      // entrada de stock
+  OUT     // salida de stock
+  ADJUSTMENT
+}
