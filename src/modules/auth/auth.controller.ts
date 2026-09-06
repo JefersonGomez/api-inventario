@@ -22,7 +22,3 @@ export async function LoginController(req: Request, res: Response) {
     res.status(401).json({ error: (err as Error).message });
   }
 }
-
-export function MeController(req: Request, res: Response) {
-  res.status(200).json({ user: req.user });
-}

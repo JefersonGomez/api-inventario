@@ -223,10 +223,10 @@ Carpeta por módulo dentro de `src/modules/<nombre>/`:
 - [x] Middleware de autenticación (`Authenticated`) — verifica JWT, llena `req.user`
 - [x] Middleware de roles (`Authorize`) — factory function, recibe roles permitidos por rest params
 - [x] `GET /auth/me` como ruta de prueba (validada con Postman)
-- [ ] Validación de inputs con Zod
+- [x] Validación de inputs con Zod (auth, categories, products, movements)
 - [x] CRUD de productos y categorías
-- [ ] Movimientos de stock
-- [ ] Reportes
+- [x] Movimientos de stock
+- [x] Reportes (low-stock, movements por rango de fechas, inventory-value)
 - [ ] Swagger
 - [ ] Tests (Jest + Supertest)
 - [ ] Deploy
@@ -269,6 +269,17 @@ Errores que ya se repitieron más de una vez al construir categories/products �
 - **Prefijos de rutas consistentes:** confirmar que el `app.use("/prefijo", router)` en `app.ts` coincide exactamente (singular/plural) con lo que se prueba en Postman.
 - **No incluir el `id` dentro de `data` en un `update`** — el `id` va solo en `where`.
 - **Validar existencia de relaciones antes de crear/actualizar** (ej. `categoryId` en `Product`) para dar un mensaje de error claro en vez del error crudo de la foreign key de Prisma.
+
+---
+
+## 5.3 Notas técnicas de validación con Zod
+
+- **Versión reciente de Zod (v4):** varios validadores de formato que antes eran encadenados sobre `z.string()` ahora son funciones de nivel superior: `z.string().email()` → `z.email()`; mismo patrón para `z.uuid()`, etc.
+- **`ZodSchema` está deprecado** en favor de `ZodType` como tipo genérico para tipar un parámetro que reciba "cualquier schema".
+- **Middleware genérico reusable** (`validate(schema)`): factory function, usa `schema.safeParse(req.body)` (no `.parse()`, porque no lanza excepción — devuelve `{ success, data | error }`, más fácil de manejar en un middleware). Si es válido, reemplaza `req.body` con `result.data` antes de `next()`.
+- **Orden de middlewares:** `validate(schema)` va primero, antes de `Authenticated`/`Authorize` — validar el input es más barato que verificar un JWT, y no depende de la autenticación.
+- **El schema de `update` no siempre es igual al de `create`:** revisar qué campos acepta realmente el Service correspondiente antes de copiar el schema de create (ej. `stock` no es editable en productos, así que no debe exigirse en el schema de update).
+- **Los valores de un enum de Zod (`z.enum([...])`) deben coincidir exactamente** con los valores reales del enum de Prisma — un typo hace que Zod rechace valores que en realidad son válidos para la base de datos.
 
 ---
 
