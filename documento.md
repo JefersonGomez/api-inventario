@@ -228,7 +228,7 @@ Carpeta por módulo dentro de `src/modules/<nombre>/`:
 - [x] Movimientos de stock
 - [x] Reportes (low-stock, movements por rango de fechas, inventory-value)
 - [ ] Swagger
-- [~] Tests (Jest + Supertest) — configuración base lista, en progreso módulo por módulo
+- [x] Tests (Jest + Supertest) — 13 tests pasando: auth (register/login), middleware Authenticated, movements (IN/OUT/ADJUSTMENT con transacciones)
 - [ ] Deploy
 
 ---
@@ -332,6 +332,8 @@ export default {
 - `afterAll`: `await prisma.$disconnect()`, para que Jest no quede colgado por conexiones abiertas.
 - Probar tanto el camino feliz (201/200 y forma esperada del body) como el de error (400 con datos inválidos/duplicados).
 - Verificar explícitamente que campos sensibles (`passwordHash`) no vengan en la respuesta (`toBeUndefined()`).
+
+**Los tests como detector de "schema drift":** si el `schema.prisma` se edita (ej. corregir un typo de un nombre de campo) sin correr `migrate dev` después, la base de datos real se queda desactualizada silenciosamente — Postgres seguirá teniendo el nombre/restricción viejo. Los tests que sí ejercitan esas rutas (a diferencia de probar solo manualmente de vez en cuando) detectan esto rápido, con errores como `"The column (not available) does not exist"`. Ante ese mensaje vago, comparar directamente el `migration.sql` ya aplicado contra el `schema.prisma` actual, campo por campo, en vez de adivinar.
 
 ---
 
