@@ -11,7 +11,7 @@ app.use("/auth",authRouter)
 app.use("/categories", categoryRouter)
 app.use("/products", productRouter)
 app.use("/reports", reportRouter)
-app.get("/healt",(req, res)=>{
+app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })
 

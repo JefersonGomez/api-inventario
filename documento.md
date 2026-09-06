@@ -228,7 +228,7 @@ Carpeta por módulo dentro de `src/modules/<nombre>/`:
 - [x] Movimientos de stock
 - [x] Reportes (low-stock, movements por rango de fechas, inventory-value)
 - [ ] Swagger
-- [ ] Tests (Jest + Supertest)
+- [~] Tests (Jest + Supertest) — configuración base lista, en progreso módulo por módulo
 - [ ] Deploy
 
 ---
@@ -280,6 +280,58 @@ Errores que ya se repitieron más de una vez al construir categories/products �
 - **Orden de middlewares:** `validate(schema)` va primero, antes de `Authenticated`/`Authorize` — validar el input es más barato que verificar un JWT, y no depende de la autenticación.
 - **El schema de `update` no siempre es igual al de `create`:** revisar qué campos acepta realmente el Service correspondiente antes de copiar el schema de create (ej. `stock` no es editable en productos, así que no debe exigirse en el schema de update).
 - **Los valores de un enum de Zod (`z.enum([...])`) deben coincidir exactamente** con los valores reales del enum de Prisma — un typo hace que Zod rechace valores que en realidad son válidos para la base de datos.
+
+---
+
+## 5.4 Notas técnicas de Testing (Jest + Supertest + ESM)
+
+**Instalación:**
+```bash
+npm i -D jest @types/jest ts-jest supertest @types/supertest
+```
+
+**Conflicto conocido: TypeScript 7 vs ts-jest.** `ts-jest` aún no soporta la nueva API del compilador nativo de TS7. Solución oficial (alias de paquetes):
+```bash
+npm install --save-dev "@typescript/native@npm:typescript@^7.0.2" "typescript@npm:@typescript/typescript6@^6.0.2"
+```
+Esto mantiene TS7 real bajo `@typescript/native` (para `npx tsc`) y expone una capa de compatibilidad TS6 bajo el nombre `typescript` (lo que `ts-jest` necesita como peer dependency).
+
+**`tsconfig.json` necesita `"types": ["jest"]`** — si `types` está en `[]` (como se configuró para no cargar tipos automáticamente), hay que agregar `"jest"` explícitamente o `describe`/`it`/`expect` no se reconocen como globals.
+
+**`jest.config.js` para proyecto ESM:** usar `createDefaultEsmPreset` (no `createDefaultPreset`, que es para CommonJS — causa `SyntaxError: Unexpected token 'export'`), más un `moduleNameMapper` para resolver los imports que terminan en `.js` hacia los archivos `.ts` reales:
+```javascript
+import { createDefaultEsmPreset } from "ts-jest";
+const presetConfig = createDefaultEsmPreset();
+
+export default {
+  ...presetConfig,
+  testEnvironment: "node",
+  moduleNameMapper: { "^(\\.{1,2}/.*)\\.js$": "$1" },
+  setupFiles: ["<rootDir>/jest.setup.ts"]
+};
+```
+
+**Script de test** necesita la bandera experimental de Node para VM Modules:
+```json
+"test": "node --experimental-vm-modules node_modules/.bin/jest"
+```
+
+**Base de datos separada para tests:**
+- Una segunda base de datos (`inventario_db_test`) dentro del mismo contenedor de Postgres.
+- `.env.test` con su propio `DATABASE_URL` apuntando a esa base.
+- `jest.setup.ts` carga ese archivo antes de cualquier test: `dotenv.config({ path: ".env.test" })`.
+- Para aplicar migraciones a la base de test manualmente (Windows/PowerShell): sobreescribir la variable solo para esa sesión de terminal y usar `migrate deploy` (no `migrate dev`, que es para desarrollo):
+  ```powershell
+  $env:DATABASE_URL="...inventario_db_test"; npx prisma migrate deploy
+  ```
+  Cerrar esa terminal después, ya que la variable queda pegada a la sesión y afectaría a `npm run dev` si se reusa.
+
+**Patrón de test contra rutas con Prisma:**
+- Importar `app` (nunca `server.ts`, para no levantar un puerto real), `request` de `supertest`, y la instancia de `prisma` para limpieza.
+- `afterEach`: limpiar los datos de prueba creados (usar `deleteMany`, no `delete` — no lanza error si no encuentra nada).
+- `afterAll`: `await prisma.$disconnect()`, para que Jest no quede colgado por conexiones abiertas.
+- Probar tanto el camino feliz (201/200 y forma esperada del body) como el de error (400 con datos inválidos/duplicados).
+- Verificar explícitamente que campos sensibles (`passwordHash`) no vengan en la respuesta (`toBeUndefined()`).
 
 ---
 
