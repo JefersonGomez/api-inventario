@@ -1,0 +1,553 @@
+openapi: 3.0.3
+info:
+  title: "Inventario API"
+  version: "1.0.0"
+  description: "API REST para gestión de inventario: autenticación con roles, productos, categorías, movimientos de stock y reportes."
+servers:
+  - url: http://localhost:3000
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    CategoryInput:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        price:
+          type: number
+          format: decimal
+        stock:
+          type: integer
+        minStock:
+          type: integer
+        categoryId:
+          type: string
+          format: uuid
+        category:
+          $ref: '#/components/schemas/Category'
+
+    ProductCreateInput:
+      type: object
+      required:
+        - sku
+        - name
+        - price
+        - stock
+        - minStock
+        - categoryId
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        stock:
+          type: integer
+        minStock:
+          type: integer
+        categoryId:
+          type: string
+          format: uuid
+
+    ProductUpdateInput:
+      type: object
+      required:
+        - name
+        - price
+        - minStock
+        - categoryId
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        minStock:
+          type: integer
+        categoryId:
+          type: string
+          format: uuid
+
+    MovementInput:
+      type: object
+      required:
+        - productId
+        - type
+        - quantity
+      properties:
+        productId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [IN, OUT, ADJUSTMENT]
+        quantity:
+          type: integer
+        reason:
+          type: string
+
+    StockMovement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [IN, OUT, ADJUSTMENT]
+        quantity:
+          type: integer
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    RegisterInput:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+
+    LoginInput:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+paths:
+  /auth/register:
+    post:
+      summary: Registra un nuevo usuario (rol EMPLOYEE)
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterInput'
+      responses:
+        '201':
+          description: Usuario creado correctamente
+        '400':
+          description: El usuario ya existe o los datos no son válidos
+
+  /auth/login:
+    post:
+      summary: Autentica un usuario y devuelve un JWT
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginInput'
+      responses:
+        '200':
+          description: Login exitoso, devuelve el token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '401':
+          description: Credenciales inválidas
+
+  /categories/:
+    get:
+      summary: Lista todas las categorías
+      tags:
+        - Categories
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de categorías
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+        '401':
+          description: No autorizado
+    post:
+      summary: Crea una categoría (solo ADMIN)
+      tags:
+        - Categories
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '201':
+          description: Categoría creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          description: La categoría ya existe o los datos no son válidos
+        '401':
+          description: No autorizado
+        '403':
+          description: Rol insuficiente
+
+  /categories/{id}:
+    get:
+      summary: Obtiene una categoría por ID
+      tags:
+        - Categories
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Categoría encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '404':
+          description: Categoría no encontrada
+    put:
+      summary: Actualiza una categoría (solo ADMIN)
+      tags:
+        - Categories
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryInput'
+      responses:
+        '200':
+          description: Categoría actualizada
+        '403':
+          description: Rol insuficiente
+        '404':
+          description: Categoría no encontrada
+    delete:
+      summary: Elimina una categoría (solo ADMIN)
+      tags:
+        - Categories
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Categoría eliminada
+        '403':
+          description: Rol insuficiente
+        '404':
+          description: Categoría no encontrada
+
+  /products/:
+    get:
+      summary: Lista todos los productos (con su categoría)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de productos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+    post:
+      summary: Crea un producto (solo ADMIN)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateInput'
+      responses:
+        '201':
+          description: Producto creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          description: SKU duplicado, categoría inválida, o datos no válidos
+        '403':
+          description: Rol insuficiente
+
+  /products/{id}:
+    get:
+      summary: Obtiene un producto por ID
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Producto encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Producto no encontrado
+    put:
+      summary: Actualiza un producto (solo ADMIN). No permite editar el stock.
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdateInput'
+      responses:
+        '200':
+          description: Producto actualizado
+        '403':
+          description: Rol insuficiente
+        '404':
+          description: Producto no encontrado
+    delete:
+      summary: Elimina un producto (solo ADMIN)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Producto eliminado
+        '403':
+          description: Rol insuficiente
+        '404':
+          description: Producto no encontrado
+
+  /movements/:
+    get:
+      summary: Lista los movimientos de stock (más recientes primero)
+      tags:
+        - Movements
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filtra los movimientos de un producto específico
+      responses:
+        '200':
+          description: Lista de movimientos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockMovement'
+    post:
+      summary: Registra un movimiento de stock (ADMIN o EMPLOYEE)
+      tags:
+        - Movements
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MovementInput'
+      responses:
+        '201':
+          description: Movimiento registrado y stock actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovement'
+        '400':
+          description: Producto inexistente o stock insuficiente para una salida (OUT)
+
+  /reports/low-stock:
+    get:
+      summary: Productos con stock en o por debajo del mínimo
+      tags:
+        - Reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de productos con stock bajo
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+
+  /reports/movements:
+    get:
+      summary: Movimientos filtrados por rango de fechas
+      tags:
+        - Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Lista de movimientos en el rango indicado
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StockMovement'
+
+  /reports/inventory-value:
+    get:
+      summary: Valor total del inventario
+      tags:
+        - Reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Valor total calculado (stock × price) y cantidad de productos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalValue:
+                    type: number
+                  totalProducts:
+                    type: integer
