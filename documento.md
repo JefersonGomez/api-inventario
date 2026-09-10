@@ -227,7 +227,7 @@ Carpeta por módulo dentro de `src/modules/<nombre>/`:
 - [x] CRUD de productos y categorías
 - [x] Movimientos de stock
 - [x] Reportes (low-stock, movements por rango de fechas, inventory-value)
-- [ ] Swagger
+- [x] Swagger (openapi.yaml, servido en /api-docs)
 - [x] Tests (Jest + Supertest) — 13 tests pasando: auth (register/login), middleware Authenticated, movements (IN/OUT/ADJUSTMENT con transacciones)
 - [ ] Deploy
 
@@ -334,6 +334,30 @@ export default {
 - Verificar explícitamente que campos sensibles (`passwordHash`) no vengan en la respuesta (`toBeUndefined()`).
 
 **Los tests como detector de "schema drift":** si el `schema.prisma` se edita (ej. corregir un typo de un nombre de campo) sin correr `migrate dev` después, la base de datos real se queda desactualizada silenciosamente — Postgres seguirá teniendo el nombre/restricción viejo. Los tests que sí ejercitan esas rutas (a diferencia de probar solo manualmente de vez en cuando) detectan esto rápido, con errores como `"The column (not available) does not exist"`. Ante ese mensaje vago, comparar directamente el `migration.sql` ya aplicado contra el `schema.prisma` actual, campo por campo, en vez de adivinar.
+
+## 5.5 Notas técnicas de Swagger (OpenAPI, archivo YAML separado)
+
+**Instalación:**
+```bash
+npm i swagger-ui-express yaml
+npm i -D @types/swagger-ui-express
+```
+(No hace falta `swagger-jsdoc` — esa librería es solo para el enfoque de anotaciones en el código, que no se usó aquí.)
+
+**Conexión en `app.ts`:** leer el YAML con `fs.readFileSync`, parsearlo con `parse()` del paquete `yaml`, y montarlo con:
+```typescript
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(documentoParseado))
+```
+
+**Estructura del documento (`openapi.yaml`):**
+- `info` / `servers`: metadata y URL base.
+- `components.securitySchemes.bearerAuth`: define el esquema JWT una sola vez (`type: http`, `scheme: bearer`, `bearerFormat: JWT`). Se activa por ruta con `security: [{ bearerAuth: [] }]` — esto es lo que habilita el botón "Authorize" en la UI.
+- `components.schemas`: define la forma de cada modelo/input una sola vez (`Category`, `Product`, `MovementInput`, etc.) y se reutiliza en cualquier `path` con `$ref: '#/components/schemas/NombreDelSchema'` — evita repetir `properties` en cada endpoint.
+
+**Errores comunes de sintaxis YAML (estricta con espaciado):**
+- Siempre un espacio después de `:` entre clave y valor.
+- Las listas (`servers`, `tags`, `required`, elementos de un array) necesitan el guion `-` seguido de un espacio antes del valor.
+- Las claves del estándar (`requestBody`, `description`, etc.) van siempre en inglés, sin importar el idioma del contenido.
 
 ---
 

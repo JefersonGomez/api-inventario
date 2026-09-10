@@ -169,15 +169,23 @@ Authorization: Bearer <token>
 
 ### Reportes (`/reports`)
 
-En construcción. Planeados:
-- `GET /reports/low-stock` — productos con `stock <= minStock`.
-- `GET /reports/movements?from=&to=` — movimientos filtrados por rango de fechas.
-- `GET /reports/inventory-value` — valor total del inventario (`Σ stock × price`).
+| Método | Ruta | Protección | Descripción |
+|---|---|---|---|
+| GET | `/reports/low-stock` | Autenticado | Productos con `stock <= minStock` |
+| GET | `/reports/movements?from=&to=` | Autenticado | Movimientos filtrados por rango de fechas (ambos parámetros opcionales) |
+| GET | `/reports/inventory-value` | Autenticado | Valor total del inventario (`Σ stock × price`) y cantidad de productos |
+
+## Documentación interactiva (Swagger)
+
+Con el servidor corriendo, la documentación completa de la API está disponible en:
+```
+http://localhost:3000/api-docs
+```
+
+Incluye todos los endpoints agrupados por módulo, con sus schemas de request/response, y un botón **Authorize** para pegar un JWT y probar las rutas protegidas directamente desde el navegador.
+
+El documento fuente vive en `openapi.yaml`, en la raíz del proyecto.
 
 ## Pendientes
 
-- Validación de inputs con Zod
-- Reportes
-- Documentación con Swagger
-- Tests (Jest + Supertest)
 - Deploy

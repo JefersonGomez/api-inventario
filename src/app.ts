@@ -8,7 +8,11 @@ import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
 import path from 'node:path';
+import cors from "cors"
 const app = Express()
+app.use(cors({
+  origin: "http://localhost:5173"
+}))
 app.use(Express.json())
 
 
