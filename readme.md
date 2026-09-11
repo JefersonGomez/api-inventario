@@ -186,6 +186,10 @@ Incluye todos los endpoints agrupados por módulo, con sus schemas de request/re
 
 El documento fuente vive en `openapi.yaml`, en la raíz del proyecto.
 
+## Frontend
+
+Existe un frontend independiente (React + Vite) en la carpeta `inventario-frontend/`, al mismo nivel que este proyecto. Ver su propio README para instrucciones de instalación. Requiere que este backend esté corriendo en `http://localhost:3000` con CORS habilitado para `http://localhost:5173`.
+
 ## Pendientes
 
 - Deploy
