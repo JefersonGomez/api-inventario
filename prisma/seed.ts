@@ -19,7 +19,8 @@ async function main() {
         name: "Admin",
         email: "admin@gmail.com",
         passwordHash: passwordHashed,
-        role: "ADMIN"
+        role: "ADMIN",
+        avatarUrl: "avatars/default.png",
       }
     })
 

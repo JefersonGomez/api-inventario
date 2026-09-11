@@ -436,4 +436,89 @@ Para cada nueva funcionalidad:
 5. Se revisa lo escrito, se corrige, y se explica el porqué de cada corrección.
 6. Se prueba el flujo completo antes de pasar al siguiente módulo.
 
-Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la IA a futuro.
+Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la IA a futuro..
+
+
+# Voy a crear el contenido actualizado del documento del proyecto
+# Primero analicemos qué necesitamos agregar/modificar
+
+updates = """
+## 6. Roadmap de desarrollo (fases aprobadas)
+
+### Fase 1: Perfil y configuración (en progreso)
+- [ ] Foto de perfil (subida con multer, guardado en disco)
+- [ ] Mostrar rol en la UI (campo `role` ya existe en User)
+- [ ] Cambio de contraseña
+- [ ] Edición de perfil (nombre, email)
+- [ ] Idioma ES/EN (pendiente - react-i18next en frontend)
+- [ ] Modo oscuro/claro (pendiente - frontend ya tiene variables CSS)
+
+### Fase 2: Gestión de usuarios (admin)
+- [ ] Lista de empleados + su info
+- [ ] Activar/desactivar usuarios (requiere campo `isActive` en User)
+- [ ] Un admin no puede desactivarse a sí mismo, pero sí a otros admins
+
+### Fase 3: Categorías con descripción
+- [ ] Campo `description` en Category (rápido)
+
+### Fase 4: Gráficos reales + escaneo de código de barras
+- [ ] Recharts para gráficos (frontend)
+- [ ] Lector de cámara para códigos de barras (frontend)
+
+### Fase 5: Proveedores y órdenes de compra
+- [ ] Nuevo módulo completo (el más grande)
+
+### Fase 6: Detalles técnicos
+- [ ] Refresh tokens
+- [ ] Soft delete (productos/categorías)
+- [ ] Auditoría (logs de acciones)
+
+### Fase 7: Asistente IA (solo lectura)
+- [ ] Chat con function calling sobre reportes/productos
+- [ ] Ejecutar acciones queda para fase futura
+
+---
+
+## 9. Decisiones técnicas clave
+
+### Chatbot: modo "solo lectura" primero
+- **Decisión:** El asistente IA comenzará respondiendo preguntas en lenguaje natural usando datos reales del inventario (ej. "¿cuánto stock tengo de Taladro Bosch?"), sin ejecutar acciones (crear movimientos, editar productos).
+- **Implementación:** API de Claude con tool use / function calling — el modelo llama a funciones del backend (`getProducts`, `getLowStockReport`, etc.) para traer datos antes de responder.
+- **Por qué:** Un chatbot que escribe en la base de datos necesita confirmaciones explícitas, límites claros y manejo robusto de errores. Mejor construir la capa de lectura primero, validarla, y luego agregar la de escritura como fase futura.
+
+### Foto de perfil
+- **Stack:** multer en backend, guardado en disco local, servido estáticamente
+- **Campo nuevo:** `avatarUrl` en modelo User
+- **Sin dependencia externa:** no usamos servicios cloud de pago (S3, Cloudinary, etc.)
+
+### Internacionalización (i18n)
+- **Frontend:** react-i18next (estándar de facto para React)
+- **Backend:** no aplica por ahora (las respuestas de API son JSON estructurados)
+
+### Modo claro/oscuro
+- **Frontend:** ya tienes las variables CSS definidas — solo falta botón que alterna clase `dark` y persiste en localStorage
+- **Backend:** no aplica
+
+"""
+
+print("Contenido listo para agregar al documento")
+print("=" * 60)
+print(updates[:500] + "...")
+
+ # Result 
+Contenido listo para agregar al documento
+============================================================
+
+## 6. Roadmap de desarrollo (fases aprobadas)
+
+### Fase 1: Perfil y configuración (en progreso)
+- [ ] Foto de perfil (subida con multer, guardado en disco)
+- [ ] Mostrar rol en la UI (campo `role` ya existe en User)
+- [ ] Cambio de contraseña
+- [ ] Edición de perfil (nombre, email)
+- [ ] Idioma ES/EN (pendiente - react-i18next en frontend)
+- [ ] Modo oscuro/claro (pendiente - frontend ya tiene variables CSS)
+
+### Fase 2: Gestión de usuarios (admin)
+- [ ] Lista de empleados + su info
+- [ ] Activ...

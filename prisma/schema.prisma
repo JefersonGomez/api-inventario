@@ -22,6 +22,7 @@ model User{
   email String @unique
   passwordHash String
   role Role @default(EMPLOYE)
+  avatarUrl String?
   createAt DateTime @default(now())
   movements StockMovement[]
 }
