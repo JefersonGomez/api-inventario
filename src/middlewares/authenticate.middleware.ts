@@ -16,9 +16,7 @@ export async function Authenticated(
       if (!token) {
         return res.status(401).json({ message: "Formato de token inválido" });
       }
-
-      const clave =
-        process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
+        const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
      const verification = jwt.verify(token, clave) as AuthPayload
       if (verification) {
         req.user = verification

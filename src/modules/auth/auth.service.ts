@@ -1,14 +1,14 @@
-import console from "node:console";
 import { prisma } from "../../config/database.ts";
 import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
+
 export async function Register(name: string, email: string, password: string) {
   const existingUser = await prisma.user.findUnique({
     where: { email: email },
   });
 
   if (existingUser) {
-    throw new Error("El usuario ya exister");
+    throw new Error("El usuario ya existe");
   }
 
   const passwordHashed = await bcrypt.hash(password, 10);
@@ -25,10 +25,10 @@ export async function Register(name: string, email: string, password: string) {
       name: true,
       email: true,
       role: true,
+      avatarUrl: true,
     },
   });
 
-  console.log("nuevo usuario creado correctamente...");
   return newUser;
 }
 
@@ -60,5 +60,14 @@ export async function Login(email: string, password: string) {
 
   const token = jwt.sign(payload, clave, opciones);
 
-  return token;
+  return {
+    token,
+    user: {
+      id: existUser.id,
+      name: existUser.name,
+      email: existUser.email,
+      role: existUser.role,
+      avatarUrl: existUser.avatarUrl,
+    },
+  };
 }

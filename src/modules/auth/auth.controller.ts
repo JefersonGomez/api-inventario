@@ -16,8 +16,8 @@ export async function RegisterController(req: Request, res: Response) {
 export async function LoginController(req: Request, res: Response) {
   try {
     const { email, password } = req.body;
-    const userLogin = await Login(email, password);
-    res.status(200).json({ token: userLogin });
+    const result = await Login(email, password);
+    res.status(200).json(result);
   } catch (err) {
     res.status(401).json({ error: (err as Error).message });
   }

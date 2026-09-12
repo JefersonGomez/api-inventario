@@ -1,5 +1,5 @@
 import type { Request, Response } from "express"
-import { getProfile, updateAvatar, changePassword } from "./user.service.ts"
+import { getProfile, updateAvatar, changePassword,updateProfile } from "./user.service.ts"
 
 export async function getProfileController(req: Request, res: Response) {
   try {
@@ -33,6 +33,18 @@ export async function changePasswordController(req: Request, res: Response) {
 
     const result = await changePassword(userId, currentPassword, newPassword)
     res.status(200).json(result)
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message })
+  }
+}
+
+export async function updateProfileController(req: Request, res: Response) {
+  try {
+    const userId = req.user!.id
+    const { name, email } = req.body
+
+    const updatedProfile = await updateProfile(userId, name, email)
+    res.status(200).json(updatedProfile)
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })
   }

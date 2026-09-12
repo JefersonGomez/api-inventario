@@ -78,3 +78,25 @@ export async function changePassword(userID:string,currentPassword:string,newPas
   })
    return { message: "Contraseña actualizada correctamente" }
 }
+
+export async function updateProfile(userId: string, name: string, email: string) {
+  const existingEmail = await prisma.user.findUnique({ where: { email } })
+
+  if (existingEmail && existingEmail.id !== userId) {
+    throw new Error("Ese email ya está en uso por otro usuario")
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: userId },
+    data: { name, email },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      avatarUrl: true,
+    },
+  })
+
+  return updatedUser
+}
