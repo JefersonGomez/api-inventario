@@ -11,3 +11,4 @@ router.get("/", Authenticated, getAllCategoriesController)
 router.post("/", validate(categorySchema),Authenticated, Authorize("ADMIN"), CreateCategoryController)
 router.put("/:id",validate(categorySchema),Authenticated, Authorize("ADMIN"), updateCategoryController)
 router.delete("/:id", Authenticated, Authorize("ADMIN"), deleteCategoryCotroller)
+

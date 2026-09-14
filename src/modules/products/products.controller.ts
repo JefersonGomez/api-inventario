@@ -5,15 +5,16 @@ import {
   getProductById,
   updateProduct,
   deleteProduct,
+  getProductByBarcode // Importar la nueva función
 } from "./products.service.ts";
 
 export async function CreateProductController(req: Request, res: Response) {
   try {
-    const { sku, name, description, price, stock, minStock, categoryId } =
-      req.body;
+    const { sku, barcode, name, description, price, stock, minStock, categoryId } = req.body;
 
-    const create = await createProduct(
+    const created = await createProduct(
       sku,
+      barcode,
       name,
       description,
       price,
@@ -21,7 +22,7 @@ export async function CreateProductController(req: Request, res: Response) {
       minStock,
       categoryId,
     );
-    res.status(201).json(create);
+    res.status(201).json(created);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
@@ -29,8 +30,8 @@ export async function CreateProductController(req: Request, res: Response) {
 
 export async function getAllProductsController(req: Request, res: Response) {
   try {
-    const getProducts = await getAllProducts();
-    res.status(200).json(getProducts);
+    const products = await getAllProducts();
+    res.status(200).json(products);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
@@ -40,59 +41,60 @@ export async function getProductByIdController(req: Request, res: Response) {
   try {
     const { id } = req.params;
     if (!id || typeof id !== "string") {
-      return res
-        .status(400)
-        .json({ message: "El ID es requerido y debe ser un texto" });
+      return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const getProduct = await getProductById(id);
-
-    res.status(200).json(getProduct);
+    const product = await getProductById(id);
+    res.status(200).json(product);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
 }
 
-export async function updateCategoryController(req: Request, res: Response) {
+export async function updateProductController(req: Request, res: Response) {
   try {
-   const { id } = req.params;
-    const {name, description, price, minStock, categoryId } = req.body;
+    const { id } = req.params;
+    const { name, barcode, description, price, minStock, categoryId } = req.body;
+    
     if (!id || typeof id !== "string") {
-      return res
-        .status(400)
-        .json({ message: "El ID es requerido y debe ser un texto" });
+      return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const update = await updateProduct(id,name,description,price,minStock,categoryId)
-   
-    res.status(200).json(update)
-
-
+    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId);
+    res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
 }
-
 
 export async function deleteProductController(req: Request, res: Response) {
-    try{
-
-       const { id } = req.params;
-         if (!id || typeof id !== "string") {
-      return res
-        .status(400)
-        .json({ message: "El ID es requerido y debe ser un texto" });
+  try {
+    const { id } = req.params;
+    if (!id || typeof id !== "string") {
+      return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
-    const deleteP = await deleteProduct(id)
+    
+    const deleted = await deleteProduct(id);
+    res.status(200).json(deleted);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
 
-    res.status(200).json(deleteP)
-
-
-
-    }catch(error){
-         res.status(400).json({ error: (error as Error).message });
-
+export async function getProductByBarcodeController(req: Request, res: Response) {
+  try {
+    const { code } = req.params;
+     if (!code || typeof code !== "string") {
+      return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
-
-
+    const product = await getProductByBarcode(code);
+    
+    if (!product) {
+      return res.status(404).json({ message: "Producto no encontrado con ese código" });
+    }
+    
+    return res.json(product);
+  } catch (error) {
+    return res.status(500).json({ message: "Error interno del servidor" });
+  }
 }
