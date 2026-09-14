@@ -33,7 +33,7 @@ export async function Register(name: string, email: string, password: string) {
 }
 
 export async function Login(email: string, password: string) {
-  const existUser = await prisma.user.findUnique({
+ const existUser = await prisma.user.findUnique({
     where: { email: email },
   });
 
@@ -45,6 +45,10 @@ export async function Login(email: string, password: string) {
 
   if (!coinciden) {
     throw new Error("Credenciales invalidas");
+  }
+
+  if (!existUser.isActive) {
+    throw new Error("Tu cuenta ha sido desactivada. Contacta a un administrador.");
   }
 
   const payload = {

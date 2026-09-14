@@ -23,6 +23,7 @@ model User{
   passwordHash String
   role Role @default(EMPLOYE)
   avatarUrl String?
+  isActive Boolean @default(true)
   createAt DateTime @default(now())
   movements StockMovement[]
 }

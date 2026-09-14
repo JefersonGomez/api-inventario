@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import type { AuthPayload } from "../types/express.d.ts"
+import { prisma } from "../config/database.ts";
 export async function Authenticated(
   req: Request,
   res: Response,
@@ -16,12 +17,16 @@ export async function Authenticated(
       if (!token) {
         return res.status(401).json({ message: "Formato de token inválido" });
       }
-        const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
-     const verification = jwt.verify(token, clave) as AuthPayload
-      if (verification) {
-        req.user = verification
-        next()
+      const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
+      const verification = jwt.verify(token, clave) as AuthPayload
+
+     const user = await prisma.user.findUnique({ where: { id: verification.id } });
+      if(!user || !user.isActive){
+         return res.status(401).json({ message: "Cuenta desactivada o inexistente" });
+
       }
+      req.user = verification;
+      next();
     } catch (err) {
         res.status(401).json({"message":"acceso no autorizado"})
     }

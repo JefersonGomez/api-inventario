@@ -406,6 +406,32 @@ Dashboard oscuro estilo "admin panel", inspirado en una referencia con sidebar f
 - [x] Registro de movimientos (UI) — formulario IN/OUT/ADJUSTMENT, invalida products y reports al crear
 - [x] Reportes (UI) — valor de inventario, stock bajo, movimientos filtrados por rango de fechas
 
+### Fase 1: Perfil y configuración — COMPLETA
+
+- [x] Foto de perfil (multer en backend, subida vía FormData, mostrada en Topbar y Profile, sincronizada con `updateUser` del AuthContext)
+- [x] Mostrar rol en la UI (Badge en Profile y en tabla de Users)
+- [x] Cambio de contraseña (verifica contraseña actual antes de permitir el cambio)
+- [x] Edición de perfil (nombre/email) — patrón `EditableRow`: fila con label + valor, "Editar" activa un input inline con Guardar/Cancelar
+- [x] Idioma ES/EN (react-i18next, selector persistente en Configuración vía localStorage)
+- [x] Modo oscuro/claro (ThemeContext propio, toggle en Configuración, persiste en localStorage)
+
+### Fase 2: Gestión de usuarios (admin) — COMPLETA
+
+- [x] Modelo `User` con campo `isActive` (default `true`)
+- [x] Admin ve lista de empleados con foto, rol, fecha de registro
+- [x] Activar/desactivar usuarios — regla: un admin no puede desactivarse a sí mismo, pero sí a otros admins
+- [x] `Authenticated` valida `isActive` contra la BD en cada petición (revocación inmediata, no espera a que expire el JWT)
+- [x] `Login` rechaza cuentas desactivadas con mensaje explícito (validado después de comprobar la contraseña, para no filtrar el estado de la cuenta a quien no la conoce)
+- [x] `AdminRoute` en el frontend (redirige a quien no sea ADMIN si intenta entrar a `/users` por URL directa)
+
+### Pendiente (fases futuras acordadas)
+
+- [ ] Categorías con descripción
+- [ ] Gráficos reales (recharts) + escaneo de código de barras
+- [ ] Proveedores y órdenes de compra
+- [ ] Refresh tokens, soft delete (productos/categorías), auditoría
+- [ ] Asistente IA (modo solo lectura, function calling sobre reportes/productos)
+
 ### Notas técnicas del frontend
 
 - **shadcn CLI nueva versión (con "Base UI" y presets con nombre — Vega, Nova, Mira, etc.):** requiere `jsconfig.json` con alias `@/*` (proyecto JS, no TS) + `resolve.alias` en `vite.config.js`. En ESM, `__dirname` no existe — reconstruir con `path.dirname(fileURLToPath(import.meta.url))`.
@@ -424,6 +450,18 @@ Dashboard oscuro estilo "admin panel", inspirado en una referencia con sidebar f
 - **shadcn `Select` con Base UI requiere la prop `items`:** sin pasar `items={[{ value, label }, ...]}` directamente al componente `<Select>`, `SelectValue` muestra el `value` crudo (ej. un UUID) en vez del texto legible (`label`), aunque los `SelectItem` internos estén bien escritos. Es un requisito adicional de esta variante Base UI que no existía en la versión Radix clásica de shadcn.
 - **`queryKey` con parámetros dinámicos** (ej. `["reports", "movements", from, to]`): incluir los filtros dentro de la key hace que React Query trate cada combinación de filtros como una consulta distinta y vuelva a pedir datos cuando cambian — si se omiten de la key, el cache no se refresca al cambiar el filtro.
 
+### Notas técnicas de Fase 1 y 2
+
+- **Bug crítico de desincronización `JWT_SECRET` vs `JWT_SECRET_KEY`:** si el nombre de la variable de entorno usada para firmar (`Login`) no coincide exactamente con la usada para verificar (`Authenticated`), el token se firma con un valor (real o el de emergencia) y se verifica con otro — produce 401 persistentes con un token aparentemente válido y bien formado. Sospechar esto ante 401 que no se resuelven ni recreando el token. Solución: unificar el nombre exacto en ambos archivos, revisando primero cuál es el que realmente existe en `.env` (no asumir).
+- **`Login` debe devolver `{ token, user }`, no solo el token** — si el controller solo reenvía lo que el service retorna (`res.json(result)`), hay que asegurarse de que el service arme ese objeto compuesto explícitamente (con `select` manual de los campos seguros del usuario, igual que en `Register`). Si el controller envuelve el resultado de nuevo en `{ token: result }`, se genera un objeto anidado y el frontend termina mandando `Authorization: Bearer [object Object]`.
+- **Agregar un campo nuevo y obligatorio a un modelo (`isActive`, `avatarUrl`, etc.) rompe cualquier `select` de Prisma que prometa devolver el tipo completo** (ej. `Promise<ProfileData>` con `ProfileData = Omit<User, "passwordHash">`) si ese campo no se agrega también a los `select` existentes — TypeScript avisa con "Property 'X' is missing in type... but required in type 'ProfileData'".
+- **Revocación de sesión al desactivar un usuario:** como el JWT no tiene estado en el servidor, desactivar a alguien no invalida sus tokens ya emitidos por sí solo. Hace falta que el middleware `Authenticated` consulte la BD en cada petición (`prisma.user.findUnique` + chequeo de `isActive`) para que la desactivación tenga efecto inmediato, en vez de esperar a que el token expire.
+- **`req.params.id` se tipa como `string | string[] | undefined`** en Express con TypeScript (no solo `string | undefined`) — siempre validar con `if (!id || typeof id !== "string")` antes de pasarlo a una función que espera `string`, para que TypeScript reduzca el tipo (type narrowing).
+- **i18next (react-i18next):** estructura de claves anidadas en JSON por idioma (`es.json`/`en.json`), cargados en `i18n/index.js` con `lng` inicial leído de `localStorage`. En cada componente: `const { t } = useTranslation()` y reemplazar texto fijo por `t("clave.anidada")`. `i18n.changeLanguage(value)` cambia el idioma en caliente en toda la app sin recargar. Reusar claves compartidas (ej. "Email"/"Password") entre formularios distintos en vez de duplicarlas.
+- **Modo oscuro/claro con Context propio:** a diferencia de `AuthContext` (que no necesita `useEffect` porque lee `localStorage` de forma perezosa), el `ThemeContext` sí usa un `useEffect` legítimo — porque su propósito es sincronizar el estado de React con un sistema externo real (la clase `dark`/`light` en el `<html>` del DOM), que es el caso de uso que React sí recomienda para efectos.
+- **Patrón para inicializar un formulario con datos que llegan async (evitando el warning de `setState` en efecto):** extraer el formulario a un componente hijo separado que recibe los datos ya cargados como prop, y solo montarlo condicionalmente (`{data && <Form data={data} />}`). El `useState(data.campo)` del hijo se ejecuta una sola vez, con datos reales, sin necesitar ningún `useEffect` de sincronización.
+- **Gestión de usuarios — regla de "no auto-desactivación":** se implementa comparando `targetUserId === requestingUserId` en el service, no por rol — un admin puede desactivar a otro admin, solo no puede desactivarse a sí mismo. En el frontend, un `AdminRoute` (similar a `ProtectedRoute` pero validando `user.role === "ADMIN"`) evita que un empleado llegue a la pantalla de gestión por URL directa, aunque la protección real sigue siendo el `Authorize("ADMIN")` del backend.
+
 ---
 
 ## 8. Cómo seguimos trabajando (metodología)
@@ -436,89 +474,4 @@ Para cada nueva funcionalidad:
 5. Se revisa lo escrito, se corrige, y se explica el porqué de cada corrección.
 6. Se prueba el flujo completo antes de pasar al siguiente módulo.
 
-Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la IA a futuro..
-
-
-# Voy a crear el contenido actualizado del documento del proyecto
-# Primero analicemos qué necesitamos agregar/modificar
-
-updates = """
-## 6. Roadmap de desarrollo (fases aprobadas)
-
-### Fase 1: Perfil y configuración (en progreso)
-- [ ] Foto de perfil (subida con multer, guardado en disco)
-- [ ] Mostrar rol en la UI (campo `role` ya existe en User)
-- [ ] Cambio de contraseña
-- [ ] Edición de perfil (nombre, email)
-- [ ] Idioma ES/EN (pendiente - react-i18next en frontend)
-- [ ] Modo oscuro/claro (pendiente - frontend ya tiene variables CSS)
-
-### Fase 2: Gestión de usuarios (admin)
-- [ ] Lista de empleados + su info
-- [ ] Activar/desactivar usuarios (requiere campo `isActive` en User)
-- [ ] Un admin no puede desactivarse a sí mismo, pero sí a otros admins
-
-### Fase 3: Categorías con descripción
-- [ ] Campo `description` en Category (rápido)
-
-### Fase 4: Gráficos reales + escaneo de código de barras
-- [ ] Recharts para gráficos (frontend)
-- [ ] Lector de cámara para códigos de barras (frontend)
-
-### Fase 5: Proveedores y órdenes de compra
-- [ ] Nuevo módulo completo (el más grande)
-
-### Fase 6: Detalles técnicos
-- [ ] Refresh tokens
-- [ ] Soft delete (productos/categorías)
-- [ ] Auditoría (logs de acciones)
-
-### Fase 7: Asistente IA (solo lectura)
-- [ ] Chat con function calling sobre reportes/productos
-- [ ] Ejecutar acciones queda para fase futura
-
----
-
-## 9. Decisiones técnicas clave
-
-### Chatbot: modo "solo lectura" primero
-- **Decisión:** El asistente IA comenzará respondiendo preguntas en lenguaje natural usando datos reales del inventario (ej. "¿cuánto stock tengo de Taladro Bosch?"), sin ejecutar acciones (crear movimientos, editar productos).
-- **Implementación:** API de Claude con tool use / function calling — el modelo llama a funciones del backend (`getProducts`, `getLowStockReport`, etc.) para traer datos antes de responder.
-- **Por qué:** Un chatbot que escribe en la base de datos necesita confirmaciones explícitas, límites claros y manejo robusto de errores. Mejor construir la capa de lectura primero, validarla, y luego agregar la de escritura como fase futura.
-
-### Foto de perfil
-- **Stack:** multer en backend, guardado en disco local, servido estáticamente
-- **Campo nuevo:** `avatarUrl` en modelo User
-- **Sin dependencia externa:** no usamos servicios cloud de pago (S3, Cloudinary, etc.)
-
-### Internacionalización (i18n)
-- **Frontend:** react-i18next (estándar de facto para React)
-- **Backend:** no aplica por ahora (las respuestas de API son JSON estructurados)
-
-### Modo claro/oscuro
-- **Frontend:** ya tienes las variables CSS definidas — solo falta botón que alterna clase `dark` y persiste en localStorage
-- **Backend:** no aplica
-
-"""
-
-print("Contenido listo para agregar al documento")
-print("=" * 60)
-print(updates[:500] + "...")
-
- # Result 
-Contenido listo para agregar al documento
-============================================================
-
-## 6. Roadmap de desarrollo (fases aprobadas)
-
-### Fase 1: Perfil y configuración (en progreso)
-- [ ] Foto de perfil (subida con multer, guardado en disco)
-- [ ] Mostrar rol en la UI (campo `role` ya existe en User)
-- [ ] Cambio de contraseña
-- [ ] Edición de perfil (nombre, email)
-- [ ] Idioma ES/EN (pendiente - react-i18next en frontend)
-- [ ] Modo oscuro/claro (pendiente - frontend ya tiene variables CSS)
-
-### Fase 2: Gestión de usuarios (admin)
-- [ ] Lista de empleados + su info
-- [ ] Activ...
+Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la IA a futuro.

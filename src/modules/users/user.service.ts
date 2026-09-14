@@ -13,7 +13,8 @@ export async function getProfile(userId: string): Promise<ProfileData> {
             email: true,
             role: true,
             avatarUrl: true,
-            createAt: true, // Es útil tener la fecha de creación
+            isActive: true,
+            createAt: true,
         }
     });
 
@@ -25,7 +26,6 @@ export async function getProfile(userId: string): Promise<ProfileData> {
 }
 
 export async function updateAvatar(userId: string, filename: string): Promise<ProfileData> {
-    // 1. Verificar que el usuario existe
     const userExists = await prisma.user.findUnique({
         where: { id: userId }
     });
@@ -34,11 +34,8 @@ export async function updateAvatar(userId: string, filename: string): Promise<Pr
         throw new Error("Usuario no encontrado");
     }
 
-    // 2. Construir la URL pública relativa
-    // Como en app.ts usamos express.static('uploads'), la ruta web empieza con /uploads
     const avatarUrl = `/uploads/avatars/${filename}`;
 
-    // 3. Actualizar la base de datos
     const updatedUser = await prisma.user.update({
         where: { id: userId },
         data: { avatarUrl },
@@ -48,6 +45,7 @@ export async function updateAvatar(userId: string, filename: string): Promise<Pr
             email: true,
             role: true,
             avatarUrl: true,
+            isActive: true,
             createAt: true,
         }
     });
