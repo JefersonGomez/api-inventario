@@ -1,6 +1,6 @@
 import { prisma } from "../../config/database.ts";
 
-export async function createCategory(name: string) {
+export async function createCategory(name: string,description:string | undefined) {
   const exitsCategory = await prisma.category.findUnique({
     where: { name: name },
   });
@@ -12,6 +12,7 @@ export async function createCategory(name: string) {
   const newCategory = await prisma.category.create({
     data: {
       name: name,
+      description:description ?? null
     },
   });
 
@@ -37,11 +38,12 @@ export async function GetCategoryById(idCategory:string) {
     
 }
 
-export async function updateCategory(idCategory:string,name:string) {
+export async function updateCategory(idCategory:string,name:string,description: string | undefined) {
     const updateCategories = await prisma.category.update({
         where:{id:idCategory},
         data:{
             name:name,
+            description:description ?? null
         }
     })
     

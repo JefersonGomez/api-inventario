@@ -10,8 +10,8 @@ import { error } from "node:console";
 
 export async function CreateCategoryController(req: Request, res: Response) {
   try {
-    const nameCategory = req.body.name;
-    const create = await createCategory(nameCategory);
+    const {nameCategory,description} = req.body.name;
+    const create = await createCategory(nameCategory,description);
     if (create) {
       res.status(201).json(create);
     }
@@ -50,13 +50,13 @@ export async function GetCategoryByIdController(req: Request, res: Response) {
 export async function updateCategoryController(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name } = req.body;
+    const { name, description } = req.body;
     if (!id || typeof id !== "string") {
       return res
         .status(400)
         .json({ message: "El ID es requerido y debe ser un texto" });
     }
-    const update = await updateCategory(id, name);
+    const update = await updateCategory(id, name, description);
     res.status(200).json(update);
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
