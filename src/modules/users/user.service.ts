@@ -14,7 +14,8 @@ export async function getProfile(userId: string): Promise<ProfileData> {
             role: true,
             avatarUrl: true,
             isActive: true,
-            createAt: true,
+            createdAt: true,
+
         }
     });
 
@@ -46,7 +47,7 @@ export async function updateAvatar(userId: string, filename: string): Promise<Pr
             role: true,
             avatarUrl: true,
             isActive: true,
-            createAt: true,
+            createdAt: true,
         }
     });
 

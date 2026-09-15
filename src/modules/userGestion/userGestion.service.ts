@@ -9,9 +9,9 @@ export async function getAllUsers() {
       role: true,
       avatarUrl: true,
       isActive: true,
-      createAt: true,
+      createdAt: true,
     },
-    orderBy: { createAt: "desc" },
+    orderBy: { createdAt: "desc" },
   });
 
   return users;

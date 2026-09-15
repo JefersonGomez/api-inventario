@@ -6,6 +6,7 @@ import { router as reportRouter } from "./modules/reports/report.routes.ts"
 import { router as movementRouter } from "./modules/movements/mevemenst.routes.ts"
 import { router as profileRouter } from "./modules/users/profile.routes.ts"
 import { router as usersRouter } from "./modules/userGestion/userGestion.routes.ts"
+import { router as supplierRouter  } from "./modules/suppliers/supplier.routes.ts"
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -26,6 +27,7 @@ app.use("/movements", movementRouter)
 app.use("/profile", profileRouter)
 app.use("/uploads", Express.static(path.join(process.cwd(), "uploads")))
 app.use("/users", usersRouter)
+app.use("/suppliers", supplierRouter)
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })

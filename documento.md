@@ -426,8 +426,8 @@ Dashboard oscuro estilo "admin panel", inspirado en una referencia con sidebar f
 
 ### Pendiente (fases futuras acordadas)
 
-- [ ] Categorías con descripción
-- [ ] Gráficos reales (recharts) + escaneo de código de barras
+- [x] Categorías con descripción
+- [x] Gráficos reales (recharts) + escaneo de código de barras
 - [ ] Proveedores y órdenes de compra
 - [ ] Refresh tokens, soft delete (productos/categorías), auditoría
 - [ ] Asistente IA (modo solo lectura, function calling sobre reportes/productos)

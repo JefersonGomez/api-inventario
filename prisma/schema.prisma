@@ -1,31 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
-  moduleFormat = "esm"
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
   generatedFileExtension = "ts"
-  importFileExtension = "ts"
+  importFileExtension    = "ts"
+  moduleFormat           = "esm"
 }
 
 datasource db {
   provider = "postgresql"
-  
-}
-
-model User{
-  id String @id @default(uuid())
-  name String 
-  email String @unique
-  passwordHash String
-  role Role @default(EMPLOYE)
-  avatarUrl String?
-  isActive Boolean @default(true)
-  createAt DateTime @default(now())
-  movements StockMovement[]
 }
 
 enum Role {
@@ -33,43 +15,119 @@ enum Role {
   EMPLOYE
 }
 
+enum MovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+enum PurchaseRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PurchaseOrderStatus {
+  PENDING
+  RECEIVED
+  CANCELLED
+}
+
+model User {
+  id           String          @id @default(uuid())
+  name         String
+  email        String          @unique
+  passwordHash String
+  role         Role            @default(EMPLOYE)
+  createdAt    DateTime        @default(now()) // Corregido: createAt -> createdAt
+  avatarUrl    String?
+  isActive     Boolean         @default(true)
+  movements    StockMovement[]
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+}
+
 model Category {
-  id String @id @default(uuid())
-  name String @unique
+  id          String    @id @default(uuid())
+  name        String    @unique
   description String?
-  products Product[]
+  products    Product[]
+}
+
+model Supplier {
+  id             String          @id @default(uuid())
+  name           String          @unique
+  email          String?
+  phone          String?
+  address        String?
+  createdAt      DateTime        @default(now())
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
 }
 
 model Product {
-  id String @id @default(uuid())
-  sku String @unique
-  barcode String? @unique
-  name String
-  description String?
-  price Decimal @db.Decimal(10,2)
-  stock Int @default(0)
-  minStock Int @default(0)
-  categoryId String 
-  category Category @relation(fields: [categoryId],references: [id])
-  createAt DateTime @default(now())
-  updateAt DateTime @updatedAt
-  movements StockMovement[]
+  id                   String              @id @default(uuid())
+  sku                  String              @unique
+  barcode              String?             @unique
+  name                 String
+  description          String?
+  price                Decimal             @db.Decimal(10, 2)
+  stock                Int                 @default(0)
+  minStock             Int                 @default(0)
+  categoryId           String
+  supplierId           String?
+  category             Category            @relation(fields: [categoryId], references: [id])
+  supplier             Supplier?           @relation(fields: [supplierId], references: [id])
+  movements            StockMovement[]
+  purchaseOrderItems   PurchaseOrderItem[]
+  purchaseRequests     PurchaseRequest[]
+  createdAt            DateTime            @default(now()) // Corregido: createAt -> createdAt
+  updatedAt            DateTime            @updatedAt      // Corregido: updateAt -> updatedAt
 }
 
-model StockMovement{
-  id String @id @default(uuid())
+model StockMovement {
+  id        String       @id @default(uuid())
   productId String
-  product Product @relation(fields: [productId],references: [id])
-  userId String
-  user User @relation(fields: [userId],references: [id])
-  type MovementType 
-  quantity Int
-  reason String?
-  createdAt DateTime @default(now())
+  userId    String
+  type      MovementType
+  quantity  Int
+  reason    String?
+  createdAt DateTime     @default(now())
+  product   Product      @relation(fields: [productId], references: [id])
+  user      User         @relation(fields: [userId], references: [id])
 }
 
-enum MovementType{
-  IN //entrada de stock
-  OUT //salidad de stock
-  ADJUSTMENT //ajuste de stock
+model PurchaseRequest {
+  id            String                @id @default(uuid())
+  productId     String
+  requestedById String
+  quantity      Int
+  reason        String?
+  status        PurchaseRequestStatus @default(PENDING)
+  createdAt     DateTime              @default(now())
+  product       Product               @relation(fields: [productId], references: [id])
+  requestedBy   User                  @relation(fields: [requestedById], references: [id])
+
+}
+
+model PurchaseOrder {
+  id          String              @id @default(uuid())
+  supplierId  String
+  createdById String
+  status      PurchaseOrderStatus @default(PENDING)
+  createdAt   DateTime            @default(now())
+  receivedAt  DateTime?
+  supplier    Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy   User                @relation(fields: [createdById], references: [id])
+  items       PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  productId       String
+  quantity        Int
+  unitCost        Decimal       @db.Decimal(10, 2)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  product         Product       @relation(fields: [productId], references: [id])
 }
