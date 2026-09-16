@@ -1,62 +1,58 @@
 import { prisma } from "../../config/database.ts";
 
-export async function createCategory(name: string,description:string | undefined) {
+export async function createCategory(name: string, description: string | undefined) {
+  if (!name) {
+    throw new Error("El nombre de la categoría es obligatorio");
+  }
+
   const exitsCategory = await prisma.category.findUnique({
     where: { name: name },
   });
 
   if (exitsCategory) {
-    throw new Error("La categoria ya existe en sistema");
+    throw new Error("La categoría ya existe en el sistema");
   }
 
-  const newCategory = await prisma.category.create({
+  return await prisma.category.create({
     data: {
       name: name,
-      description:description ?? null
+      description: description ?? null,
     },
   });
-
-  return newCategory;
 }
 
 export async function getAllCategories() {
-    const allCategories = await prisma.category.findMany()
-    return allCategories
+  return await prisma.category.findMany();
 }
 
-export async function GetCategoryById(idCategory:string) {
-    const existCategory = await prisma.category.findUnique({
-        where:{id:idCategory}
-    })
+export async function GetCategoryById(idCategory: string) {
+  const existCategory = await prisma.category.findUnique({
+    where: { id: idCategory },
+  });
 
-    if(existCategory==null){
-        throw new Error("No se encontro la categoria que buscas")
-    }
+  if (!existCategory) {
+    throw new Error("No se encontró la categoría que buscas");
+  }
 
-    return existCategory
-
-    
+  return existCategory;
 }
 
-export async function updateCategory(idCategory:string,name:string,description: string | undefined) {
-    const updateCategories = await prisma.category.update({
-        where:{id:idCategory},
-        data:{
-            name:name,
-            description:description ?? null
-        }
-    })
-    
+export async function updateCategory(idCategory: string, name: string, description: string | undefined) {
+  if (!name) {
+    throw new Error("El nombre de la categoría es obligatorio para actualizar");
+  }
 
-    return updateCategories
-    
+  return await prisma.category.update({
+    where: { id: idCategory },
+    data: {
+      name: name,
+      description: description ?? null,
+    },
+  });
 }
 
-export async function deleteCategory(idCategory:string) {
-    const categoryDelete = await prisma.category.delete({
-        where:{id:idCategory}
-    })
-
-    return categoryDelete
-    
+export async function deleteCategory(idCategory: string) {
+  return await prisma.category.delete({
+    where: { id: idCategory },
+  });
 }
