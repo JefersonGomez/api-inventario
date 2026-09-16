@@ -1,14 +1,15 @@
 import { prisma } from "../../config/database.ts"
 import type { MovementType } from "../../generated/prisma/enums.ts";
-
+import type { Prisma } from "../../generated/prisma/client.ts";
 export async function createMovement(
   productId: string,
   userId: string,
   type: MovementType,
   quantity: number,
-  reason: string | undefined
+  reason: string | undefined,
+  client: Prisma.TransactionClient | typeof prisma = prisma // ← nuevo parámetro opcional
 ) {
-  const existProduct = await prisma.product.findUnique({
+  const existProduct = await client.product.findUnique({
     where: { id: productId }
   })
 
@@ -38,23 +39,33 @@ export async function createMovement(
       throw new Error("Tipo de movimiento inválido");
   }
 
-  const result = await prisma.$transaction([
-    prisma.stockMovement.create({
-      data: {
-        productId: productId,
-        userId: userId,
-        type: type,
-        quantity: quantity,
-        reason: reason ?? null
-      }
-    }),
-    prisma.product.update({
-      where: { id: productId },
-      data: { stock: nuevoStock }
-    })
-  ])
+  // ya no uses prisma.$transaction([...]) acá — cuando client === prisma
+  // (uso normal, fuera de una orden de compra) seguimos queriendo atomicidad,
+  // así que envolvemos con $transaction SOLO si client es el prisma global
+  if (client === prisma) {
+    const result = await prisma.$transaction([
+      prisma.stockMovement.create({
+        data: { productId, userId, type, quantity, reason: reason ?? null }
+      }),
+      prisma.product.update({
+        where: { id: productId },
+        data: { stock: nuevoStock }
+      })
+    ]);
+    return result[0];
+  }
 
-  return result[0]; // el movimiento creado
+  // cuando viene un `tx` de afuera, ya estamos DENTRO de una transacción
+  // más grande — no envolvemos de nuevo, solo ejecutamos secuencial
+  const movement = await client.stockMovement.create({
+    data: { productId, userId, type, quantity, reason: reason ?? null }
+  });
+  await client.product.update({
+    where: { id: productId },
+    data: { stock: nuevoStock }
+  });
+
+  return movement;
 }
 
 export async function getMovements(productId?: string) {
