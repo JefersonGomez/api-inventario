@@ -5,12 +5,14 @@ import { validate } from "../../middlewares/validate.middleware.ts";
 import {
   createPurchaseRequestSchema,
   updateStatusSchema,
-} from "./purchase-request.schema.js";
+} from "./purchase-request.schema.ts";
 import {
   createPurchaseRequestHandler,
   getAllPurchaseRequestsHandler,
   updatePurchaseRequestStatusHandler,
-} from "./purchase-request.controller.js";
+  getPurchaseRequestAlertsHandler
+  
+} from "./purchase-request.controller.ts";
 
 export const purchaseRequestRouter = Router();
 
@@ -29,4 +31,11 @@ purchaseRequestRouter.patch(
   Authenticated,
   Authorize("ADMIN"),
   updatePurchaseRequestStatusHandler
+);
+
+purchaseRequestRouter.get(
+  "/alerts",
+  Authenticated,
+  Authorize("ADMIN"),
+  getPurchaseRequestAlertsHandler
 );

@@ -475,3 +475,13 @@ Para cada nueva funcionalidad:
 6. Se prueba el flujo completo antes de pasar al siguiente módulo.
 
 Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la IA a futuro.
+
+
+Nota registrada hasta ahora (borrador interno, esto es lo que te voy a entregar al final, ajustado y completo):
+
+Fix de exports: páginas nuevas deben usar export function X() (named export), no export default, para coincidir con el patrón de imports del proyecto.
+Bug de role: string vs Role en AuthPayload — se resolvió tipando los services como string, con nota de aplicar lo mismo en módulos futuros (pendiente ideal: mover el fix a express.d.ts para que Role se importe una sola vez).
+createMovement en movements.service.ts se extendió con un parámetro opcional client (tx o prisma global) para poder reutilizarse dentro de la transacción de receivePurchaseOrder sin duplicar lógica.
+createPurchaseOrder valida existencia de supplierId y de todos los productId antes de crear, y rechaza productos duplicados entre líneas (decisión pendiente de confirmar si se permite o no).
+Bug de composición Base UI: asChild no es válido en este preset de shadcn (usa Base UI, no Radix) — reemplazar por render={...} en todo DialogTrigger/AlertDialogTrigger. Pendiente confirmar el patrón exacto con el archivo real de dialog.jsx.
+Nueva funcionalidad decidida (no estaba en el plan original): sistema de alertas para PurchaseRequest — campo expiresAt (default 7 días) en solicitudes PENDING, y vínculo opcional purchaseOrderId en PurchaseRequest para saber si una solicitud APPROVED ya fue cubierta por una orden real. Alertas vía polling in-app (no email, eso queda pendiente para cuando exista un job scheduler en Fase 6), con dos endpoints: solicitudes por vencer (≤3 días) y aprobadas sin orden.

@@ -12,4 +12,5 @@ export const createPurchaseOrderSchema = z.object({
       })
     )
     .nonempty(),
+    fulfilledRequestIds: z.array(z.string().uuid()).optional(),
 });

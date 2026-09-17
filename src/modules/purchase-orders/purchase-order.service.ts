@@ -1,11 +1,56 @@
+// purchase-order.service.ts
 import { prisma } from "../../config/database.ts";
-import { createMovement } from "../movements/movements.service.ts"; // ajustá el path real
+import { createMovement } from "../movements/movements.service.ts";
 
+// purchase-order.service.ts
 export async function createPurchaseOrder(
   supplierId: string,
   createdById: string,
-  items: { productId: string; quantity: number; unitCost: number }[]
+  items: { productId: string; quantity: number; unitCost: number }[],
+  fulfilledRequestIds?: string[]
 ) {
+  const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
+  if (!supplier) {
+    throw new Error("El proveedor indicado no existe");
+  }
+
+  const productIds = items.map((i) => i.productId);
+  const uniqueIds = new Set(productIds);
+  if (uniqueIds.size !== productIds.length) {
+    throw new Error("Hay productos duplicados en las líneas de la orden");
+  }
+
+  const existingProducts = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true },
+  });
+  if (existingProducts.length !== productIds.length) {
+    const foundIds = new Set(existingProducts.map((p) => p.id));
+    const missingIds = productIds.filter((id) => !foundIds.has(id));
+    throw new Error(`Los siguientes productos no existen: ${missingIds.join(", ")}`);
+  }
+
+  // --- validar las solicitudes a vincular, si vienen ---
+  if (fulfilledRequestIds && fulfilledRequestIds.length > 0) {
+    const requests = await prisma.purchaseRequest.findMany({
+      where: { id: { in: fulfilledRequestIds } },
+    });
+
+    if (requests.length !== fulfilledRequestIds.length) {
+      throw new Error("Alguna de las solicitudes indicadas no existe");
+    }
+
+    const notApproved = requests.filter((r) => r.status !== "APPROVED");
+    if (notApproved.length > 0) {
+      throw new Error("Solo se pueden vincular solicitudes aprobadas");
+    }
+
+    const alreadyLinked = requests.filter((r) => r.purchaseOrderId !== null);
+    if (alreadyLinked.length > 0) {
+      throw new Error("Alguna de las solicitudes ya está vinculada a otra orden");
+    }
+  }
+
   return prisma.purchaseOrder.create({
     data: {
       supplierId,
@@ -17,8 +62,18 @@ export async function createPurchaseOrder(
           unitCost: i.unitCost,
         })),
       },
+      // ✅ Solución: la clave solo se agrega al objeto si fulfilledRequestIds tiene elementos
+      ...(fulfilledRequestIds && fulfilledRequestIds.length > 0 && {
+        fulfilledRequests: {
+          connect: fulfilledRequestIds.map((id) => ({ id })),
+        },
+      }),
     },
-    include: { supplier: true, items: { include: { product: true } } },
+    include: {
+      supplier: true,
+      items: { include: { product: true } },
+      fulfilledRequests: true,
+    },
   });
 }
 
@@ -58,7 +113,7 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         "IN",
         item.quantity,
         `Recepción de orden de compra ${order.id}`,
-        tx // ← acá está la clave: le pasamos el cliente de la transacción
+        tx
       );
     }
 

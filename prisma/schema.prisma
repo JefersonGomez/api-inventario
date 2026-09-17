@@ -104,9 +104,12 @@ model PurchaseRequest {
   quantity      Int
   reason        String?
   status        PurchaseRequestStatus @default(PENDING)
+  expiresAt       DateTime?
+  purchaseOrderId String? 
   createdAt     DateTime              @default(now())
   product       Product               @relation(fields: [productId], references: [id])
   requestedBy   User                  @relation(fields: [requestedById], references: [id])
+  purchaseOrder   PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
 
 }
 
@@ -120,6 +123,7 @@ model PurchaseOrder {
   supplier    Supplier            @relation(fields: [supplierId], references: [id])
   createdBy   User                @relation(fields: [createdById], references: [id])
   items       PurchaseOrderItem[]
+  fulfilledRequests PurchaseRequest[] 
 }
 
 model PurchaseOrderItem {
@@ -130,4 +134,5 @@ model PurchaseOrderItem {
   unitCost        Decimal       @db.Decimal(10, 2)
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product         Product       @relation(fields: [productId], references: [id])
+  
 }

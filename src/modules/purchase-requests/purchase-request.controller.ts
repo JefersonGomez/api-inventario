@@ -39,3 +39,15 @@ export async function updatePurchaseRequestStatusHandler(req: Request, res: Resp
     res.status(400).json({ error: (error as Error).message });
   }
 }
+
+export async function getPurchaseRequestAlertsHandler(req: Request, res: Response) {
+  try {
+    const [expiringSoon, approvedUnfulfilled] = await Promise.all([
+      service.getExpiringSoonRequests(3),
+      service.getApprovedUnfulfilledRequests(),
+    ]);
+    res.json({ expiringSoon, approvedUnfulfilled });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
