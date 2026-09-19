@@ -9,8 +9,8 @@ export async function createMovement(
   reason: string | undefined,
   client: Prisma.TransactionClient | typeof prisma = prisma // ← nuevo parámetro opcional
 ) {
-  const existProduct = await client.product.findUnique({
-    where: { id: productId }
+  const existProduct = await client.product.findFirst({
+    where: { id: productId, deletedAt: null } // ← nuevo
   })
 
   if (!existProduct) {

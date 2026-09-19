@@ -21,9 +21,9 @@ export async function createPurchaseOrder(
   }
 
   const existingProducts = await prisma.product.findMany({
-    where: { id: { in: productIds } },
-    select: { id: true },
-  });
+  where: { id: { in: productIds }, deletedAt: null }, // ← agregado deletedAt: null
+  select: { id: true },
+});
   if (existingProducts.length !== productIds.length) {
     const foundIds = new Set(existingProducts.map((p) => p.id));
     const missingIds = productIds.filter((id) => !foundIds.has(id));

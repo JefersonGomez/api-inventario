@@ -2,6 +2,7 @@ import { prisma } from "../../config/database.ts"
 
 export async function getLowStockReport() {
   const allProducts = await prisma.product.findMany({
+    where: { deletedAt: null },
     include: { category: true }
   });
 

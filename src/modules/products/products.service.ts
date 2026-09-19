@@ -2,7 +2,7 @@ import { prisma } from "../../config/database.ts";
 
 export async function createProduct(
   sku: string,
-  barcode: string | undefined, // Puede ser opcional si no se escanea al crear
+  barcode: string | undefined,
   name: string,
   description: string | undefined,
   price: number,
@@ -11,15 +11,15 @@ export async function createProduct(
   categoryId: string,
 ) {
   const existProduct = await prisma.product.findUnique({
-    where: { sku: sku }
+    where: { sku: sku, deletedAt: null }, 
   });
 
   if (existProduct) {
     throw new Error("El producto ya existe en el sistema");
   }
 
-  const existCategory = await prisma.category.findUnique({
-    where: { id: categoryId }
+  const existCategory = await prisma.category.findFirst({
+    where: { id: categoryId, deletedAt: null } // ← nuevo: no crear productos en categorías "eliminadas"
   });
 
   if (!existCategory) {
@@ -44,14 +44,15 @@ export async function createProduct(
 
 export async function getAllProducts() {
   const allProducts = await prisma.product.findMany({
+    where: { deletedAt: null }, // ← nuevo
     include: { category: true }
   });
   return allProducts;
 }
 
 export async function getProductById(idProduct: string) {
-  const existProduct = await prisma.product.findUnique({
-    where: { id: idProduct },
+  const existProduct = await prisma.product.findFirst({
+    where: { id: idProduct, deletedAt: null }, // ← nuevo, y findUnique → findFirst
     include: { category: true }
   });
 
@@ -61,13 +62,12 @@ export async function getProductById(idProduct: string) {
   return existProduct;
 }
 
-// NUEVA FUNCIÓN AGREGADA
 export async function getProductByBarcode(code: string) {
-  const product = await prisma.product.findUnique({
-    where: { barcode: code },
+  const product = await prisma.product.findFirst({
+    where: { barcode: code, deletedAt: null }, // ← nuevo, y findUnique → findFirst
     include: { category: true }
   });
-  return product; // Retorna null si no existe, lo manejamos en el controller
+  return product;
 }
 
 export async function updateProduct(
@@ -79,8 +79,8 @@ export async function updateProduct(
   minStock: number,
   categoryId: string
 ) {
-  const existCategory = await prisma.category.findUnique({
-    where: { id: categoryId }
+  const existCategory = await prisma.category.findFirst({
+    where: { id: categoryId, deletedAt: null } // ← nuevo
   });
 
   if (!existCategory) {
@@ -103,8 +103,10 @@ export async function updateProduct(
 }
 
 export async function deleteProduct(id: string) {
-  const deletedProduct = await prisma.product.delete({
-    where: { id: id }
+  // antes: prisma.product.delete(...)
+  const deletedProduct = await prisma.product.update({
+    where: { id: id },
+    data: { deletedAt: new Date() }
   });
   return deletedProduct;
 }

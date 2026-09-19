@@ -6,7 +6,7 @@ export async function createCategory(name: string, description: string | undefin
   }
 
   const exitsCategory = await prisma.category.findUnique({
-    where: { name: name },
+    where: { name: name, deletedAt: null },
   });
 
   if (exitsCategory) {
@@ -22,12 +22,16 @@ export async function createCategory(name: string, description: string | undefin
 }
 
 export async function getAllCategories() {
-  return await prisma.category.findMany();
+  return await prisma.category.findMany({
+    where: { deletedAt: null }, // ← nuevo
+  });
 }
 
 export async function GetCategoryById(idCategory: string) {
-  const existCategory = await prisma.category.findUnique({
-    where: { id: idCategory },
+  // cambia findUnique por findFirst: findUnique no admite combinar
+  // el campo único (id) con un filtro extra (deletedAt) en este caso
+  const existCategory = await prisma.category.findFirst({
+    where: { id: idCategory, deletedAt: null }, // ← nuevo
   });
 
   if (!existCategory) {
@@ -52,7 +56,9 @@ export async function updateCategory(idCategory: string, name: string, descripti
 }
 
 export async function deleteCategory(idCategory: string) {
-  return await prisma.category.delete({
+  // antes: prisma.category.delete(...)
+  return await prisma.category.update({
     where: { id: idCategory },
+    data: { deletedAt: new Date() },
   });
 }

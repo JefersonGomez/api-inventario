@@ -8,10 +8,18 @@ export async function createPurchaseRequest(
   requestedById: string,
   quantity: number,
   reason?: string,
-  expiresAt?:Date
+  expiresAt?: Date
 ) {
+  // ← nuevo: validar que el producto exista y no esté eliminado
+  const existProduct = await prisma.product.findFirst({
+    where: { id: productId, deletedAt: null },
+  });
 
-   const finalExpiresAt =
+  if (!existProduct) {
+    throw new Error("El producto indicado no existe");
+  }
+
+  const finalExpiresAt =
     expiresAt ??
     new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
