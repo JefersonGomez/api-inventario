@@ -10,7 +10,7 @@ export async function createProduct(
   minStock: number,
   categoryId: string,
 ) {
-  const existProduct = await prisma.product.findUnique({
+  const existProduct = await prisma.product.findFirst({
     where: { sku: sku, deletedAt: null }, 
   });
 

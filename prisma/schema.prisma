@@ -45,6 +45,7 @@ model User {
   movements    StockMovement[]
   purchaseRequests PurchaseRequest[]
   purchaseOrders   PurchaseOrder[]
+  auditLogs AuditLog[]
 }
 
 model Category {
@@ -137,4 +138,15 @@ model PurchaseOrderItem {
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product         Product       @relation(fields: [productId], references: [id])
   
+}
+
+model AuditLog{
+  id String @id @default(uuid())
+  userId String
+  action String
+  entityType String
+  entityId String
+  changes Json?
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id])
 }

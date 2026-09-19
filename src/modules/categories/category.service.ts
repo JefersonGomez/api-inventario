@@ -5,7 +5,7 @@ export async function createCategory(name: string, description: string | undefin
     throw new Error("El nombre de la categoría es obligatorio");
   }
 
-  const exitsCategory = await prisma.category.findUnique({
+  const exitsCategory = await prisma.category.findFirst({
     where: { name: name, deletedAt: null },
   });
 
