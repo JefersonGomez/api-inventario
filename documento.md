@@ -555,3 +555,20 @@ Objetivo: que el usuario entienda cada pieza para depender cada vez menos de la 
 **Fase 7 — Asistente IA (modo solo lectura)** (no iniciada):
 - Endpoint `POST /assistant/chat`: recibe el mensaje, llama a la API de Claude con tool use, ejecuta las tools que el modelo pida (`getProducts`, `getLowStockReport`, `getMovements`, etc. — funciones que consultan datos reales, nunca inventadas), devuelve la respuesta final.
 - Frontend: widget de chat flotante o página dedicada — sin decisiones de UI tomadas todavía.
+
+
+Nota para el documento (guardando en paralelo, como quedamos)
+Product.deletedAt / Category.deletedAt (DateTime?) — soft delete real, delete() reemplazado por update({ data: { deletedAt: new Date() } }) en ambos services.
+Todos los findMany/findFirst de productos/categorías que representan estado actual filtran deletedAt: null: listados, validaciones de creación/actualización (createProduct, updateProduct, createCategory), createPurchaseOrder, createPurchaseRequest (que además no validaba la existencia del producto en absoluto — se agregó esa validación de paso), getLowStockReport, getInventoryValueReport.
+Decisión de negocio: los históricos no se filtran — getMovementsReport y las lecturas de PurchaseRequest/PurchaseOrder ya existentes siguen mostrando productos eliminados, porque representan hechos que ya ocurrieron.
+name (Category), sku y barcode (Product) dejaron de ser @unique en el schema — la unicidad ahora la implementan índices únicos parciales de Postgres (CREATE UNIQUE INDEX ... WHERE "deletedAt" IS NULL), escritos a mano en la migración vía --create-only, porque Prisma no soporta índices únicos parciales de forma nativa. Esto permite reutilizar un nombre/sku después de eliminar el registro que lo tenía.
+Como consecuencia, findUnique sobre esos 3 campos ya no compila (exige @unique) — se reemplazó por findFirst({ where: { campo, deletedAt: null } }) en los 3 lugares que lo usaban.
+
+Nota registrada (auditoría, en progreso):
+
+Modelo AuditLog agregado (userId, action, entityType, entityId, changes Json opcional, createdAt), con relación inversa auditLogs AuditLog[] en User. Migración add_audit_log aplicada.
+Helper centralizado src/modules/audit/audit.service.ts con logAudit(...) — nunca lanza excepción hacia el caller (atrapa sus propios errores con try/catch interno + console.error), para que un fallo de auditoría nunca bloquee la operación principal.
+Fix de tipos: changes debe tiparse como Prisma.InputJsonValue (no Record<string, unknown>) y solo incluirse en el objeto data con el patrón ...(changes !== undefined && { changes }), no changes: changes ?? undefined — por exactOptionalPropertyTypes: true en el tsconfig, que distingue "propiedad ausente" de "propiedad presente con valor undefined". Mismo patrón que ya se usaba en fulfilledRequests de createPurchaseOrder.
+Bug real detectado y corregido en category.service.ts: quedaba (al menos) un findUnique({ where: { name, deletedAt } }) sin migrar a findFirst tras sacar @unique de name — Prisma exige que findUnique reciba solo campos realmente únicos (id), no combinaciones de filtros.
+Pendiente inmediato: conectar logAudit(...) en los services reales — todavía no se llamó desde ningún módulo, solo existe el helper.
+Alcance acordado de qué se audita: update/delete (incluye soft delete) de Product y Category; cambios de estado de PurchaseRequest; creación y recepción de PurchaseOrder; activar/desactivar usuarios.
