@@ -51,7 +51,7 @@ export async function updateCategoryController(req: Request, res: Response) {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const update = await updateCategory(id, categoryName, description);
+    const update = await updateCategory(id, categoryName, description,req.user!.id);
     return res.status(200).json(update);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });
@@ -65,7 +65,7 @@ export async function deleteCategoryCotroller(req: Request, res: Response) {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const categoryDeleted = await deleteCategory(id);
+    const categoryDeleted = await deleteCategory(id,req.user!.id);
     return res.status(200).json(categoryDeleted);
   } catch (err) {
     return res.status(400).json({ error: (err as Error).message });

@@ -33,7 +33,7 @@ export async function updatePurchaseRequestStatusHandler(req: Request, res: Resp
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
     const { status } = req.body;
-    const updated = await service.updatePurchaseRequestStatus(id, status);
+    const updated = await service.updatePurchaseRequestStatus(id, status,req.user!.id);
     res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

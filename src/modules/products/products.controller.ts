@@ -60,7 +60,7 @@ export async function updateProductController(req: Request, res: Response) {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId);
+    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id);
     res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -74,7 +74,7 @@ export async function deleteProductController(req: Request, res: Response) {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
     
-    const deleted = await deleteProduct(id);
+    const deleted = await deleteProduct(id,req.user!.id);
     res.status(200).json(deleted);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

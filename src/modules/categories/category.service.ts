@@ -1,5 +1,5 @@
 import { prisma } from "../../config/database.ts";
-
+import { logAudit } from "../audit/audit.service.ts";
 export async function createCategory(name: string, description: string | undefined) {
   if (!name) {
     throw new Error("El nombre de la categoría es obligatorio");
@@ -41,24 +41,37 @@ export async function GetCategoryById(idCategory: string) {
   return existCategory;
 }
 
-export async function updateCategory(idCategory: string, name: string, description: string | undefined) {
+export async function updateCategory(
+  idCategory: string,
+  name: string,
+  description: string | undefined,
+  userId: string // ← nuevo parámetro
+) {
   if (!name) {
     throw new Error("El nombre de la categoría es obligatorio para actualizar");
   }
 
-  return await prisma.category.update({
+  const updated = await prisma.category.update({
     where: { id: idCategory },
     data: {
       name: name,
       description: description ?? null,
     },
   });
+
+  await logAudit(userId, "UPDATE", "Category", idCategory, { name, description });
+
+  return updated;
 }
 
-export async function deleteCategory(idCategory: string) {
+export async function deleteCategory(idCategory: string,userId:string) {
   // antes: prisma.category.delete(...)
-  return await prisma.category.update({
+  const categoryDelete = await prisma.category.update({
     where: { id: idCategory },
     data: { deletedAt: new Date() },
   });
+
+   await logAudit(userId, "DELETE", "Category", idCategory);
+   
+  return categoryDelete
 }

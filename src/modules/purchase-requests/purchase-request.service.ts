@@ -1,7 +1,7 @@
 // purchase-request.service.ts
 import { prisma } from "../../config/database.ts";
 import type { Role } from "../../generated/prisma/enums.ts"; // ajustá el import a como lo tengas tú
-
+import { logAudit } from "../audit/audit.service.ts";
 const DEFAULT_EXPIRY_DAYS = 7; 
 export async function createPurchaseRequest(
   productId: string,
@@ -39,13 +39,17 @@ export async function getAllPurchaseRequests(user: { id: string; role: string })
 
 export async function updatePurchaseRequestStatus(
   id: string,
-  status: "APPROVED" | "REJECTED"
+  status: "APPROVED" | "REJECTED",
+  userId:string
 ) {
-  return prisma.purchaseRequest.update({
+  const updatePurchaseRequestStatus = await prisma.purchaseRequest.update({
     where: { id },
     data: { status },
     include: { product: true, requestedBy: true },
   });
+
+  const action = status === "APPROVED" ? "APPROVE" : "REJECT";
+  await logAudit(userId, action, "PurchaseRequest", id);
 }
 
 export async function getExpiringSoonRequests(daysAhead = 3) {

@@ -1,5 +1,5 @@
 import { prisma } from "../../config/database.ts";
-
+import { logAudit } from "../audit/audit.service.ts";
 export async function createProduct(
   sku: string,
   barcode: string | undefined,
@@ -77,7 +77,8 @@ export async function updateProduct(
   description: string | undefined,
   price: number,
   minStock: number,
-  categoryId: string
+  categoryId: string,
+  userId:string
 ) {
   const existCategory = await prisma.category.findFirst({
     where: { id: categoryId, deletedAt: null } // ← nuevo
@@ -99,14 +100,18 @@ export async function updateProduct(
     }
   });
 
+  await logAudit (userId,"UPDATE","Product",id,{ name, barcode, description, price, minStock, categoryId})
+
   return updatedProduct;
 }
 
-export async function deleteProduct(id: string) {
+export async function deleteProduct(id: string,userId:string) {
   // antes: prisma.product.delete(...)
   const deletedProduct = await prisma.product.update({
     where: { id: id },
     data: { deletedAt: new Date() }
   });
+
+  await logAudit(userId,"DELETE","Product",id)
   return deletedProduct;
 }
