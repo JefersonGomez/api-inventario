@@ -46,6 +46,7 @@ model User {
   purchaseRequests PurchaseRequest[]
   purchaseOrders   PurchaseOrder[]
   auditLogs AuditLog[]
+  refreshTokens RefreshToken[]
 }
 
 model Category {
@@ -149,4 +150,14 @@ model AuditLog{
   changes Json?
   createdAt DateTime @default(now())
   user User @relation(fields: [userId], references: [id])
+}
+
+model RefreshToken {
+  id String @id @default(uuid())
+  userId String
+  tokenHash String
+  expiresAt DateTime
+  revoked Boolean @default(false)
+  createdAt DateTime @default(now())
+  User User  @relation(fields: [userId], references: [id])
 }
