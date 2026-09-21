@@ -9,6 +9,7 @@ import { router as usersRouter } from "./modules/userGestion/userGestion.routes.
 import { router as supplierRouter  } from "./modules/suppliers/supplier.routes.ts"
 import {purchaseOrderRouter as purchaseOrderRouter} from "./modules/purchase-orders/purchase-order.routes.ts"
 import{purchaseRequestRouter as purchaseRequestRouter} from "./modules/purchase-requests/purchase-request.routes.ts"
+import { auditRouter } from "./modules/audit/audit.routes.ts";
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -33,6 +34,7 @@ app.use("/users", usersRouter)
 app.use("/suppliers", supplierRouter)
 app.use("/purchase-orders",purchaseOrderRouter)
 app.use("/purchase-requests", purchaseRequestRouter)
+app.use("/audit-logs", auditRouter);
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })

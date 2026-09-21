@@ -35,3 +35,42 @@ export async function getAuditLogs(entityType?: string) {
     take: 200,
   });
 }
+
+export async function getAuditMetrics() {
+  const [totalCount, byAction, byEntityType, last7Days] = await Promise.all([
+    prisma.auditLog.count(),
+
+    prisma.auditLog.groupBy({
+      by: ["action"],
+      _count: { action: true },
+    }),
+
+    prisma.auditLog.groupBy({
+      by: ["entityType"],
+      _count: { entityType: true },
+    }),
+
+    // Actividad de los últimos 7 días, para un gráfico de tendencia
+    prisma.auditLog.findMany({
+      where: {
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      },
+      select: { createdAt: true },
+    }),
+  ]);
+
+  // Agrupar "last7Days" por fecha (día), ya que Prisma no agrupa por día directamente
+  const activityByDay: Record<string, number> = {};
+  for (const log of last7Days) {
+    const day = log.createdAt.toISOString().split("T")[0]!; // "2026-09-21"
+    activityByDay[day] = (activityByDay[day] ?? 0) + 1;
+  }
+
+  return {
+    totalCount,
+    byAction: byAction.map((a) => ({ action: a.action, count: a._count.action })),
+    byEntityType: byEntityType.map((e) => ({ entityType: e.entityType, count: e._count.entityType })),
+    activityByDay, // { "2026-09-15": 3, "2026-09-16": 7, ... }
+ 
+  };
+}
