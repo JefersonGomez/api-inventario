@@ -10,18 +10,18 @@ export async function getAllUsersController(req: Request, res: Response) {
   }
 }
 
-export async function toggleUserActiveController(req: Request, res: Response) {
+export async function toggleUserActiveHandler(
+  req: Request<{ id: string }>,
+  res: Response
+) {
   try {
     const { id } = req.params;
-
     if (!id || typeof id !== "string") {
-      return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
+      res.status(400).json({ error: "id inválido" });
+      return;
     }
-
-    const requestingUserId = req.user!.id;
-
-    const updatedUser = await toggleUserActive(id, requestingUserId);
-    res.status(200).json(updatedUser);
+    const updated = await toggleUserActive(id, req.user!.id);
+    res.json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }

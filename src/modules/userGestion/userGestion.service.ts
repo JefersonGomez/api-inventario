@@ -1,4 +1,5 @@
 import { prisma } from "../../config/database.js";
+import { logAudit } from "../audit/audit.service.ts";
 
 export async function getAllUsers() {
   const users = await prisma.user.findMany({
@@ -17,28 +18,32 @@ export async function getAllUsers() {
   return users;
 }
 
-export async function toggleUserActive(targetUserId: string, requestingUserId: string) {
+export async function toggleUserActive(
+  targetUserId: string,
+  requestingUserId: string
+) {
   if (targetUserId === requestingUserId) {
-    throw new Error("No puedes desactivar tu propia cuenta");
+    throw new Error("No podés desactivar tu propia cuenta");
   }
 
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+  const targetUser = await prisma.user.findUnique({
+    where: { id: targetUserId },
+  });
 
   if (!targetUser) {
     throw new Error("Usuario no encontrado");
   }
 
-  const updatedUser = await prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: targetUserId },
     data: { isActive: !targetUser.isActive },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      isActive: true,
-    },
   });
 
-  return updatedUser;
+  const action = updated.isActive ? "ACTIVATE" : "DEACTIVATE";
+  await logAudit(requestingUserId, action, "User", targetUserId, {
+    previousState: targetUser.isActive,
+    newState: updated.isActive,
+  });
+
+  return updated;
 }

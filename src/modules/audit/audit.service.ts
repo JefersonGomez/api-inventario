@@ -2,7 +2,7 @@
 import { prisma } from "../../config/database.ts";
 import type { Prisma } from "../../generated/prisma/client.ts"; // ajustá el path si es distinto
 
-type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE";
+type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE"  | "ACTIVATE" | "DEACTIVATE";
 
 export async function logAudit(
   userId: string,
