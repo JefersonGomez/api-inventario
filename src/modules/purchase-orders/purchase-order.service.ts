@@ -1,8 +1,8 @@
 // purchase-order.service.ts
 import { prisma } from "../../config/database.ts";
+import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
 
-// purchase-order.service.ts
 export async function createPurchaseOrder(
   supplierId: string,
   createdById: string,
@@ -21,16 +21,15 @@ export async function createPurchaseOrder(
   }
 
   const existingProducts = await prisma.product.findMany({
-  where: { id: { in: productIds }, deletedAt: null }, // ← agregado deletedAt: null
-  select: { id: true },
-});
+    where: { id: { in: productIds }, deletedAt: null },
+    select: { id: true },
+  });
   if (existingProducts.length !== productIds.length) {
     const foundIds = new Set(existingProducts.map((p) => p.id));
     const missingIds = productIds.filter((id) => !foundIds.has(id));
     throw new Error(`Los siguientes productos no existen: ${missingIds.join(", ")}`);
   }
 
-  // --- validar las solicitudes a vincular, si vienen ---
   if (fulfilledRequestIds && fulfilledRequestIds.length > 0) {
     const requests = await prisma.purchaseRequest.findMany({
       where: { id: { in: fulfilledRequestIds } },
@@ -51,7 +50,8 @@ export async function createPurchaseOrder(
     }
   }
 
-  return prisma.purchaseOrder.create({
+  // ← clave: guardamos el resultado en una variable, SIN "return" todavía
+  const order = await prisma.purchaseOrder.create({
     data: {
       supplierId,
       createdById,
@@ -62,7 +62,6 @@ export async function createPurchaseOrder(
           unitCost: i.unitCost,
         })),
       },
-      // ✅ Solución: la clave solo se agrega al objeto si fulfilledRequestIds tiene elementos
       ...(fulfilledRequestIds && fulfilledRequestIds.length > 0 && {
         fulfilledRequests: {
           connect: fulfilledRequestIds.map((id) => ({ id })),
@@ -75,6 +74,15 @@ export async function createPurchaseOrder(
       fulfilledRequests: true,
     },
   });
+
+  // ahora sí se ejecuta, porque todavía no hicimos return
+  await logAudit(createdById, "CREATE", "PurchaseOrder", order.id, {
+    supplierId,
+    items,
+  });
+
+  // el return va al final, después de todo lo que tenía que pasar antes
+  return order;
 }
 
 export async function getAllPurchaseOrders() {
@@ -117,10 +125,14 @@ export async function receivePurchaseOrder(id: string, userId: string) {
       );
     }
 
-    return tx.purchaseOrder.update({
+    const received = await tx.purchaseOrder.update({
       where: { id },
       data: { status: "RECEIVED", receivedAt: new Date() },
       include: { supplier: true, items: { include: { product: true } } },
     });
+
+    await logAudit(userId, "RECEIVE", "PurchaseOrder", id, undefined, tx);
+
+    return received;
   });
 }
