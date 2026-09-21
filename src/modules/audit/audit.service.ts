@@ -9,17 +9,16 @@ export async function logAudit(
   action: AuditAction,
   entityType: string,
   entityId: string,
-  changes?: Prisma.InputJsonValue // ← cambio 1: tipo correcto de Prisma, no Record<string, unknown>
+  changes?: Prisma.InputJsonValue, // ← cambio 1: tipo correcto de Prisma, no Record<string, unknown>
+  client: Prisma.TransactionClient | typeof prisma= prisma
 ) {
   try {
-    await prisma.auditLog.create({
+   await client.auditLog.create({
       data: {
         userId,
         action,
         entityType,
         entityId,
-        // ← cambio 2: solo incluir la propiedad si hay un valor real,
-        // en vez de asignarle undefined explícitamente
         ...(changes !== undefined && { changes }),
       },
     });
@@ -36,4 +35,3 @@ export async function getAuditLogs(entityType?: string) {
     take: 200,
   });
 }
-
