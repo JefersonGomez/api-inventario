@@ -33,6 +33,7 @@
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
   "dependencies": {
+    "@google/genai": "^2.24.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "bcrypt": "^6.0.0",

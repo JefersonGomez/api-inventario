@@ -572,3 +572,28 @@ Fix de tipos: changes debe tiparse como Prisma.InputJsonValue (no Record<string,
 Bug real detectado y corregido en category.service.ts: quedaba (al menos) un findUnique({ where: { name, deletedAt } }) sin migrar a findFirst tras sacar @unique de name — Prisma exige que findUnique reciba solo campos realmente únicos (id), no combinaciones de filtros.
 Pendiente inmediato: conectar logAudit(...) en los services reales — todavía no se llamó desde ningún módulo, solo existe el helper.
 Alcance acordado de qué se audita: update/delete (incluye soft delete) de Product y Category; cambios de estado de PurchaseRequest; creación y recepción de PurchaseOrder; activar/desactivar usuarios.
+
+
+## Fase 6 — Refresh tokens, soft delete, auditoría — COMPLETA ✅
+
+**Soft delete:** `deletedAt DateTime?` en `Product` y `Category`. `delete()` reemplazado por `update({ deletedAt: new Date() })` en ambos services. Todos los `findMany`/`findFirst` que representan estado actual filtran `deletedAt: null` (listados, validaciones de creación/actualización, `createPurchaseOrder`, `createPurchaseRequest`, reportes de low-stock e inventory-value). Los históricos (`getMovementsReport`, lecturas de `PurchaseRequest`/`PurchaseOrder` ya existentes) NO se filtran a propósito — un hecho ya ocurrido no debe desaparecer del registro.
+
+`Category.name`, `Product.sku` y `Product.barcode` dejaron de ser `@unique` en el schema — la unicidad la maneja un índice único *parcial* de Postgres (`WHERE "deletedAt" IS NULL`), escrito a mano en la migración vía `prisma migrate dev --create-only`, porque Prisma no soporta índices únicos parciales de forma nativa. Esto permite reutilizar un nombre/sku después de eliminar el registro que lo tenía. Como consecuencia, `findUnique` sobre esos 3 campos ya no compila (exige `@unique`) — reemplazado por `findFirst({ where: { campo, deletedAt: null } })` en los servicios correspondientes.
+
+**Auditoría:** modelo `AuditLog` (`userId`, `action`, `entityType`, `entityId`, `changes` Json opcional, `createdAt`). Helper centralizado `src/modules/audit/audit.service.ts` → `logAudit(...)`, que nunca lanza excepción hacia el caller (try/catch interno) para que un fallo de auditoría nunca bloquee la operación principal. Acepta un cliente de transacción opcional (mismo patrón que `createMovement`), usado dentro de `receivePurchaseOrder` para que el log forme parte atómica de esa transacción.
+
+Alcance auditado: update/delete (soft delete) de Product y Category; APPROVE/REJECT de PurchaseRequest; CREATE/RECEIVE de PurchaseOrder; ACTIVATE/DEACTIVATE de usuarios.
+
+Fix de tipos relevante: `changes` debe tiparse como `Prisma.InputJsonValue` (no `Record<string, unknown>`) y solo incluirse en el objeto `data` con el patrón `...(changes !== undefined && { changes })` — no `changes: changes ?? undefined` — por `exactOptionalPropertyTypes: true` en el tsconfig.
+
+Frontend: página `AuditLog.jsx` (solo ADMIN) con 3 cards de métricas (total, acción más frecuente, entidad más afectada), gráfico de línea de actividad de 7 días (recharts) y tabla filtrable por entidad. Endpoints: `GET /audit-logs` y `GET /audit-logs/metrics` (ambos con `Authorize("ADMIN")`, `/metrics` declarado antes que cualquier ruta con `:id` futura).
+
+**Refresh tokens:** modelo `RefreshToken` (`userId`, `tokenHash`, `expiresAt`, `revoked`). Access token bajado a 15 minutos. El refresh token viaja como `"<id>.<secret>"` — el `id` ubica la fila (no es secreto), el `secret` se compara con `bcrypt.compare` contra el hash guardado (mismo patrón que las contraseñas). Se implementó **rotación**: cada uso de un refresh token lo revoca y emite uno nuevo, así un refresh token robado solo sirve una vez.
+
+Endpoints nuevos: `POST /auth/refresh` (sin `Authenticated`, es precisamente para cuando el access token ya expiró) y `POST /auth/logout` (revoca el refresh token en la BD).
+
+Frontend: `client.js` tiene un interceptor de response que detecta 401, refresca el access token automáticamente y reintenta la request original — con una promesa compartida (`refreshPromise`) para evitar refrescos duplicados si varias requests fallan en simultáneo. `AuthContext.login()` ahora recibe 3 argumentos (`token, refreshToken, user`); `logout()` es `async`, avisa al backend para revocar el refresh token, y limpia `localStorage` incluso si esa llamada falla.
+
+Probado de punta a punta con un script de Node (`test-refresh-flow.mjs`): login → expiración real del access token → refresh automático → confirmación de que el token viejo queda inválido tras la rotación → logout → confirmación de que el refresh token queda revocado. Todos los pasos pasaron correctamente.
+
+**Nota:** la ruta `GET /auth/me` mencionada en versiones anteriores del handoff ya no existe en el proyecto (fue eliminada en algún momento) — no confundir con un bug si se la busca en el futuro.
