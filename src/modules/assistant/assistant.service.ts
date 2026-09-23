@@ -1,10 +1,10 @@
 // src/modules/assistant/assistant.service.ts
 import { GoogleGenAI } from "@google/genai";
-import type { Content, Part } from "@google/genai"; // Importación de tipos pura
+import type { Content, Part } from "@google/genai";
 import { toolDeclarations, toolExecutors } from "./assistant.tools.ts";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "API_KEY_DEFAULT" });
-const MODEL = "gemini-2.0-flash";
+const MODEL = "gemini-3.6-flash";
 const MAX_TOOL_ROUNDS = 5;
 
 const SYSTEM_INSTRUCTION = `
@@ -12,9 +12,8 @@ Sos un asistente de solo lectura para un sistema de inventario.
 Respondé siempre basándote en los datos reales que obtengas de las herramientas disponibles.
 Nunca inventes cifras, nombres de productos, ni cantidades.
 Si una pregunta requiere datos que no podés obtener con las herramientas disponibles, decilo explícitamente en vez de inventar una respuesta.
-Respondé en español, de forma clara y concisa.
+Respondé siempre en el mismo idioma en el que te escribe el usuario. Si te escribe en inglés, respondé en inglés; si te escribe en español, respondé en español; y así con cualquier otro idioma.
 `.trim();
-
 export async function chatWithAssistant(userMessage: string) {
   const contents: Content[] = [
     { role: "user", parts: [{ text: userMessage }] },
@@ -36,10 +35,16 @@ export async function chatWithAssistant(userMessage: string) {
       return { reply: response.text };
     }
 
-    contents.push({
-      role: "model",
-      parts: functionCalls.map((call) => ({ functionCall: call })),
-    });
+    const modelContent = response.candidates?.[0]?.content;
+    if (modelContent) {
+      contents.push(modelContent);
+    } else {
+      // fallback defensivo, no debería pasar en la práctica
+      contents.push({
+        role: "model",
+        parts: functionCalls.map((call) => ({ functionCall: call })),
+      });
+    }
 
     const functionResponseParts: Part[] = [];
 
@@ -49,7 +54,6 @@ export async function chatWithAssistant(userMessage: string) {
 
       let result;
 
-      // Se comprueba explícitamente que executor sea una función antes de llamarla
       if (typeof executor !== "function") {
         result = { error: `Herramienta desconocida o no ejecutable: ${toolName}` };
       } else {
@@ -62,6 +66,7 @@ export async function chatWithAssistant(userMessage: string) {
 
       functionResponseParts.push({
         functionResponse: {
+          id: call.id ?? call.name ?? `call-${round}-${functionResponseParts.length}`,
           name: toolName ?? "unknown",
           response: { result },
         },

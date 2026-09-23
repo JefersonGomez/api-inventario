@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import crypto from "crypto";
 
-const ACCESS_TOKEN_EXPIRY = "20s";
+const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
 export async function Register(name: string, email: string, password: string) {
