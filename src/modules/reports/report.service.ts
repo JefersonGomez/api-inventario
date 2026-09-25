@@ -50,3 +50,53 @@ export async function getInventoryValueReport() {
     totalProducts: allProducts.length
   };
 }
+
+export async function getInventoryValueBreakdown(daysThreshold = 60) {
+  const cutoffDate = new Date(Date.now() - daysThreshold * 24 * 60 * 60 * 1000);
+
+  const allProducts = await prisma.product.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, sku: true, stock: true, price: true },
+  });
+
+  // Traemos, en una sola consulta, los productos que SÍ tuvieron
+  // movimiento reciente (evita un findMany por producto, un problema N+1)
+  const recentMovements = await prisma.stockMovement.findMany({
+    where: { createdAt: { gte: cutoffDate } },
+    select: { productId: true },
+    distinct: ["productId"],
+  });
+  const activeProductIds = new Set(recentMovements.map((m) => m.productId));
+
+  let activeValue = 0;
+  let immobilizedValue = 0;
+  const immobilizedProducts: { id: string; name: string; sku: string; value: number }[] = [];
+
+  for (const product of allProducts) {
+    const value = product.stock * Number(product.price);
+
+    if (activeProductIds.has(product.id)) {
+      activeValue += value;
+    } else {
+      immobilizedValue += value;
+      immobilizedProducts.push({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        value: Number(value.toFixed(2)),
+      });
+    }
+  }
+
+  // Los productos con más capital inmovilizado primero — son los
+  // que más vale la pena revisar
+  immobilizedProducts.sort((a, b) => b.value - a.value);
+
+  return {
+    daysThreshold,
+    totalValue: Number((activeValue + immobilizedValue).toFixed(2)),
+    activeValue: Number(activeValue.toFixed(2)),
+    immobilizedValue: Number(immobilizedValue.toFixed(2)),
+    immobilizedProducts,
+  };
+}
