@@ -597,3 +597,16 @@ Frontend: `client.js` tiene un interceptor de response que detecta 401, refresca
 Probado de punta a punta con un script de Node (`test-refresh-flow.mjs`): login → expiración real del access token → refresh automático → confirmación de que el token viejo queda inválido tras la rotación → logout → confirmación de que el refresh token queda revocado. Todos los pasos pasaron correctamente.
 
 **Nota:** la ruta `GET /auth/me` mencionada en versiones anteriores del handoff ya no existe en el proyecto (fue eliminada en algún momento) — no confundir con un bug si se la busca en el futuro.
+
+
+## Fase 8 — Inteligencia sobre datos existentes (no iniciada)
+
+Idea general: en vez de módulos nuevos, extraer más valor de datos que el sistema ya recolecta (`StockMovement`, `AuditLog` con `changes`, `Product.price` a lo largo del tiempo). Priorizado por relación esfuerzo/valor, reutilizando infraestructura ya construida:
+
+1. **Alertas predictivas de stock:** sobre `getLowStockReport` ya existente, calcular velocidad de venta reciente (promedio de `StockMovement` tipo OUT en los últimos N días) y estimar días restantes de inventario antes de agotarse. No requiere modelo nuevo, es una consulta agregada sobre datos existentes.
+2. **Capital inmovilizado / productos sin movimiento:** extender `getInventoryValueReport` para separar el valor total entre "con movimiento reciente" y "sin movimiento en los últimos N días" (usando `StockMovement.createdAt` por producto). Responde la pregunta real de negocio: "¿cuánto dinero tengo parado en productos que no se mueven?".
+3. **Historial de precios:** hoy `Product.price` se pisa en cada `update`, sin dejar rastro del valor anterior. Como `AuditLog.changes` ya registra los campos editados en cada UPDATE de producto (incluido `price`), se puede reconstruir el historial de precios directamente desde ahí sin una tabla nueva — evaluar si alcanza con eso o si conviene una tabla `PriceHistory` dedicada, según qué tan seguido se vaya a consultar.
+
+Quedaron identificados pero descartados por ahora (alto esfuerzo o no aplican al alcance actual del negocio): inventario multi-ubicación/transferencias (solo tiene sentido con múltiples bodegas reales), predicción de demanda y detección de anomalías (proyectos de estadística/ML en sí mismos, mejor candidatos para una tool más del asistente de Fase 7 que para un módulo aparte), permisos granulares más allá de ADMIN/EMPLOYE (sin caso de uso concreto todavía), gestión de productos dañados/devoluciones (se podría resolver extendiendo el enum `MovementType` en vez de un módulo nuevo, si se retoma), y mejoras de UX (dashboard configurable, búsqueda global, centro de actividad tipo feed).
+
+**Decisión ya descartada, no reabrir sin confirmación explícita:** recepción parcial de órdenes de compra — contradice la decisión de negocio tomada en la Fase 5 (sección 5.2 del handoff: "recepción completa únicamente, no parcial").

@@ -115,3 +115,45 @@ export async function deleteProduct(id: string,userId:string) {
   await logAudit(userId,"DELETE","Product",id)
   return deletedProduct;
 }
+
+
+export async function getProductPriceHistory(productId: string) {
+  const product = await prisma.product.findFirst({
+    where: { id: productId, deletedAt: null },
+    select: { id: true, name: true, price: true, updatedAt: true },
+  });
+
+  if (!product) {
+    throw new Error("No se encontró el producto");
+  }
+
+  const logs = await prisma.auditLog.findMany({
+    where: {
+      entityType: "Product",
+      entityId: productId,
+      action: "UPDATE",
+    },
+    orderBy: { createdAt: "asc" },
+    select: { changes: true, createdAt: true },
+  });
+
+  // Extraemos solo los cambios de precio, ignorando updates donde
+  // el price no cambió (ej. alguien solo editó el nombre)
+  const history = logs
+    .map((log) => {
+      const changes = log.changes as { price?: number } | null;
+      if (changes?.price === undefined) return null;
+      return { price: changes.price, date: log.createdAt };
+    })
+    .filter((entry): entry is { price: number; date: Date } => entry !== null);
+
+  // Agregamos el precio actual al final, como el punto más reciente
+  history.push({ price: Number(product.price), date: product.updatedAt });
+
+  return {
+    productId: product.id,
+    productName: product.name,
+    currentPrice: Number(product.price),
+    history,
+  };
+}

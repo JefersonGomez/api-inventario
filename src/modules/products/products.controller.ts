@@ -5,7 +5,8 @@ import {
   getProductById,
   updateProduct,
   deleteProduct,
-  getProductByBarcode // Importar la nueva función
+  getProductByBarcode, // Importar la nueva función
+  getProductPriceHistory
 } from "./products.service.ts";
 
 export async function CreateProductController(req: Request, res: Response) {
@@ -96,5 +97,23 @@ export async function getProductByBarcodeController(req: Request, res: Response)
     return res.json(product);
   } catch (error) {
     return res.status(500).json({ message: "Error interno del servidor" });
+  }
+}
+
+// product.controller.ts — agregar
+export async function getProductPriceHistoryHandler(
+  req: Request<{ id: string }>,
+  res: Response
+) {
+  try {
+    const { id } = req.params;
+    if (!id || typeof id !== "string") {
+      res.status(400).json({ error: "id inválido" });
+      return;
+    }
+    const history = await getProductPriceHistory(id);
+    res.json(history);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
   }
 }

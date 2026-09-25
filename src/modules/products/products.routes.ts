@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CreateProductController,getAllProductsController,getProductByIdController,updateProductController,deleteProductController,getProductByBarcodeController } from "./products.controller.ts";
+import { CreateProductController,getProductPriceHistoryHandler,getAllProductsController,getProductByIdController,updateProductController,deleteProductController,getProductByBarcodeController } from "./products.controller.ts";
 import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate } from "../../middlewares/validate.middleware.ts";
 import { productsSchemaCreate,productsSchemaUpdate } from "./products.schema.ts";
@@ -15,4 +15,4 @@ router.get("/:id",Authenticated,getProductByIdController)
 router.put("/:id",validate(productsSchemaUpdate),Authenticated, Authorize("ADMIN"),updateProductController)
 router.delete("/:id",Authenticated, Authorize("ADMIN"),deleteProductController)
 
-
+router.get("/:id/price-history", Authenticated, getProductPriceHistoryHandler);
