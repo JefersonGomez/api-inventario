@@ -100,3 +100,57 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
     immobilizedProducts,
   };
 }
+
+export async function getStockForecast(velocityWindowDays = 30, alertThresholdDays = 14) {
+  const cutoffDate = new Date(Date.now() - velocityWindowDays * 24 * 60 * 60 * 1000);
+
+  const products = await prisma.product.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, sku: true, stock: true },
+  });
+
+  // Suma de unidades vendidas (OUT) por producto, en una sola consulta
+  const salesByProduct = await prisma.stockMovement.groupBy({
+    by: ["productId"],
+    where: {
+      type: "OUT",
+      createdAt: { gte: cutoffDate },
+    },
+    _sum: { quantity: true },
+  });
+
+  const salesMap = new Map(
+    salesByProduct.map((s) => [s.productId, s._sum.quantity ?? 0])
+  );
+
+  const forecast = products
+    .map((product) => {
+      const totalSold = salesMap.get(product.id) ?? 0;
+
+      // Sin ventas recientes: no hay velocidad, no se puede predecir nada
+      if (totalSold === 0) return null;
+
+      const dailyVelocity = totalSold / velocityWindowDays;
+      const daysRemaining = product.stock / dailyVelocity;
+
+      return {
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        currentStock: product.stock,
+        dailyVelocity: Number(dailyVelocity.toFixed(2)),
+        daysRemaining: Number(daysRemaining.toFixed(1)),
+        willRunOutSoon: daysRemaining <= alertThresholdDays,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    // los más urgentes primero (menos días restantes)
+    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+
+  return {
+    velocityWindowDays,
+    alertThresholdDays,
+    forecast, // TODOS los productos con velocidad calculable, ordenados por urgencia
+    urgent: forecast.filter((f) => f.willRunOutSoon), // solo los que disparan alerta
+  };
+}

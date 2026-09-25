@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown } from "./report.service.ts";
+import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast } from "./report.service.ts";
 
 export async function getLowStockController(req: Request, res: Response) {
   try {
@@ -45,6 +45,25 @@ export async function getInventoryValueBreakdownHandler(req: Request, res: Respo
 
     const breakdown = await getInventoryValueBreakdown(daysThreshold);
     res.json(breakdown);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+// reports.controller.ts — agregar
+export async function getStockForecastHandler(req: Request, res: Response) {
+  try {
+    const { velocityDays, alertDays } = req.query;
+    const velocityWindowDays = velocityDays ? Number(velocityDays) : 30;
+    const alertThresholdDays = alertDays ? Number(alertDays) : 14;
+
+    if (isNaN(velocityWindowDays) || velocityWindowDays <= 0 || isNaN(alertThresholdDays) || alertThresholdDays <= 0) {
+      res.status(400).json({ error: "Los parámetros deben ser números positivos" });
+      return;
+    }
+
+    const forecast = await getStockForecast(velocityWindowDays, alertThresholdDays);
+    res.json(forecast);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
