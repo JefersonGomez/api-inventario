@@ -1,7 +1,7 @@
 // purchase-request.controller.ts
 import type { Request, Response } from "express";
 import * as service from "./purchase-request.service.js";
-
+import * as productService from "../products/products.service.ts";
 export async function createPurchaseRequestHandler(req: Request, res: Response) {
   try {
     const { productId, quantity, reason } = req.body;
@@ -42,11 +42,12 @@ export async function updatePurchaseRequestStatusHandler(req: Request, res: Resp
 
 export async function getPurchaseRequestAlertsHandler(req: Request, res: Response) {
   try {
-    const [expiringSoon, approvedUnfulfilled] = await Promise.all([
+    const [expiringSoon, approvedUnfulfilled, expiringSoonProducts] = await Promise.all([
       service.getExpiringSoonRequests(3),
       service.getApprovedUnfulfilledRequests(),
+      productService.getExpiringSoonProducts(7), // ← nuevo
     ]);
-    res.json({ expiringSoon, approvedUnfulfilled });
+    res.json({ expiringSoon, approvedUnfulfilled, expiringSoonProducts });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

@@ -610,3 +610,28 @@ Idea general: en vez de módulos nuevos, extraer más valor de datos que el sist
 Quedaron identificados pero descartados por ahora (alto esfuerzo o no aplican al alcance actual del negocio): inventario multi-ubicación/transferencias (solo tiene sentido con múltiples bodegas reales), predicción de demanda y detección de anomalías (proyectos de estadística/ML en sí mismos, mejor candidatos para una tool más del asistente de Fase 7 que para un módulo aparte), permisos granulares más allá de ADMIN/EMPLOYE (sin caso de uso concreto todavía), gestión de productos dañados/devoluciones (se podría resolver extendiendo el enum `MovementType` en vez de un módulo nuevo, si se retoma), y mejoras de UX (dashboard configurable, búsqueda global, centro de actividad tipo feed).
 
 **Decisión ya descartada, no reabrir sin confirmación explícita:** recepción parcial de órdenes de compra — contradice la decisión de negocio tomada en la Fase 5 (sección 5.2 del handoff: "recepción completa únicamente, no parcial").
+
+
+## Fase 9 — Tiempo real, comunicación entre roles y perecederos (no iniciada)
+
+Orden de trabajo acordado, de menor a mayor dependencia entre piezas:
+
+### 9.1 Productos perecederos (arrancar por acá — la más chica y autocontenida)
+- Agregar `expirationDate DateTime?` (opcional, no todo producto vence) al modelo `Product`.
+- Reutilizar el mismo patrón ya usado para `PurchaseRequest.expiresAt`: alertas de "productos por vencer" (ej. ≤7 días), probablemente sumadas al mismo centro de alertas del Dashboard que ya existe para solicitudes de compra, en vez de crear una sección nueva desde cero.
+- Definir si el formulario de creación/edición de producto vuelve `expirationDate` visible siempre o solo cuando la categoría/tipo de producto lo amerite (a decidir al retomar).
+
+### 9.2 WebSockets (la base para las piezas 9.3 y "presencia de usuarios")
+- Reemplaza el polling actual (`refetchInterval: 60_000` en `usePurchaseRequestAlerts`, y cualquier otro refetch periódico similar) por push real desde el backend cuando algo cambia.
+- Candidatos iniciales a tiempo real: cambios de stock (movimientos, recepción de órdenes), nuevas solicitudes de compra, aprobaciones/rechazos.
+- Abre la puerta a "presencia de usuarios" (ej. "Juan y María están viendo Productos ahora") con esfuerzo incremental bajo una vez montada la infraestructura base.
+- Pendiente de definir al retomar: librería a usar (Socket.IO vs WebSocket nativo de Node), y cómo autenticar la conexión del socket (reutilizar el JWT del access token es lo más directo).
+
+### 9.3 Mensajería/notificación entre roles (depende de 9.2 para la versión con push instantáneo)
+- Decisión tomada: arrancar con notificación **in-app** (tabla + badge, mismo patrón que las alertas de solicitudes de compra ya construidas), no con email real — email queda como extensión posterior si hace falta avisar a alguien sin la app abierta.
+- Con WebSockets ya en pie (9.2), el mensaje llega al instante en vez de por polling.
+- Variante más simple a evaluar primero: comentarios/notas atados a una entidad específica (ej. hilo corto en una orden de compra o solicitud, para registrar el "por qué" de una decisión) en vez de mensajería libre persona a persona — cubre buena parte del caso de uso real con menos superficie de construcción.
+
+### Ideas adicionales identificadas, sin orden fijado todavía
+- Exportar reportes a Excel/PDF (los cálculos ya existen en los reportes de la Fase 8, faltaría la capa de generación de archivo).
+- Proveedor de email real (Resend con tier gratuito, o Nodemailer/SMTP) si 9.3 evoluciona más allá de lo in-app.

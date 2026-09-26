@@ -9,9 +9,10 @@ export async function createProduct(
   stock: number,
   minStock: number,
   categoryId: string,
+  expirationDate?: Date // ← nuevo parámetro, al final para no romper el orden existente
 ) {
   const existProduct = await prisma.product.findFirst({
-    where: { sku: sku, deletedAt: null }, 
+    where: { sku: sku, deletedAt: null },
   });
 
   if (existProduct) {
@@ -19,7 +20,7 @@ export async function createProduct(
   }
 
   const existCategory = await prisma.category.findFirst({
-    where: { id: categoryId, deletedAt: null } // ← nuevo: no crear productos en categorías "eliminadas"
+    where: { id: categoryId, deletedAt: null }
   });
 
   if (!existCategory) {
@@ -36,6 +37,7 @@ export async function createProduct(
       stock: stock,
       minStock: minStock,
       categoryId: categoryId,
+      expirationDate: expirationDate ?? null, // ← nuevo
     }
   });
 
@@ -78,10 +80,11 @@ export async function updateProduct(
   price: number,
   minStock: number,
   categoryId: string,
-  userId:string
+  userId: string,
+  expirationDate?: Date // ← nuevo parámetro, al final
 ) {
   const existCategory = await prisma.category.findFirst({
-    where: { id: categoryId, deletedAt: null } // ← nuevo
+    where: { id: categoryId, deletedAt: null }
   });
 
   if (!existCategory) {
@@ -96,11 +99,14 @@ export async function updateProduct(
       description: description ?? null,
       price: price,
       minStock: minStock,
-      categoryId: categoryId
+      categoryId: categoryId,
+      expirationDate: expirationDate ?? null, // ← nuevo
     }
   });
 
-  await logAudit (userId,"UPDATE","Product",id,{ name, barcode, description, price, minStock, categoryId})
+  await logAudit(userId, "UPDATE", "Product", id, {
+    name, barcode, description, price, minStock, categoryId, expirationDate
+  });
 
   return updatedProduct;
 }
@@ -156,4 +162,18 @@ export async function getProductPriceHistory(productId: string) {
     currentPrice: Number(product.price),
     history,
   };
+}
+
+
+export async function getExpiringSoonProducts(daysAhead = 7) {
+  const now = new Date();
+  const limit = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+
+  return prisma.product.findMany({
+    where: {
+      deletedAt: null,
+      expirationDate: { not: null, gte: now, lte: limit },
+    },
+    orderBy: { expirationDate: "asc" },
+  });
 }

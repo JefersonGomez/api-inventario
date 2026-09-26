@@ -80,6 +80,7 @@ model Product {
   categoryId           String
   supplierId           String?
   deletedAt            DateTime?
+  expirationDate     DateTime? 
   category             Category            @relation(fields: [categoryId], references: [id])
   supplier             Supplier?           @relation(fields: [supplierId], references: [id])
   movements            StockMovement[]
