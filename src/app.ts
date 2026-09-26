@@ -11,6 +11,7 @@ import {purchaseOrderRouter as purchaseOrderRouter} from "./modules/purchase-ord
 import{purchaseRequestRouter as purchaseRequestRouter} from "./modules/purchase-requests/purchase-request.routes.ts"
 import { auditRouter } from "./modules/audit/audit.routes.ts";
 import { assistantRouter } from "./modules/assistant/assistant.routes.ts";
+import { notificationsRouter } from "./modules/notifications/notifications.routes.ts"
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -37,6 +38,7 @@ app.use("/purchase-orders",purchaseOrderRouter)
 app.use("/purchase-requests", purchaseRequestRouter)
 app.use("/audit-logs", auditRouter);
 app.use("/assistant", assistantRouter);
+app.use("/notifications",notificationsRouter)
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })
