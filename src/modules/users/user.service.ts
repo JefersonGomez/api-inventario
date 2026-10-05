@@ -13,6 +13,8 @@ export async function getProfile(userId: string): Promise<ProfileData> {
             email: true,
             role: true,
             avatarUrl: true,
+            phone: true,
+            company: true,
             isActive: true,
             createdAt: true,
 
@@ -46,6 +48,8 @@ export async function updateAvatar(userId: string, filename: string): Promise<Pr
             email: true,
             role: true,
             avatarUrl: true,
+            phone: true,
+            company: true,
             isActive: true,
             createdAt: true,
         }
