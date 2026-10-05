@@ -5,5 +5,5 @@ import { validate } from "../../middlewares/validate.middleware.ts";
 import { CreateMovementsSchema } from "./movements.schema.ts";
 export const router = Router()
 
-router.post("/", validate(CreateMovementsSchema),Authenticated, Authorize("ADMIN", "EMPLOYEE"), createMovementController)
+router.post("/", validate(CreateMovementsSchema),Authenticated, Authorize("ADMIN", "EMPLOYE"), createMovementController)
 router.get('/',Authenticated,getMovementsController);

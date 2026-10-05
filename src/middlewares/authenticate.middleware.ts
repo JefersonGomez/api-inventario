@@ -33,13 +33,13 @@ export async function Authenticated(
 }
 
 
-export function Authorize (...rolesPermitidos: string[]){
+export function Authorize (...rolesPermitidos: ("ADMIN" | "EMPLOYE")[]){
      return (req: Request, res: Response, next: NextFunction) => {
         if(!req.user){
             return res.status(401).json({"message":"acceso no autorizado"})
         }
 
-        const verification = rolesPermitidos.includes(req.user.role)
+        const verification = (rolesPermitidos as string[]).includes(req.user.role)
         if(!verification){
             return res.status(403).json({"message":"estas auntenticado pero no tienes acceso"})
         }
