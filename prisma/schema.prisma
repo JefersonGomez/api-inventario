@@ -41,6 +41,8 @@ model User {
   role         Role            @default(EMPLOYE)
   createdAt    DateTime        @default(now()) // Corregido: createAt -> createdAt
   avatarUrl    String?
+  phone        String?
+  company      String?
   isActive     Boolean         @default(true)
   movements    StockMovement[]
   purchaseRequests PurchaseRequest[]

@@ -3,8 +3,8 @@ import { Register, Login,refreshAccessToken,logout } from "./auth.service.ts";
 
 export async function RegisterController(req: Request, res: Response) {
   try {
-    const { name, email, password } = req.body;
-    const userCreated = await Register(name, email, password);
+    const { name, email, password, phone, company } = req.body;
+    const userCreated = await Register(name, email, password, { phone, company });
     if (userCreated) {
       res.status(201).json(userCreated);
     }

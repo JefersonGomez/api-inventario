@@ -6,7 +6,12 @@ import crypto from "crypto";
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
-export async function Register(name: string, email: string, password: string) {
+export async function Register(
+  name: string,
+  email: string,
+  password: string,
+  extra: { phone?: string; company?: string } = {}
+) {
   const existingUser = await prisma.user.findUnique({
     where: { email: email },
   });
@@ -23,6 +28,8 @@ export async function Register(name: string, email: string, password: string) {
       email: email,
       passwordHash: passwordHashed,
       role: "EMPLOYE",
+      ...(extra.phone && { phone: extra.phone }),
+      ...(extra.company && { company: extra.company }),
     },
     select: {
       id: true,
@@ -30,6 +37,8 @@ export async function Register(name: string, email: string, password: string) {
       email: true,
       role: true,
       avatarUrl: true,
+      phone: true,
+      company: true,
     },
   });
 
