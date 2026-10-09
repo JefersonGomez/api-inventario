@@ -76,3 +76,11 @@ export async function getApprovedUnfulfilledRequests() {
     orderBy: { createdAt: "asc" },
   });
 }
+
+export async function getPendingRequests() {
+  return prisma.purchaseRequest.findMany({
+    where: { status: "PENDING" },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+}

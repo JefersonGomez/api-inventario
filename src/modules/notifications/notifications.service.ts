@@ -6,8 +6,9 @@ import * as reportsService from "../reports/report.service.ts";
 
 export async function getNotifications() {
 
-    const [expiringSoonRequests, approvedUnfulfilled, expiringSoonProducts, lowStockProducts] = await Promise.all([
+    const [expiringSoonRequests, pendingRequests, approvedUnfulfilled, expiringSoonProducts, lowStockProducts] = await Promise.all([
         purchaseRequestService.getExpiringSoonRequests(3),
+        purchaseRequestService.getPendingRequests(),
         purchaseRequestService.getApprovedUnfulfilledRequests(),
         productService.getExpiringSoonProducts(7),
         reportsService.getLowStockReport(),
@@ -21,6 +22,15 @@ export async function getNotifications() {
       link: `/purchase-requests?highlight=${r.id}`,
       createdAt: r.createdAt,
     })),
+    // las pendientes que ya avisan por vencer no se repiten
+    ...pendingRequests
+      .filter((r) => !expiringSoonRequests.some((e) => e.id === r.id))
+      .map((r) => ({
+        id: `pr-pending-${r.id}`,
+        message: `${r.requestedBy.name} solicitó ${r.quantity} de "${r.product.name}"`,
+        link: `/purchase-requests?highlight=${r.id}`,
+        createdAt: r.createdAt,
+      })),
     ...approvedUnfulfilled.map((r) => ({
       id: `pr-unfulfilled-${r.id}`,
       message: `Solicitud aprobada de "${r.product.name}" sin orden de compra`,
