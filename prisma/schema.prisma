@@ -114,6 +114,7 @@ model PurchaseRequest {
   status        PurchaseRequestStatus @default(PENDING)
   expiresAt       DateTime?
   purchaseOrderId String? 
+  rejectionReason String?
   createdAt     DateTime              @default(now())
   product       Product               @relation(fields: [productId], references: [id])
   requestedBy   User                  @relation(fields: [requestedById], references: [id])

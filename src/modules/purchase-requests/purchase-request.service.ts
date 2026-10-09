@@ -41,7 +41,8 @@ export async function getAllPurchaseRequests(user: { id: string; role: string })
 export async function updatePurchaseRequestStatus(
   id: string,
   status: "APPROVED" | "REJECTED",
-  userId:string
+  userId:string,
+  rejectionReason?: string
 ) {
   const action = status === "APPROVED" ? "APPROVE" : "REJECT";
 
@@ -50,7 +51,8 @@ export async function updatePurchaseRequestStatus(
     const before = await tx.purchaseRequest.findUnique({ where: { id }, select: { status: true } });
     const updatedRequest = await tx.purchaseRequest.update({
       where: { id },
-      data: { status },
+      // el motivo solo existe mientras esté rechazada: aprobar después lo borra
+      data: { status, rejectionReason: status === "REJECTED" ? (rejectionReason ?? null) : null },
       include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
     });
 
@@ -61,14 +63,21 @@ export async function updatePurchaseRequestStatus(
           userId: updatedRequest.requestedById,
           type: status === "APPROVED" ? "requestApproved" : "requestRejected",
           title: updatedRequest.product.name,
-          meta: { quantity: updatedRequest.quantity },
+          meta: {
+            quantity: updatedRequest.quantity,
+            ...(status === "REJECTED" && rejectionReason && { reason: rejectionReason }),
+          },
           link: `/purchase-requests?highlight=${id}`,
         }],
         tx
       );
     }
 
-    await logAudit(userId, action, "PurchaseRequest", id, undefined, tx);
+    await logAudit(
+      userId, action, "PurchaseRequest", id,
+      status === "REJECTED" && rejectionReason ? { rejectionReason } : undefined,
+      tx
+    );
     return updatedRequest;
   });
 }
