@@ -25,14 +25,14 @@ export async function createPurchaseRequest(
 
   return prisma.purchaseRequest.create({
     data: { productId, requestedById, quantity, reason: reason ?? null, expiresAt: finalExpiresAt },
-    include: { product: true, requestedBy: true },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
   });
 }
 
 export async function getAllPurchaseRequests(user: { id: string; role: string }) {
   return prisma.purchaseRequest.findMany({
     where: user.role === "ADMIN" ? {} : { requestedById: user.id },
-    include: { product: true, requestedBy: true },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -45,7 +45,7 @@ export async function updatePurchaseRequestStatus(
   const updatePurchaseRequestStatus = await prisma.purchaseRequest.update({
     where: { id },
     data: { status },
-    include: { product: true, requestedBy: true },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
   });
 
   const action = status === "APPROVED" ? "APPROVE" : "REJECT";
@@ -61,7 +61,7 @@ export async function getExpiringSoonRequests(daysAhead = 3) {
       status: "PENDING",
       expiresAt: { gte: now, lte: limit },
     },
-    include: { product: true, requestedBy: true },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
     orderBy: { expiresAt: "asc" },
   });
 }
@@ -72,7 +72,7 @@ export async function getApprovedUnfulfilledRequests() {
       status: "APPROVED",
       purchaseOrderId: null,
     },
-    include: { product: true, requestedBy: true },
+    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
     orderBy: { createdAt: "asc" },
   });
 }

@@ -87,7 +87,7 @@ export async function createPurchaseOrder(
 
 export async function getAllPurchaseOrders() {
   return prisma.purchaseOrder.findMany({
-    include: { supplier: true, items: { include: { product: true } } },
+    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -95,7 +95,7 @@ export async function getAllPurchaseOrders() {
 export async function getPurchaseOrderById(id: string) {
   return prisma.purchaseOrder.findUnique({
     where: { id },
-    include: { supplier: true, items: { include: { product: true } } },
+    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
   });
 }
 
@@ -128,7 +128,7 @@ export async function receivePurchaseOrder(id: string, userId: string) {
     const received = await tx.purchaseOrder.update({
       where: { id },
       data: { status: "RECEIVED", receivedAt: new Date() },
-      include: { supplier: true, items: { include: { product: true } } },
+      include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
     });
 
     await logAudit(userId, "RECEIVE", "PurchaseOrder", id, undefined, tx);
