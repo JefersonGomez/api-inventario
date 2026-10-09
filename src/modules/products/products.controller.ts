@@ -12,7 +12,7 @@ import {
 
 export async function CreateProductController(req: Request, res: Response) {
   try {
-    const { sku, barcode, name, description, price, stock, minStock, categoryId,expirationDate } = req.body;
+    const { sku, barcode, name, description, price, stock, minStock, categoryId,expirationDate, supplierId } = req.body;
 
     const created = await createProduct(
       sku,
@@ -23,7 +23,8 @@ export async function CreateProductController(req: Request, res: Response) {
       stock,
       minStock,
       categoryId,
-      expirationDate
+      expirationDate,
+      supplierId
     );
     res.status(201).json(created);
   } catch (error) {
@@ -57,13 +58,13 @@ export async function getProductByIdController(req: Request, res: Response) {
 export async function updateProductController(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, barcode, description, price, minStock, categoryId,expirationDate } = req.body;
+    const { name, barcode, description, price, minStock, categoryId,expirationDate, supplierId } = req.body;
     
     if (!id || typeof id !== "string") {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id,expirationDate);
+    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id,expirationDate,supplierId);
     res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

@@ -1,5 +1,14 @@
 import { prisma } from "../../config/database.ts";
 import { logAudit } from "../audit/audit.service.ts";
+// null = sin proveedor; undefined = no tocar
+async function assertSupplierExists(supplierId: string | null | undefined) {
+  if (!supplierId) return;
+  const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
+  if (!supplier) throw new Error("El proveedor indicado no existe");
+}
+
+const withSupplier = { category: true, supplier: { select: { id: true, name: true } } };
+
 export async function createProduct(
   sku: string,
   barcode: string | undefined,
@@ -9,8 +18,10 @@ export async function createProduct(
   stock: number,
   minStock: number,
   categoryId: string,
-  expirationDate?: Date // ← nuevo parámetro, al final para no romper el orden existente
+  expirationDate?: Date, // ← nuevo parámetro, al final para no romper el orden existente
+  supplierId?: string | null
 ) {
+  await assertSupplierExists(supplierId);
   const existProduct = await prisma.product.findFirst({
     where: { sku: sku, deletedAt: null },
   });
@@ -38,7 +49,9 @@ export async function createProduct(
       minStock: minStock,
       categoryId: categoryId,
       expirationDate: expirationDate ?? null, // ← nuevo
-    }
+      supplierId: supplierId ?? null,
+    },
+    include: withSupplier,
   });
 
   return newProduct;
@@ -47,7 +60,7 @@ export async function createProduct(
 export async function getAllProducts() {
   const allProducts = await prisma.product.findMany({
     where: { deletedAt: null }, // ← nuevo
-    include: { category: true }
+    include: withSupplier
   });
   return allProducts;
 }
@@ -55,7 +68,7 @@ export async function getAllProducts() {
 export async function getProductById(idProduct: string) {
   const existProduct = await prisma.product.findFirst({
     where: { id: idProduct, deletedAt: null }, // ← nuevo, y findUnique → findFirst
-    include: { category: true }
+    include: withSupplier
   });
 
   if (!existProduct) {
@@ -67,7 +80,7 @@ export async function getProductById(idProduct: string) {
 export async function getProductByBarcode(code: string) {
   const product = await prisma.product.findFirst({
     where: { barcode: code, deletedAt: null }, // ← nuevo, y findUnique → findFirst
-    include: { category: true }
+    include: withSupplier
   });
   return product;
 }
@@ -81,8 +94,10 @@ export async function updateProduct(
   minStock: number,
   categoryId: string,
   userId: string,
-  expirationDate?: Date // ← nuevo parámetro, al final
+  expirationDate?: Date, // ← nuevo parámetro, al final
+  supplierId?: string | null
 ) {
+  await assertSupplierExists(supplierId);
   const existCategory = await prisma.category.findFirst({
     where: { id: categoryId, deletedAt: null }
   });
@@ -101,11 +116,13 @@ export async function updateProduct(
       minStock: minStock,
       categoryId: categoryId,
       expirationDate: expirationDate ?? null, // ← nuevo
-    }
+      ...(supplierId !== undefined && { supplierId }),
+    },
+    include: withSupplier,
   });
 
   await logAudit(userId, "UPDATE", "Product", id, {
-    name, barcode, description, price, minStock, categoryId, expirationDate
+    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId
   });
 
   return updatedProduct;

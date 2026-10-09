@@ -10,6 +10,7 @@ export const productsSchemaCreate = z.object({
   minStock: z.number().nonnegative("El stock mínimo no puede ser negativo"),
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
+  supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
 });
 
 export const productsSchemaUpdate = z.object({
@@ -20,4 +21,5 @@ export const productsSchemaUpdate = z.object({
   minStock: z.number().nonnegative("El stock mínimo no puede ser negativo"),
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
+  supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
 });
