@@ -1,6 +1,7 @@
 // purchase-order.controller.ts
 import type { Request, Response } from "express";
 import * as service from "./purchase-order.service.js";
+import { emit, ADMINS, EVERYONE, REQUEST_TOPICS, STOCK_TOPICS } from "../../shared/realtime.ts";
 
 export async function createPurchaseOrderHandler(req: Request, res: Response) {
   try {
@@ -11,6 +12,7 @@ export async function createPurchaseOrderHandler(req: Request, res: Response) {
       items,
       fulfilledRequestIds
     );
+    emit(ADMINS, ["purchase-orders", ...REQUEST_TOPICS]);
     res.status(201).json(order);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -57,6 +59,7 @@ export async function receivePurchaseOrderHandler(
       return;
     }
     const order = await service.receivePurchaseOrder(id, req.user!.id);
+    emit(EVERYONE, ["purchase-orders", ...STOCK_TOPICS]);
     res.json(order);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

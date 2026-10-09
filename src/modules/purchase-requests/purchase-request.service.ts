@@ -42,7 +42,7 @@ export async function updatePurchaseRequestStatus(
   status: "APPROVED" | "REJECTED",
   userId:string
 ) {
-  const updatePurchaseRequestStatus = await prisma.purchaseRequest.update({
+  const updatedRequest = await prisma.purchaseRequest.update({
     where: { id },
     data: { status },
     include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
@@ -50,6 +50,7 @@ export async function updatePurchaseRequestStatus(
 
   const action = status === "APPROVED" ? "APPROVE" : "REJECT";
   await logAudit(userId, action, "PurchaseRequest", id);
+  return updatedRequest;
 }
 
 export async function getExpiringSoonRequests(daysAhead = 3) {

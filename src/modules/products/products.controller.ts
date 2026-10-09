@@ -9,6 +9,9 @@ import {
   getProductPriceHistory,
   getExpiringSoonProducts
 } from "./products.service.ts";
+import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
+
+const PRODUCT_TOPICS = [...STOCK_TOPICS, "product-price-history"];
 
 export async function CreateProductController(req: Request, res: Response) {
   try {
@@ -26,6 +29,7 @@ export async function CreateProductController(req: Request, res: Response) {
       expirationDate,
       supplierId
     );
+    emit(EVERYONE, PRODUCT_TOPICS);
     res.status(201).json(created);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -65,6 +69,7 @@ export async function updateProductController(req: Request, res: Response) {
     }
 
     const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id,expirationDate,supplierId);
+    emit(EVERYONE, PRODUCT_TOPICS);
     res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -79,6 +84,7 @@ export async function deleteProductController(req: Request, res: Response) {
     }
     
     const deleted = await deleteProduct(id,req.user!.id);
+    emit(EVERYONE, PRODUCT_TOPICS);
     res.status(200).json(deleted);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

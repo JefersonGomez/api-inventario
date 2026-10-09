@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { createMovement,getMovements } from "./movements.service.ts";
+import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
 
 export async function createMovementController(req: Request, res: Response) {
   try {
@@ -7,6 +8,7 @@ export async function createMovementController(req: Request, res: Response) {
     const userId = req.user!.id;
 
     const movement = await createMovement(productId, userId, type, quantity, reason);
+    emit(EVERYONE, STOCK_TOPICS);
     res.status(201).json(movement);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
