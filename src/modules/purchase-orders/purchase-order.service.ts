@@ -2,6 +2,7 @@
 import { prisma } from "../../config/database.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
+import { createNotifications } from "../notifications/notifications.persist.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -130,6 +131,22 @@ export async function receivePurchaseOrder(id: string, userId: string) {
       data: { status: "RECEIVED", receivedAt: new Date() },
       include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
     });
+
+    // quien pidió el producto se entera de que ya llegó (el admin que recibe no se avisa a sí mismo)
+    const fulfilled = await tx.purchaseRequest.findMany({
+      where: { purchaseOrderId: id, requestedById: { not: userId } },
+      include: { product: true },
+    });
+    await createNotifications(
+      fulfilled.map((r) => ({
+        userId: r.requestedById,
+        type: "orderReceived",
+        title: r.product.name,
+        meta: { quantity: r.quantity },
+        link: `/purchase-requests?highlight=${r.id}`,
+      })),
+      tx
+    );
 
     await logAudit(userId, "RECEIVE", "PurchaseOrder", id, undefined, tx);
 

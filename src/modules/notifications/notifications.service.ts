@@ -1,10 +1,11 @@
 import * as purchaseRequestService from "../purchase-requests/purchase-request.service.ts";
 import * as productService from "../products/products.service.ts";
 import * as reportsService from "../reports/report.service.ts";
+import { getUserNotifications } from "./notifications.persist.ts";
 
 // `type` + `title` + `meta` son lo que consume la campanita (agrupa por tipo y arma el detalle con i18n).
 // `message` se conserva como texto plano para quien no use los campos nuevos.
-export async function getNotifications() {
+async function getDerivedNotifications() {
 
     const [expiringSoonRequests, pendingRequests, approvedUnfulfilled, expiringSoonProducts, lowStockProducts] = await Promise.all([
         purchaseRequestService.getExpiringSoonRequests(3),
@@ -70,5 +71,31 @@ export async function getNotifications() {
     })),
   ];
 
-  return { total: notifications.length, notifications };
+  return notifications;
+}
+
+// ADMIN: avisos de estado calculados + sus eventos guardados. EMPLOYE: solo sus eventos guardados.
+// Los calculados no tienen estado de lectura (existen mientras el problema exista): siempre cuentan como no leídos.
+export async function getNotifications(user: { id: string; role: string }) {
+  const stored = (await getUserNotifications(user.id)).map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    meta: n.meta,
+    link: n.link,
+    createdAt: n.createdAt,
+    persisted: true as const,
+    read: n.readAt !== null,
+  }));
+  const derived =
+    user.role === "ADMIN"
+      ? (await getDerivedNotifications()).map((n) => ({ ...n, persisted: false as const, read: false }))
+      : [];
+
+  const notifications = [...derived, ...stored];
+  return {
+    total: notifications.length,
+    unread: notifications.filter((n) => !n.read).length,
+    notifications,
+  };
 }

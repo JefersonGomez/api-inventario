@@ -2,6 +2,7 @@
 import { prisma } from "../../config/database.ts";
 import type { Role } from "../../generated/prisma/enums.ts"; // ajustá el import a como lo tengas tú
 import { logAudit } from "../audit/audit.service.ts";
+import { createNotifications } from "../notifications/notifications.persist.ts";
 const DEFAULT_EXPIRY_DAYS = 7; 
 export async function createPurchaseRequest(
   productId: string,
@@ -42,15 +43,34 @@ export async function updatePurchaseRequestStatus(
   status: "APPROVED" | "REJECTED",
   userId:string
 ) {
-  const updatedRequest = await prisma.purchaseRequest.update({
-    where: { id },
-    data: { status },
-    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
-  });
-
   const action = status === "APPROVED" ? "APPROVE" : "REJECT";
-  await logAudit(userId, action, "PurchaseRequest", id);
-  return updatedRequest;
+
+  // cambio de estado + auditoría + aviso al autor: todo o nada
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.purchaseRequest.findUnique({ where: { id }, select: { status: true } });
+    const updatedRequest = await tx.purchaseRequest.update({
+      where: { id },
+      data: { status },
+      include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
+    });
+
+    // sin aviso si el estado no cambió (aprobar dos veces) o si el admin resolvió su propia solicitud
+    if (before?.status !== status && updatedRequest.requestedById !== userId) {
+      await createNotifications(
+        [{
+          userId: updatedRequest.requestedById,
+          type: status === "APPROVED" ? "requestApproved" : "requestRejected",
+          title: updatedRequest.product.name,
+          meta: { quantity: updatedRequest.quantity },
+          link: `/purchase-requests?highlight=${id}`,
+        }],
+        tx
+      );
+    }
+
+    await logAudit(userId, action, "PurchaseRequest", id, undefined, tx);
+    return updatedRequest;
+  });
 }
 
 export async function getExpiringSoonRequests(daysAhead = 3) {
