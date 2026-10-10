@@ -3,6 +3,8 @@ import { prisma } from "../../config/database.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
+import { sendEmail, escapeHtml } from "../../shared/email.ts";
+import { getCompany } from "../company/company.service.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -152,4 +154,53 @@ export async function receivePurchaseOrder(id: string, userId: string) {
 
     return received;
   });
+}
+const orderNumber = (id: string) => id.slice(0, 8).toUpperCase();
+
+// Manda la orden al email del proveedor. Se puede reenviar: emailedAt guarda el último envío.
+export async function sendPurchaseOrderEmail(id: string, userId: string) {
+  const order = await prisma.purchaseOrder.findUnique({
+    where: { id },
+    include: { supplier: true, createdBy: { select: { name: true } }, items: { include: { product: true } } },
+  });
+  if (!order) throw new Error("Orden de compra no encontrada");
+  if (!order.supplier.email) throw new Error("El proveedor no tiene email cargado");
+  const { name: company } = await getCompany();
+  if (!company) throw new Error("Configura el nombre de la empresa en Configuración antes de enviar");
+
+  const total = order.items.reduce((sum, i) => sum + i.quantity * Number(i.unitCost), 0);
+  const cell = 'style="padding:6px 10px;border-bottom:1px solid #e5e5e0"';
+  const rows = order.items
+    .map((i) => `<tr><td ${cell}>${escapeHtml(i.product.name)}</td><td ${cell} align="right">${i.quantity}</td>`
+      + `<td ${cell} align="right">${Number(i.unitCost).toFixed(2)}</td>`
+      + `<td ${cell} align="right">${(i.quantity * Number(i.unitCost)).toFixed(2)}</td></tr>`)
+    .join("");
+  const html = `<div style="font-family:Arial,sans-serif;color:#1a1a18;max-width:640px">
+  <h2 style="margin:0 0 4px">${escapeHtml(company)}</h2>
+  <p style="margin:0 0 16px;color:#6b6b66">Orden de compra N.º ${orderNumber(order.id)}</p>
+  <p>Hola ${escapeHtml(order.supplier.name)},</p>
+  <p>Les enviamos la siguiente orden de compra:</p>
+  <table style="border-collapse:collapse;width:100%;font-size:14px">
+    <thead><tr style="text-align:left;background:#f4f4ef">
+      <th ${cell}>Producto</th><th ${cell} align="right">Cantidad</th><th ${cell} align="right">Costo unitario</th><th ${cell} align="right">Subtotal</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="3" ${cell} align="right"><strong>Total</strong></td><td ${cell} align="right"><strong>${total.toFixed(2)}</strong></td></tr></tfoot>
+  </table>
+  <p style="margin-top:16px;color:#6b6b66;font-size:13px">Fecha: ${order.createdAt.toLocaleDateString("es")} · Creada por: ${escapeHtml(order.createdBy.name)}</p>
+</div>`;
+
+  const { testMode } = await sendEmail({
+    to: order.supplier.email,
+    subject: `Orden de compra ${orderNumber(order.id)} — ${company}`,
+    html,
+  });
+
+  const updated = await prisma.purchaseOrder.update({
+    where: { id },
+    data: { emailedAt: new Date() },
+    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+  });
+  await logAudit(userId, "EMAIL", "PurchaseOrder", id, { to: order.supplier.email, testMode });
+  return { order: updated, testMode };
 }

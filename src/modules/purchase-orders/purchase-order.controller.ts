@@ -65,3 +65,12 @@ export async function receivePurchaseOrderHandler(
     res.status(400).json({ error: (error as Error).message });
   }
 }
+export async function sendPurchaseOrderEmailHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    const result = await service.sendPurchaseOrderEmail(req.params.id, req.user!.id);
+    emit(ADMINS, ["purchase-orders"]);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}

@@ -131,6 +131,7 @@ model PurchaseOrder {
   status      PurchaseOrderStatus @default(PENDING)
   createdAt   DateTime            @default(now())
   receivedAt  DateTime?
+  emailedAt   DateTime? // último envío al proveedor
   supplier    Supplier            @relation(fields: [supplierId], references: [id])
   createdBy   User                @relation(fields: [createdById], references: [id])
   items       PurchaseOrderItem[]
@@ -200,4 +201,11 @@ model Comment {
 
   @@index([purchaseRequestId, createdAt])
   @@index([purchaseOrderId, createdAt])
+}
+
+// Datos de la empresa dueña de esta instalación (una instalación = una empresa). Fila única id = 1.
+model Company {
+  id        Int      @id @default(1)
+  name      String
+  updatedAt DateTime @updatedAt
 }

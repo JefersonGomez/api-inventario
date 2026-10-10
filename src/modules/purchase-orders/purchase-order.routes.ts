@@ -11,6 +11,7 @@ import {
   getAllPurchaseOrdersHandler,
   getPurchaseOrderByIdHandler,
   receivePurchaseOrderHandler,
+  sendPurchaseOrderEmailHandler,
 } from "./purchase-order.controller.js";
 
 export const purchaseOrderRouter = Router();
@@ -34,6 +35,9 @@ purchaseOrderRouter.patch(
   Authorize("ADMIN"),
   receivePurchaseOrderHandler
 );
+
+// envía (o reenvía) la orden al email del proveedor
+purchaseOrderRouter.post("/:id/send-email", Authenticated, Authorize("ADMIN"), sendPurchaseOrderEmailHandler);
 
 // hilo de comentarios de la orden: solo admins
 purchaseOrderRouter.get("/:id/comments", Authenticated, Authorize("ADMIN"), getCommentsHandler("order"));
