@@ -1,7 +1,7 @@
 // Flujo de compra completo + reglas de acceso de solicitudes, órdenes y comentarios
 import request from "supertest"
 import app from "../app.ts"
-import { prisma } from "../config/database.ts"
+import { prismaRoot as prisma } from "../config/database.ts"
 import { resetDb, createUser } from "../test/helpers.ts"
 
 describe("Flujo de compra", () => {
@@ -14,13 +14,14 @@ describe("Flujo de compra", () => {
   beforeAll(async () => {
     await resetDb()
     admin = await createUser("ADMIN")
-    employee = await createUser("EMPLOYE")
-    otherEmployee = await createUser("EMPLOYE")
-    const category = await prisma.category.create({ data: { name: "Cat flujo" } })
-    const supplier = await prisma.supplier.create({ data: { name: "Proveedor flujo", email: "prov@test.com" } })
+    employee = await createUser("EMPLOYE", admin.companyId)
+    otherEmployee = await createUser("EMPLOYE", admin.companyId)
+    const companyId = admin.companyId
+    const category = await prisma.category.create({ data: { name: "Cat flujo", companyId } })
+    const supplier = await prisma.supplier.create({ data: { name: "Proveedor flujo", email: "prov@test.com", companyId } })
     supplierId = supplier.id
     const product = await prisma.product.create({
-      data: { sku: "FLOW-1", name: "Producto flujo", price: 100, stock: 5, minStock: 2, categoryId: category.id, supplierId },
+      data: { companyId, sku: "FLOW-1", name: "Producto flujo", price: 100, stock: 5, minStock: 2, categoryId: category.id, supplierId },
     })
     productId = product.id
   })

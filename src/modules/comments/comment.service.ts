@@ -1,7 +1,8 @@
 // comment.service.ts
 // Hilo de comentarios de una solicitud (quien la pidió + admins) o de una orden (solo admins).
 // Sin edición ni borrado: el hilo es un registro de la conversación.
-import { prisma } from "../../config/database.ts";
+import { prisma, prismaRoot } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 
 export type ThreadKind = "request" | "order";
@@ -40,8 +41,11 @@ export async function addComment(kind: ThreadKind, id: string, user: Viewer, bod
   if (!thread) return null;
 
   // avisa a todos los que pueden ver el hilo menos al autor: admins activos + quien pidió la solicitud
-  const admins = await prisma.user.findMany({ where: { role: "ADMIN", isActive: true }, select: { id: true } });
-  const recipients = [...new Set([...admins.map((a) => a.id), ...(thread.ownerId ? [thread.ownerId] : [])])]
+  const admins = await prismaRoot.membership.findMany({
+    where: { companyId: currentCompanyId(), role: "ADMIN", isActive: true, user: { isActive: true } },
+    select: { userId: true },
+  });
+  const recipients = [...new Set([...admins.map((a) => a.userId), ...(thread.ownerId ? [thread.ownerId] : [])])]
     .filter((uid) => uid !== user.id);
 
   const comment = await prisma.$transaction(async (tx) => {

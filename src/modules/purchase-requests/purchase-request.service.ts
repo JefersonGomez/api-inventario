@@ -1,5 +1,6 @@
 // purchase-request.service.ts
 import { prisma } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
 import type { Role } from "../../generated/prisma/enums.ts"; // ajustá el import a como lo tengas tú
 import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
@@ -25,7 +26,7 @@ export async function createPurchaseRequest(
     new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
   return prisma.purchaseRequest.create({
-    data: { productId, requestedById, quantity, reason: reason ?? null, expiresAt: finalExpiresAt },
+    data: { companyId: currentCompanyId(), productId, requestedById, quantity, reason: reason ?? null, expiresAt: finalExpiresAt },
     include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
   });
 }

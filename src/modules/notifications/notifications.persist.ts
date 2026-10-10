@@ -1,6 +1,8 @@
 // Avisos guardados (eventos dirigidos a un usuario). Archivo aparte de notifications.service.ts
 // para que los servicios de solicitudes/órdenes puedan crearlos sin un import circular.
-import { prisma } from "../../config/database.ts";
+import { prisma, type Db } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
+
 import type { Prisma } from "../../generated/prisma/client.ts";
 
 export type NewNotification = {
@@ -14,11 +16,11 @@ export type NewNotification = {
 // Pasar `tx` cuando se llama dentro de una transacción: el aviso queda atómico con el cambio que lo origina.
 export async function createNotifications(
   items: NewNotification[],
-  client: Prisma.TransactionClient | typeof prisma = prisma
+  client: Db = prisma
 ) {
   if (items.length === 0) return;
   await client.notification.createMany({
-    data: items.map(({ meta, ...rest }) => ({ ...rest, ...(meta !== undefined && { meta }) })),
+    data: items.map(({ meta, ...rest }) => ({ ...rest, companyId: currentCompanyId(), ...(meta !== undefined && { meta }) })),
   });
 }
 

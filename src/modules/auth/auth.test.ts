@@ -9,7 +9,7 @@ describe("POST /auth/register", () => {
   })
 
   afterEach(async () => {
-    await prisma.user.deleteMany({ where: { email: "test@example.com" } })
+    await resetDb()
   })
 
   afterAll(async () => {
@@ -29,6 +29,9 @@ describe("POST /auth/register", () => {
     expect(response.status).toBe(201)
     expect(response.body.email).toBe("test@example.com")
     expect(response.body.passwordHash).toBeUndefined()
+    // registrarse crea su propia empresa y queda como ADMIN de ella
+    expect(response.body.role).toBe("ADMIN")
+    expect(response.body.companyId).toBeTruthy()
   })
 
   it("debería rechazar un registro con email ya existente", async () => {

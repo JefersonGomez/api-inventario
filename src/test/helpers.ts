@@ -1,7 +1,7 @@
 // Utilidades de tests. Corren contra DATABASE_URL de .env.test (cargado en jest.setup.ts).
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { prisma } from "../config/database.ts";
+import { prismaRoot } from "../config/database.ts";
 
 // Vacía todas las tablas. Se niega a correr si la URL no apunta a una base "_test":
 // un .env mal cargado nunca debe poder borrar la base real.
@@ -9,23 +9,28 @@ export async function resetDb() {
   if (!/_test(\?|$)/.test(process.env.DATABASE_URL ?? "")) {
     throw new Error("resetDb: DATABASE_URL no es una base de pruebas (_test)");
   }
-  const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+  const tables = await prismaRoot.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
   if (tables.length === 0) return;
-  await prisma.$executeRawUnsafe(
+  await prismaRoot.$executeRawUnsafe(
     `TRUNCATE ${tables.map((t) => `"${t.tablename}"`).join(", ")} RESTART IDENTITY CASCADE`
   );
 }
 
-// Crea un usuario y devuelve un token de acceso firmado igual que el login
-export async function createUser(role: "ADMIN" | "EMPLOYE", email = `${role.toLowerCase()}-${Date.now()}-${Math.random()}@test.com`) {
-  const user = await prisma.user.create({
-    data: { name: `${role} test`, email, role, passwordHash: await bcrypt.hash("123456", 4) },
+let seq = 0;
+
+// Crea un usuario dentro de una empresa y devuelve un token como el del login.
+// Sin `companyId` crea una empresa nueva de la que el usuario es dueño.
+export async function createUser(role: "ADMIN" | "EMPLOYE", companyId?: string) {
+  const user = await prismaRoot.user.create({
+    data: { name: `${role} test ${++seq}`, email: `user${seq}-${Date.now()}@test.com`, passwordHash: await bcrypt.hash("123456", 4) },
   });
+  const cid = companyId ?? (await prismaRoot.company.create({ data: { name: `Empresa ${seq}`, ownerId: user.id } })).id;
+  await prismaRoot.membership.create({ data: { userId: user.id, companyId: cid, role } });
   const token = jwt.sign(
-    { id: user.id, role: user.role },
+    { id: user.id, companyId: cid },
     process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo",
     { expiresIn: "15m" }
   );
-  return { user, token, auth: { Authorization: `Bearer ${token}` } };
+  return { user, companyId: cid, token, auth: { Authorization: `Bearer ${token}` } };
 }

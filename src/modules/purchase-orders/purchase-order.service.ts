@@ -1,5 +1,6 @@
 // purchase-order.service.ts
 import { prisma } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
@@ -56,6 +57,7 @@ export async function createPurchaseOrder(
   // ← clave: guardamos el resultado en una variable, SIN "return" todavía
   const order = await prisma.purchaseOrder.create({
     data: {
+      companyId: currentCompanyId(),
       supplierId,
       createdById,
       items: {

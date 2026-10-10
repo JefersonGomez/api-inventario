@@ -1,4 +1,5 @@
 import { prisma } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 export async function createCategory(name: string, description: string | undefined) {
   if (!name) {
@@ -15,6 +16,7 @@ export async function createCategory(name: string, description: string | undefin
 
   return await prisma.category.create({
     data: {
+      companyId: currentCompanyId(),
       name: name,
       description: description ?? null,
     },

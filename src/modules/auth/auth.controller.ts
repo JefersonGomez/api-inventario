@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Register, Login,refreshAccessToken,logout } from "./auth.service.ts";
+import { Register, Login, refreshAccessToken, logout, switchCompany } from "./auth.service.ts";
 
 export async function RegisterController(req: Request, res: Response) {
   try {
@@ -51,4 +51,11 @@ export async function logoutCotroller(req: Request, res: Response) {
 
 export async function meHandler(req: Request, res: Response) {
   res.json({ user: req.user });
+}
+export async function switchCompanyHandler(req: Request, res: Response) {
+  try {
+    res.json(await switchCompany(req.user!.id, req.body.companyId));
+  } catch (error) {
+    res.status(403).json({ error: (error as Error).message });
+  }
 }

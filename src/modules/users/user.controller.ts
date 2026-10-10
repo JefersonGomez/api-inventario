@@ -5,7 +5,7 @@ export async function getProfileController(req: Request, res: Response) {
   try {
     const userId = req.user!.id
     const profile = await getProfile(userId)
-    res.status(200).json(profile)
+    res.status(200).json({ ...profile, role: req.user!.role })
   } catch (error) {
     res.status(404).json({ error: (error as Error).message })
   }
@@ -20,7 +20,7 @@ export async function updateAvatarController(req: Request, res: Response) {
     }
 
     const updatedProfile = await updateAvatar(userId, req.file.filename)
-    res.status(200).json(updatedProfile)
+    res.status(200).json({ ...updatedProfile, role: req.user!.role })
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })
   }
@@ -44,7 +44,7 @@ export async function updateProfileController(req: Request, res: Response) {
     const { name, email } = req.body
 
     const updatedProfile = await updateProfile(userId, name, email)
-    res.status(200).json(updatedProfile)
+    res.status(200).json({ ...updatedProfile, role: req.user!.role })
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })
   }

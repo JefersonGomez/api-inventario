@@ -1,6 +1,7 @@
 export interface AuthPayload {
   id: string;
-  role: string;
+  companyId: string;
+  role: string; // rol del usuario EN esa empresa (sale de Membership, no del token)
 }
 
 declare global {

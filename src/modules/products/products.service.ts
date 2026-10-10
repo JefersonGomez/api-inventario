@@ -1,5 +1,7 @@
 import { prisma } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
+import { getCompany } from "../company/company.service.ts";
 // null = sin proveedor; undefined = no tocar
 async function assertSupplierExists(supplierId: string | null | undefined) {
   if (!supplierId) return;
@@ -22,6 +24,10 @@ export async function createProduct(
   supplierId?: string | null
 ) {
   await assertSupplierExists(supplierId);
+  const { maxProducts } = (await getCompany()).limits;
+  if (maxProducts !== null && (await prisma.product.count({ where: { deletedAt: null } })) >= maxProducts) {
+    throw new Error(`Tu plan permite ${maxProducts} productos. Mejora tu plan para agregar más.`);
+  }
   const existProduct = await prisma.product.findFirst({
     where: { sku: sku, deletedAt: null },
   });
@@ -40,6 +46,7 @@ export async function createProduct(
 
   const newProduct = await prisma.product.create({
     data: {
+      companyId: currentCompanyId(),
       sku: sku,
       barcode: barcode || null,
       name: name,

@@ -1,4 +1,5 @@
 import { prisma } from "../../config/database.ts"
+import { currentCompanyId } from "../../shared/tenant.ts";
 
 export async function createSupplier(
   name: string,
@@ -6,7 +7,7 @@ export async function createSupplier(
   phone: string | undefined,
   address: string | undefined
 ) {
-  const existingSupplier = await prisma.supplier.findUnique({ where: { name } })
+  const existingSupplier = await prisma.supplier.findFirst({ where: { name } })
 
   if (existingSupplier) {
     throw new Error("El proveedor ya existe en el sistema")
@@ -14,6 +15,7 @@ export async function createSupplier(
 
   const newSupplier = await prisma.supplier.create({
     data: {
+      companyId: currentCompanyId(),
       name,
       email: email ?? null,
       phone: phone ?? null,

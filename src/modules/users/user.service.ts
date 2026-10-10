@@ -1,24 +1,15 @@
-import { prisma } from "../../config/database.js";
-import type { User } from "../../generated/prisma/client.ts";
+import { prismaRoot as prisma } from "../../config/database.ts";
 import bcrypt from "bcrypt"
 // Tipo de retorno para el perfil (sin passwordHash)
-type ProfileData = Omit<User, "passwordHash">;
+// el rol es por empresa: lo agrega el controller desde req.user
+const profileSelect = {
+  id: true, name: true, email: true, avatarUrl: true, phone: true, company: true, isActive: true, createdAt: true,
+} as const;
 
-export async function getProfile(userId: string): Promise<ProfileData> {
+export async function getProfile(userId: string) {
     const profile = await prisma.user.findUnique({
         where: { id: userId },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            avatarUrl: true,
-            phone: true,
-            company: true,
-            isActive: true,
-            createdAt: true,
-
-        }
+        select: profileSelect
     });
 
     if (!profile) {
@@ -28,7 +19,7 @@ export async function getProfile(userId: string): Promise<ProfileData> {
     return profile;
 }
 
-export async function updateAvatar(userId: string, filename: string): Promise<ProfileData> {
+export async function updateAvatar(userId: string, filename: string) {
     const userExists = await prisma.user.findUnique({
         where: { id: userId }
     });
@@ -42,17 +33,7 @@ export async function updateAvatar(userId: string, filename: string): Promise<Pr
     const updatedUser = await prisma.user.update({
         where: { id: userId },
         data: { avatarUrl },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            avatarUrl: true,
-            phone: true,
-            company: true,
-            isActive: true,
-            createdAt: true,
-        }
+        select: profileSelect
     });
 
     return updatedUser;
@@ -92,13 +73,7 @@ export async function updateProfile(userId: string, name: string, email: string)
   const updatedUser = await prisma.user.update({
     where: { id: userId },
     data: { name, email },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      avatarUrl: true,
-    },
+    select: profileSelect,
   })
 
   return updatedUser

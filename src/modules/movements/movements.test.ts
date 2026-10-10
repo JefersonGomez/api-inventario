@@ -1,43 +1,26 @@
 import request from "supertest"
-import bcrypt from "bcrypt"
 import app from "../../app.ts"
-import { resetDb } from "../../test/helpers.ts"
-import { prisma } from "../../config/database.ts"
+import { resetDb, createUser } from "../../test/helpers.ts"
+import { prismaRoot as prisma } from "../../config/database.ts"
 
 describe("POST /movements", () => {
-  const adminEmail = "movements-admin@example.com"
-  const adminPassword = "123456"
-
   let token: string
   let categoryId: string
   let productId: string
 
   beforeAll(async () => {
     await resetDb()
-    // Creamos un admin directo con Prisma (el registro público solo crea EMPLOYEE)
-    const passwordHash = await bcrypt.hash(adminPassword, 10)
-    await prisma.user.create({
-      data: {
-        name: "Movements Admin",
-        email: adminEmail,
-        passwordHash,
-        role: "ADMIN"
-      }
-    })
-
-    const loginResponse = await request(app).post("/auth/login").send({
-      email: adminEmail,
-      password: adminPassword
-    })
-    token = loginResponse.body.token
+    const admin = await createUser("ADMIN")
+    token = admin.token
 
     const category = await prisma.category.create({
-      data: { name: "Categoria Test Movements" }
+      data: { name: "Categoria Test Movements", companyId: admin.companyId }
     })
     categoryId = category.id
 
     const product = await prisma.product.create({
       data: {
+        companyId: admin.companyId,
         sku: "TEST-MOV-001",
         name: "Producto Test Movements",
         price: 10.0,

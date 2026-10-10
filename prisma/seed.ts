@@ -1,33 +1,24 @@
-import { prisma } from "../src/config/database.ts"
+// Crea el primer admin con su empresa si la base está vacía. Corre con tsx, fuera de server.ts.
+import "dotenv/config"
+import { prismaRoot as prisma } from "../src/config/database.ts"
 import bcrypt from "bcrypt"
 
 async function main() {
   try {
-    const existingAdmin = await prisma.user.findFirst({
-      where: { role: "ADMIN" }
-    })
-
-    if (existingAdmin) {
-      console.log("El admin ya existe, no se creó nada")
+    if (await prisma.user.count() > 0) {
+      console.log("Ya hay usuarios, no se creó nada")
       return
     }
-
-    const passwordHashed = await bcrypt.hash(process.env.ADMIN_INITIAL_PASSWORD!, 10)
-
-    const admin = await prisma.user.create({
-      data: {
-        name: "Admin",
-        email: "admin@gmail.com",
-        passwordHash: passwordHashed,
-        role: "ADMIN",
-        avatarUrl: "avatars/default.png",
-      }
+    const passwordHash = await bcrypt.hash(process.env.ADMIN_INITIAL_PASSWORD!, 10)
+    await prisma.$transaction(async (tx) => {
+      const admin = await tx.user.create({
+        data: { name: "Admin", email: "admin@gmail.com", passwordHash },
+      })
+      const company = await tx.company.create({ data: { name: "Mi empresa", ownerId: admin.id } })
+      await tx.membership.create({ data: { userId: admin.id, companyId: company.id, role: "ADMIN" } })
+      await tx.user.update({ where: { id: admin.id }, data: { lastCompanyId: company.id } })
     })
-
-    if (admin) {
-      console.log("Admin creado correctamente")
-    }
-
+    console.log("Admin y empresa creados correctamente")
   } catch (error) {
     console.error(error)
   } finally {

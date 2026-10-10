@@ -15,6 +15,13 @@ enum Role {
   EMPLOYE
 }
 
+// Plan de la cuenta del dueño; los límites viven en src/config/plans.ts
+enum PlanCode {
+  BASIC
+  PRO
+  BUSINESS
+}
+
 enum MovementType {
   IN
   OUT
@@ -34,68 +41,85 @@ enum PurchaseOrderStatus {
 }
 
 model User {
-  id           String          @id @default(uuid())
-  name         String
-  email        String          @unique
-  passwordHash String
-  role         Role            @default(EMPLOYE)
-  createdAt    DateTime        @default(now()) // Corregido: createAt -> createdAt
-  avatarUrl    String?
-  phone        String?
-  company      String?
-  isActive     Boolean         @default(true)
-  movements    StockMovement[]
+  id               String            @id @default(uuid())
+  name             String
+  email            String            @unique
+  passwordHash     String
+  createdAt        DateTime          @default(now()) // Corregido: createAt -> createdAt
+  avatarUrl        String?
+  phone            String?
+  company          String?
+  isActive         Boolean           @default(true) // cuenta suspendida a nivel plataforma
+  plan             PlanCode          @default(BASIC)
+  lastCompanyId    String? // empresa que se abre al iniciar sesión
+  memberships      Membership[]
+  ownedCompanies   Company[]         @relation("CompanyOwner")
+  movements        StockMovement[]
   purchaseRequests PurchaseRequest[]
   purchaseOrders   PurchaseOrder[]
-  auditLogs AuditLog[]
-  refreshTokens RefreshToken[]
-  notifications Notification[]
-  comments Comment[]
+  auditLogs        AuditLog[]
+  refreshTokens    RefreshToken[]
+  notifications    Notification[]
+  comments         Comment[]
 }
 
 model Category {
   id          String    @id @default(uuid())
-  name        String    
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id])
+  name        String
   description String?
-  deletedAt    DateTime?
+  deletedAt   DateTime?
   products    Product[]
+
+  @@index([companyId])
 }
 
 model Supplier {
   id             String          @id @default(uuid())
-  name           String          @unique
+  companyId      String
+  company        Company         @relation(fields: [companyId], references: [id])
+  name           String
   email          String?
   phone          String?
   address        String?
   createdAt      DateTime        @default(now())
   products       Product[]
   purchaseOrders PurchaseOrder[]
+
+  @@unique([companyId, name])
 }
 
 model Product {
-  id                   String              @id @default(uuid())
-  sku                  String              
-  barcode              String?             
-  name                 String
-  description          String?
-  price                Decimal             @db.Decimal(10, 2)
-  stock                Int                 @default(0)
-  minStock             Int                 @default(0)
-  categoryId           String
-  supplierId           String?
-  deletedAt            DateTime?
-  expirationDate     DateTime? 
-  category             Category            @relation(fields: [categoryId], references: [id])
-  supplier             Supplier?           @relation(fields: [supplierId], references: [id])
-  movements            StockMovement[]
-  purchaseOrderItems   PurchaseOrderItem[]
-  purchaseRequests     PurchaseRequest[]
-  createdAt            DateTime            @default(now()) // Corregido: createAt -> createdAt
-  updatedAt            DateTime            @updatedAt      // Corregido: updateAt -> updatedAt
+  id                 String              @id @default(uuid())
+  companyId          String
+  company            Company             @relation(fields: [companyId], references: [id])
+  sku                String
+  barcode            String?
+  name               String
+  description        String?
+  price              Decimal             @db.Decimal(10, 2)
+  stock              Int                 @default(0)
+  minStock           Int                 @default(0)
+  categoryId         String
+  supplierId         String?
+  deletedAt          DateTime?
+  expirationDate     DateTime?
+  category           Category            @relation(fields: [categoryId], references: [id])
+  supplier           Supplier?           @relation(fields: [supplierId], references: [id])
+  movements          StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  purchaseRequests   PurchaseRequest[]
+  createdAt          DateTime            @default(now()) // Corregido: createAt -> createdAt
+  updatedAt          DateTime            @updatedAt // Corregido: updateAt -> updatedAt
+
+  @@index([companyId])
 }
 
 model StockMovement {
   id        String       @id @default(uuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id])
   productId String
   userId    String
   type      MovementType
@@ -104,39 +128,48 @@ model StockMovement {
   createdAt DateTime     @default(now())
   product   Product      @relation(fields: [productId], references: [id])
   user      User         @relation(fields: [userId], references: [id])
+
+  @@index([companyId])
 }
 
 model PurchaseRequest {
-  id            String                @id @default(uuid())
-  productId     String
-  requestedById String
-  quantity      Int
-  reason        String?
-  status        PurchaseRequestStatus @default(PENDING)
+  id              String                @id @default(uuid())
+  companyId       String
+  company         Company               @relation(fields: [companyId], references: [id])
+  productId       String
+  requestedById   String
+  quantity        Int
+  reason          String?
+  status          PurchaseRequestStatus @default(PENDING)
   expiresAt       DateTime?
-  purchaseOrderId String? 
+  purchaseOrderId String?
   rejectionReason String?
-  createdAt     DateTime              @default(now())
-  product       Product               @relation(fields: [productId], references: [id])
-  requestedBy   User                  @relation(fields: [requestedById], references: [id])
+  createdAt       DateTime              @default(now())
+  product         Product               @relation(fields: [productId], references: [id])
+  requestedBy     User                  @relation(fields: [requestedById], references: [id])
   purchaseOrder   PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
   comments        Comment[]
 
+  @@index([companyId])
 }
 
 model PurchaseOrder {
-  id          String              @id @default(uuid())
-  supplierId  String
-  createdById String
-  status      PurchaseOrderStatus @default(PENDING)
-  createdAt   DateTime            @default(now())
-  receivedAt  DateTime?
-  emailedAt   DateTime? // último envío al proveedor
-  supplier    Supplier            @relation(fields: [supplierId], references: [id])
-  createdBy   User                @relation(fields: [createdById], references: [id])
-  items       PurchaseOrderItem[]
-  fulfilledRequests PurchaseRequest[] 
-  comments    Comment[]
+  id                String              @id @default(uuid())
+  companyId         String
+  company           Company             @relation(fields: [companyId], references: [id])
+  supplierId        String
+  createdById       String
+  status            PurchaseOrderStatus @default(PENDING)
+  createdAt         DateTime            @default(now())
+  receivedAt        DateTime?
+  emailedAt         DateTime? // último envío al proveedor
+  supplier          Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy         User                @relation(fields: [createdById], references: [id])
+  items             PurchaseOrderItem[]
+  fulfilledRequests PurchaseRequest[]
+  comments          Comment[]
+
+  @@index([companyId])
 }
 
 model PurchaseOrderItem {
@@ -147,34 +180,40 @@ model PurchaseOrderItem {
   unitCost        Decimal       @db.Decimal(10, 2)
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product         Product       @relation(fields: [productId], references: [id])
-  
 }
 
-model AuditLog{
-  id String @id @default(uuid())
-  userId String
-  action String
+model AuditLog {
+  id         String   @id @default(uuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  userId     String
+  action     String
   entityType String
-  entityId String
-  changes Json?
-  createdAt DateTime @default(now())
-  user User @relation(fields: [userId], references: [id])
+  entityId   String
+  changes    Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([companyId, createdAt])
 }
 
 model RefreshToken {
-  id String @id @default(uuid())
-  userId String
+  id        String   @id @default(uuid())
+  userId    String
   tokenHash String
   expiresAt DateTime
-  revoked Boolean @default(false)
+  revoked   Boolean  @default(false)
+  companyId String? // empresa de la sesión: refrescar no la cambia
   createdAt DateTime @default(now())
-  User User  @relation(fields: [userId], references: [id])
+  User      User     @relation(fields: [userId], references: [id])
 }
 
 // Eventos dirigidos a un usuario ("tu solicitud fue aprobada"). Los avisos de estado
 // (stock bajo, por vencer...) no se guardan: se calculan en notifications.service.ts.
 model Notification {
   id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id])
   userId    String
   type      String
   title     String
@@ -184,7 +223,7 @@ model Notification {
   createdAt DateTime  @default(now())
   user      User      @relation(fields: [userId], references: [id])
 
-  @@index([userId, createdAt])
+  @@index([userId, companyId, createdAt])
 }
 
 // Hilo de comentarios de una solicitud o de una orden: exactamente uno de los dos ids va con valor
@@ -203,9 +242,39 @@ model Comment {
   @@index([purchaseOrderId, createdAt])
 }
 
-// Datos de la empresa dueña de esta instalación (una instalación = una empresa). Fila única id = 1.
+// Empresa (tenant). Todo dato de negocio pertenece a una; los usuarios entran por Membership.
+// El plan del dueño (owner.plan) define cuántas empresas puede tener y sus límites.
 model Company {
-  id        Int      @id @default(1)
-  name      String
-  updatedAt DateTime @updatedAt
+  id               String            @id @default(uuid())
+  name             String
+  ownerId          String
+  owner            User              @relation("CompanyOwner", fields: [ownerId], references: [id])
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  memberships      Membership[]
+  categories       Category[]
+  suppliers        Supplier[]
+  products         Product[]
+  movements        StockMovement[]
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+
+  @@index([ownerId])
+}
+
+// Usuario dentro de una empresa: su rol y si está activo ahí (un usuario puede estar en varias)
+model Membership {
+  id        String   @id @default(uuid())
+  userId    String
+  companyId String
+  role      Role     @default(EMPLOYE)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  company   Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([userId, companyId])
+  @@index([companyId])
 }

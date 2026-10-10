@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "2.0.0"
+  version: "3.0.0"
   description: |
     API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
@@ -11,8 +11,14 @@ info:
     `refreshToken` (rotativo). Enviar el token como `Authorization: Bearer <token>`; cuando vence,
     pedir uno nuevo con `POST /auth/refresh`.
 
-    **Roles**: `ADMIN` y `EMPLOYE` (sin la segunda E). Cada ruta indica qué rol necesita;
-    sin el rol correcto la respuesta es 403.
+    **Multi-empresa**: cada dato pertenece a una empresa. El token lleva la empresa activa
+    (`{ id, companyId }`) y todo se filtra por ella; un usuario puede estar en varias empresas
+    (con un rol distinto en cada una) y cambia con `POST /auth/switch-company`.
+
+    **Roles**: `ADMIN` y `EMPLOYE` (sin la segunda E), **por empresa** (se leen de la membresía en
+    cada petición). Cada ruta indica qué rol necesita; sin el rol correcto la respuesta es 403.
+
+    **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas, usuarios y productos.
 
     **Tiempo real**: además de esta API, el servidor expone Socket.IO en el mismo puerto
     (auth: `{ token }` en el handshake). Solo emite el evento `invalidate` con una lista de
@@ -113,19 +119,42 @@ components:
         isActive: { type: boolean }
         createdAt: { type: string, format: date-time }
 
+    CompanyAccess:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        isOwner: { type: boolean }
+
     AuthResponse:
       type: object
       properties:
-        token: { type: string, description: JWT de acceso }
+        token: { type: string, description: "JWT de acceso con { id, companyId }" }
         refreshToken: { type: string }
-        user: { $ref: '#/components/schemas/User' }
+        user:
+          allOf: [{ $ref: '#/components/schemas/User' }]
+          description: "`role` = rol en la empresa activa"
+        company: { $ref: '#/components/schemas/CompanyAccess' }
+        companies:
+          type: array
+          items: { $ref: '#/components/schemas/CompanyAccess' }
 
     Company:
       type: object
       properties:
-        id: { type: integer, example: 1 }
-        name: { type: string, nullable: true, description: "null si el admin todavía no lo configuró" }
-        updatedAt: { type: string, format: date-time, nullable: true }
+        id: { type: string, format: uuid }
+        name: { type: string }
+        ownerId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        plan: { type: string, enum: [BASIC, PRO, BUSINESS], description: Plan del dueño }
+        limits:
+          type: object
+          properties:
+            maxCompanies: { type: integer }
+            maxUsersPerCompany: { type: integer, nullable: true }
+            maxProducts: { type: integer, nullable: true, description: null = sin límite }
 
     Category:
       type: object
@@ -406,7 +435,8 @@ paths:
   /auth/register:
     post:
       tags: [Auth]
-      summary: Crear cuenta (rol EMPLOYE)
+      summary: Crear cuenta + su primera empresa (queda como ADMIN y dueño)
+      description: Los empleados no se registran solos; el admin de cada empresa los agrega. `company` = nombre de la empresa.
       security: []
       requestBody:
         required: true
@@ -496,6 +526,28 @@ paths:
       responses:
         '204': { description: Sesión cerrada }
 
+  /auth/switch-company:
+    post:
+      tags: [Auth]
+      summary: Cambiar la empresa activa
+      description: Devuelve tokens nuevos para esa empresa. 403 si el usuario no está activo en ella.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [companyId]
+              properties:
+                companyId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Nueva sesión
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /auth/me:
     get:
       tags: [Auth]
@@ -512,7 +564,7 @@ paths:
                     type: object
                     properties:
                       id: { type: string, format: uuid }
-                      email: { type: string }
+                      companyId: { type: string, format: uuid }
                       role: { $ref: '#/components/schemas/Role' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
@@ -595,7 +647,7 @@ paths:
   /users:
     get:
       tags: [Usuarios]
-      summary: Listar usuarios (ADMIN)
+      summary: Usuarios de la empresa activa (ADMIN)
       responses:
         '200':
           description: Usuarios
@@ -610,8 +662,8 @@ paths:
   /users/{id}/toggle-active:
     patch:
       tags: [Usuarios]
-      summary: Activar / desactivar un usuario (ADMIN)
-      description: Un usuario desactivado no puede iniciar sesión ni conectarse al socket.
+      summary: Activar / desactivar un usuario en la empresa activa (ADMIN)
+      description: Corta su acceso a esta empresa al instante (sus otras empresas no cambian). No se puede desactivar al dueño ni a uno mismo.
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '200':
@@ -626,8 +678,7 @@ paths:
   /company:
     get:
       tags: [Empresa]
-      summary: Datos de la empresa de esta instalación
-      description: Una instalación = una empresa. Fila única con id 1.
+      summary: Empresa activa (con plan y límites)
       responses:
         '200':
           description: Empresa
@@ -655,6 +706,39 @@ paths:
               schema: { $ref: '#/components/schemas/Company' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /companies:
+    get:
+      tags: [Empresa]
+      summary: Empresas en las que estoy activo
+      responses:
+        '200':
+          description: Empresas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CompanyAccess' }
+    post:
+      tags: [Empresa]
+      summary: Crear otra empresa (quedo como dueño y ADMIN)
+      description: Límite = `maxCompanies` del plan. Para entrar a ella, `POST /auth/switch-company`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201':
+          description: Empresa creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompanyAccess' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   # ---------------------------------------------------------------- Categorías
   /categories:
@@ -740,6 +824,7 @@ paths:
     post:
       tags: [Productos]
       summary: Crear producto (ADMIN)
+      description: Falla con 400 si se alcanzó `maxProducts` del plan.
       requestBody:
         required: true
         content:

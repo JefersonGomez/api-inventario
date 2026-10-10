@@ -27,7 +27,7 @@ export async function getMovementsReport(from?: string, to?: string) {
     include: {
       product: true,
       user: {
-        select: { id: true, name: true, email: true, role: true }
+        select: { id: true, name: true, email: true }
       }
     },
     orderBy: { createdAt: "desc" }

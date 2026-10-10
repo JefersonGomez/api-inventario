@@ -1,5 +1,7 @@
 // src/modules/audit/audit.service.ts
-import { prisma } from "../../config/database.ts";
+import { prisma, type Db } from "../../config/database.ts";
+import { currentCompanyId } from "../../shared/tenant.ts";
+
 import type { Prisma } from "../../generated/prisma/client.ts"; // ajustá el path si es distinto
 
 type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE"  | "ACTIVATE" | "DEACTIVATE" | "EMAIL";
@@ -10,11 +12,12 @@ export async function logAudit(
   entityType: string,
   entityId: string,
   changes?: Prisma.InputJsonValue, // ← cambio 1: tipo correcto de Prisma, no Record<string, unknown>
-  client: Prisma.TransactionClient | typeof prisma= prisma
+  client: Db = prisma
 ) {
   try {
    await client.auditLog.create({
       data: {
+        companyId: currentCompanyId(),
         userId,
         action,
         entityType,

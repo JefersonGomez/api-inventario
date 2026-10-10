@@ -17,3 +17,19 @@ export async function updateCompanyHandler(req: Request, res: Response) {
     res.status(400).json({ error: (error as Error).message });
   }
 }
+
+export async function listMyCompaniesHandler(req: Request, res: Response) {
+  try {
+    res.json(await service.listMyCompanies(req.user!.id));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+export async function createCompanyHandler(req: Request, res: Response) {
+  try {
+    res.status(201).json(await service.createCompany(req.user!.id, req.body.name));
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}

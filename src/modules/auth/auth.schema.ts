@@ -8,6 +8,10 @@ export const registerSchema = z.object({
   company: z.string().trim().max(120).optional()
 })
 
+export const switchCompanySchema = z.object({
+  companyId: z.uuid(),
+})
+
 export const loginSchema = z.object({
   email: z.email("Email inválido"),
   password: z.string().min(6, "La contraseña debe de tener al menos 6 caracteres")

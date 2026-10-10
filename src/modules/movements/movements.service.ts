@@ -1,4 +1,5 @@
-import { prisma } from "../../config/database.ts"
+import { prisma, type Db } from "../../config/database.ts"
+import { currentCompanyId } from "../../shared/tenant.ts"
 import type { MovementType } from "../../generated/prisma/enums.ts";
 import type { Prisma } from "../../generated/prisma/client.ts";
 export async function createMovement(
@@ -7,7 +8,7 @@ export async function createMovement(
   type: MovementType,
   quantity: number,
   reason: string | undefined,
-  client: Prisma.TransactionClient | typeof prisma = prisma // ← nuevo parámetro opcional
+  client: Db = prisma
 ) {
   const existProduct = await client.product.findFirst({
     where: { id: productId, deletedAt: null } // ← nuevo
@@ -45,7 +46,7 @@ export async function createMovement(
   if (client === prisma) {
     const result = await prisma.$transaction([
       prisma.stockMovement.create({
-        data: { productId, userId, type, quantity, reason: reason ?? null }
+        data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null }
       }),
       prisma.product.update({
         where: { id: productId },
@@ -58,7 +59,7 @@ export async function createMovement(
   // cuando viene un `tx` de afuera, ya estamos DENTRO de una transacción
   // más grande — no envolvemos de nuevo, solo ejecutamos secuencial
   const movement = await client.stockMovement.create({
-    data: { productId, userId, type, quantity, reason: reason ?? null }
+    data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null }
   });
   await client.product.update({
     where: { id: productId },
@@ -77,7 +78,7 @@ export async function getMovements(productId?: string) {
     include: {
       product: true,
       user: {
-        select: { id: true, name: true, email: true, role: true }
+        select: { id: true, name: true, email: true }
       }
     },
     orderBy: { createdAt: "desc" } // Asegúrate de que en tu schema se llame createdAt

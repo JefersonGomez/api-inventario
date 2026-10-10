@@ -1,9 +1,9 @@
 import { Server } from "socket.io";
 import type { Server as HttpServer } from "node:http";
 import jwt from "jsonwebtoken";
-import { prisma } from "../config/database.ts";
+import { prismaRoot } from "../config/database.ts";
 import { corsOrigins } from "../config/cors.ts";
-import type { AuthPayload } from "../types/express.d.ts";
+import { currentCompanyIdOrNull } from "./tenant.ts";
 
 // El socket no transporta datos: solo avisa "esto cambió" y el cliente vuelve a pedirlo por la API normal.
 // Los topics son las raíces de las queryKey de react-query del frontend.
@@ -12,6 +12,7 @@ let io: Server | null = null;
 export const ADMINS = "role:ADMIN";
 export const EVERYONE = ["role:ADMIN", "role:EMPLOYE"];
 export const userRoom = (id: string) => `user:${id}`;
+const companyRoom = (companyId: string, room: string) => `company:${companyId}:${room}`;
 
 // lo que cambia cuando se mueve el stock o el catálogo
 export const STOCK_TOPICS = [
@@ -31,10 +32,14 @@ export function initRealtime(httpServer: HttpServer) {
     try {
       const token = socket.handshake.auth?.token;
       const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
-      const payload = jwt.verify(token, clave) as AuthPayload;
-      const user = await prisma.user.findUnique({ where: { id: payload.id } });
-      if (!user || !user.isActive) return next(new Error("unauthorized"));
-      socket.data.user = { id: user.id, role: user.role };
+      const payload = jwt.verify(token, clave) as { id?: string; companyId?: string };
+      if (!payload.id || !payload.companyId) return next(new Error("unauthorized"));
+      const membership = await prismaRoot.membership.findUnique({
+        where: { userId_companyId: { userId: payload.id, companyId: payload.companyId } },
+        include: { user: { select: { isActive: true } } },
+      });
+      if (!membership?.isActive || !membership.user.isActive) return next(new Error("unauthorized"));
+      socket.data.user = { id: payload.id, role: membership.role, companyId: payload.companyId };
       next();
     } catch {
       next(new Error("unauthorized"));
@@ -42,15 +47,21 @@ export function initRealtime(httpServer: HttpServer) {
   });
 
   io.on("connection", (socket) => {
-    const { id, role } = socket.data.user;
-    socket.join([`role:${role}`, userRoom(id)]);
+    const { id, role, companyId } = socket.data.user;
+    socket.join([companyRoom(companyId, `role:${role}`), userRoom(id)]);
   });
 }
 
 // Nunca debe romper la petición que lo llama: si el socket falla, la API sigue respondiendo.
+// Las salas por rol ("role:ADMIN") son por empresa: se traducen a la empresa activa de la
+// petición. Sin empresa activa no se avisa a ningún rol (nunca a todas las empresas).
 export function emit(rooms: string | string[], topics: string[]) {
   try {
-    io?.to(rooms).emit("invalidate", topics);
+    const companyId = currentCompanyIdOrNull();
+    const targets = (Array.isArray(rooms) ? rooms : [rooms]).flatMap((r) =>
+      r.startsWith("role:") ? (companyId ? [companyRoom(companyId, r)] : []) : [r]
+    );
+    if (targets.length > 0) io?.to(targets).emit("invalidate", topics);
   } catch (error) {
     console.error("realtime emit falló:", error);
   }
