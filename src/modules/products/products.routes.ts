@@ -10,6 +10,8 @@ export const router = Router()
 router.post("/",validate(productsSchemaCreate),Authenticated, Authorize("ADMIN"),CreateProductController)
 router.get("/",Authenticated,getAllProductsController)
 
+// rutas fijas antes de "/:id", o Express las toma como un id
+router.get("/expiring-soon", Authenticated, getExpiringSoonProductsHandler);
 router.get("/barcode/:code", Authenticated, getProductByBarcodeController);
 
 
@@ -18,4 +20,3 @@ router.put("/:id",validate(productsSchemaUpdate),Authenticated, Authorize("ADMIN
 router.delete("/:id",Authenticated, Authorize("ADMIN"),deleteProductController)
 
 router.get("/:id/price-history", Authenticated, getProductPriceHistoryHandler);
-router.get("/expiring-soon", Authenticated, getExpiringSoonProductsHandler);

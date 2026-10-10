@@ -1,10 +1,45 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "1.0.0"
-  description: "API REST para gestión de inventario: autenticación con roles, productos, categorías, movimientos de stock y reportes."
+  version: "2.0.0"
+  description: |
+    API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
+    proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
+    comentarios, asistente IA y datos de la empresa.
+
+    **Autenticación**: `POST /auth/login` devuelve un `token` (JWT de acceso, corto) y un
+    `refreshToken` (rotativo). Enviar el token como `Authorization: Bearer <token>`; cuando vence,
+    pedir uno nuevo con `POST /auth/refresh`.
+
+    **Roles**: `ADMIN` y `EMPLOYE` (sin la segunda E). Cada ruta indica qué rol necesita;
+    sin el rol correcto la respuesta es 403.
+
+    **Tiempo real**: además de esta API, el servidor expone Socket.IO en el mismo puerto
+    (auth: `{ token }` en el handshake). Solo emite el evento `invalidate` con una lista de
+    *topics* (p. ej. `["purchase-requests","notifications"]`) para que el cliente vuelva a pedir esos datos.
 servers:
   - url: http://localhost:3000
+
+tags:
+  - name: Auth
+  - name: Perfil
+  - name: Usuarios
+  - name: Empresa
+  - name: Categorías
+  - name: Productos
+  - name: Movimientos
+  - name: Proveedores
+  - name: Solicitudes de compra
+  - name: Órdenes de compra
+  - name: Comentarios
+  - name: Notificaciones
+  - name: Reportes
+  - name: Auditoría
+  - name: Asistente
+  - name: Sistema
+
+security:
+  - bearerAuth: []
 
 components:
   securitySchemes:
@@ -13,541 +48,1378 @@ components:
       scheme: bearer
       bearerFormat: JWT
 
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: Datos inválidos (validación Zod o regla de negocio)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Falta el token o es inválido / vencido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Autenticado pero sin el rol necesario
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No existe (o el usuario no tiene acceso a ese recurso)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
   schemas:
+    Error:
+      type: object
+      description: "`error` puede ser un texto o la lista de issues de Zod"
+      properties:
+        error:
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: object }
+        message: { type: string }
+
+    Role:
+      type: string
+      enum: [ADMIN, EMPLOYE]
+
+    UserSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        avatarUrl: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        company: { type: string, nullable: true }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    AuthResponse:
+      type: object
+      properties:
+        token: { type: string, description: JWT de acceso }
+        refreshToken: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+
+    Company:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        name: { type: string, nullable: true, description: "null si el admin todavía no lo configuró" }
+        updatedAt: { type: string, format: date-time, nullable: true }
+
     Category:
       type: object
       properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
 
     CategoryInput:
       type: object
-      required:
-        - name
+      required: [name]
       properties:
-        name:
-          type: string
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+
+    SupplierSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+
+    Supplier:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    SupplierInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        email: { type: string, format: email, description: "vacío (\"\") se acepta" }
+        phone: { type: string }
+        address: { type: string }
 
     Product:
       type: object
       properties:
-        id:
-          type: string
-          format: uuid
-        sku:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
+        id: { type: string, format: uuid }
+        sku: { type: string }
+        barcode: { type: string, nullable: true }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        price: { type: string, description: "Decimal(10,2) serializado como texto", example: "1250.00" }
+        stock: { type: integer }
+        minStock: { type: integer }
+        categoryId: { type: string, format: uuid }
+        category: { $ref: '#/components/schemas/Category' }
+        supplierId: { type: string, format: uuid, nullable: true }
+        supplier:
+          allOf: [{ $ref: '#/components/schemas/SupplierSummary' }]
           nullable: true
-        price:
-          type: number
-          format: decimal
-        stock:
-          type: integer
-        minStock:
-          type: integer
-        categoryId:
-          type: string
-          format: uuid
-        category:
-          $ref: '#/components/schemas/Category'
+        expirationDate: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     ProductCreateInput:
       type: object
-      required:
-        - sku
-        - name
-        - price
-        - stock
-        - minStock
-        - categoryId
+      required: [sku, name, price, stock, minStock, categoryId]
       properties:
-        sku:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        stock:
-          type: integer
-        minStock:
-          type: integer
-        categoryId:
-          type: string
-          format: uuid
+        sku: { type: string, minLength: 1 }
+        barcode: { type: string }
+        name: { type: string, minLength: 1 }
+        description: { type: string }
+        price: { type: number, exclusiveMinimum: true, minimum: 0 }
+        stock: { type: number, minimum: 0 }
+        minStock: { type: number, minimum: 0 }
+        categoryId: { type: string, format: uuid }
+        expirationDate: { type: string, format: date }
+        supplierId: { type: string, format: uuid, nullable: true }
 
     ProductUpdateInput:
       type: object
-      required:
-        - name
-        - price
-        - minStock
-        - categoryId
+      description: El stock no se edita acá; cambia solo con movimientos u órdenes recibidas.
+      required: [name, price, minStock, categoryId]
       properties:
-        name:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-        minStock:
-          type: integer
-        categoryId:
-          type: string
-          format: uuid
+        name: { type: string, minLength: 1 }
+        barcode: { type: string }
+        description: { type: string }
+        price: { type: number, exclusiveMinimum: true, minimum: 0 }
+        minStock: { type: number, minimum: 0 }
+        categoryId: { type: string, format: uuid }
+        expirationDate: { type: string, format: date }
+        supplierId: { type: string, format: uuid, nullable: true }
+
+    MovementType:
+      type: string
+      enum: [IN, OUT, ADJUSTMENT]
+
+    Movement:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/MovementType' }
+        quantity: { type: integer }
+        reason: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        product: { $ref: '#/components/schemas/Product' }
 
     MovementInput:
       type: object
-      required:
-        - productId
-        - type
-        - quantity
+      required: [productId, type, quantity]
       properties:
-        productId:
+        productId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/MovementType' }
+        quantity: { type: number, exclusiveMinimum: true, minimum: 0 }
+        reason: { type: string }
+
+    PurchaseRequestStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+
+    PurchaseRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/Product' }
+        requestedById: { type: string, format: uuid }
+        requestedBy: { $ref: '#/components/schemas/UserSummary' }
+        quantity: { type: integer }
+        reason: { type: string, nullable: true, description: Motivo de quien pide }
+        status: { $ref: '#/components/schemas/PurchaseRequestStatus' }
+        rejectionReason: { type: string, nullable: true, description: Motivo del admin al rechazar }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        purchaseOrderId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    PurchaseRequestInput:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: string, format: uuid }
+        quantity: { type: number, exclusiveMinimum: true, minimum: 0 }
+        reason: { type: string }
+        expiresAt: { type: string, format: date-time, description: "por defecto, 7 días" }
+
+    PurchaseRequestStatusInput:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [APPROVED, REJECTED] }
+        rejectionReason:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 300
+          description: Obligatorio si `status` es `REJECTED`; al aprobar se ignora y se borra.
+
+    PurchaseOrderStatus:
+      type: string
+      enum: [PENDING, RECEIVED, CANCELLED]
+
+    PurchaseOrder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        supplierId: { type: string, format: uuid }
+        supplier: { $ref: '#/components/schemas/Supplier' }
+        createdById: { type: string, format: uuid }
+        createdBy:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        status: { $ref: '#/components/schemas/PurchaseOrderStatus' }
+        createdAt: { type: string, format: date-time }
+        receivedAt: { type: string, format: date-time, nullable: true }
+        emailedAt: { type: string, format: date-time, nullable: true, description: Último envío al proveedor }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              productId: { type: string, format: uuid }
+              product: { $ref: '#/components/schemas/Product' }
+              quantity: { type: integer }
+              unitCost: { type: string, example: "980.00" }
+
+    PurchaseOrderInput:
+      type: object
+      required: [supplierId, items]
+      properties:
+        supplierId: { type: string, format: uuid }
+        items:
+          type: array
+          minItems: 1
+          description: Sin productId repetidos entre líneas.
+          items:
+            type: object
+            required: [productId, quantity, unitCost]
+            properties:
+              productId: { type: string, format: uuid }
+              quantity: { type: integer, minimum: 1 }
+              unitCost: { type: number, exclusiveMinimum: true, minimum: 0 }
+        fulfilledRequestIds:
+          type: array
+          description: Solicitudes aprobadas que esta orden cubre
+          items: { type: string, format: uuid }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        body: { type: string }
+        authorId: { type: string, format: uuid }
+        author:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            avatarUrl: { type: string, nullable: true }
+        purchaseRequestId: { type: string, format: uuid, nullable: true }
+        purchaseOrderId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    CommentInput:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 1000 }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string, description: "uuid si es guardada; id derivado (p. ej. `product-lowstock-<id>`) si es calculada" }
         type:
           type: string
-          enum: [IN, OUT, ADJUSTMENT]
-        quantity:
-          type: integer
-        reason:
-          type: string
+          description: >
+            Calculadas (solo ADMIN): requestExpiring, pending, approved, productExpiring, lowStock.
+            Guardadas: requestApproved, requestRejected, orderReceived, requestComment, orderComment.
+        title: { type: string }
+        meta: { type: object, additionalProperties: true }
+        link: { type: string, description: Ruta del frontend a la que lleva el aviso }
+        createdAt: { type: string, format: date-time, nullable: true }
+        persisted: { type: boolean }
+        read: { type: boolean }
 
-    StockMovement:
+    AuditLog:
       type: object
       properties:
-        id:
+        id: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        user: { $ref: '#/components/schemas/UserSummary' }
+        action:
           type: string
-          format: uuid
-        productId:
-          type: string
-          format: uuid
-        userId:
-          type: string
-          format: uuid
-        type:
-          type: string
-          enum: [IN, OUT, ADJUSTMENT]
-        quantity:
-          type: integer
-        reason:
-          type: string
-          nullable: true
-        createdAt:
-          type: string
-          format: date-time
-
-    RegisterInput:
-      type: object
-      required:
-        - name
-        - email
-        - password
-      properties:
-        name:
-          type: string
-        email:
-          type: string
-          format: email
-        password:
-          type: string
-          minLength: 6
-
-    LoginInput:
-      type: object
-      required:
-        - email
-        - password
-      properties:
-        email:
-          type: string
-          format: email
-        password:
-          type: string
+          enum: [CREATE, UPDATE, DELETE, APPROVE, REJECT, RECEIVE, ACTIVATE, DEACTIVATE, EMAIL]
+        entityType: { type: string, example: PurchaseOrder }
+        entityId: { type: string }
+        changes: { type: object, nullable: true, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
 
 paths:
+  # ---------------------------------------------------------------- Sistema
+  /health:
+    get:
+      tags: [Sistema]
+      summary: Estado del servidor
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  # ---------------------------------------------------------------- Auth
   /auth/register:
     post:
-      summary: Registra un nuevo usuario (rol EMPLOYEE)
-      tags:
-        - Auth
+      tags: [Auth]
+      summary: Crear cuenta (rol EMPLOYE)
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterInput'
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 1 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 6 }
+                phone: { type: string, maxLength: 30 }
+                company: { type: string, maxLength: 120 }
       responses:
         '201':
-          description: Usuario creado correctamente
-        '400':
-          description: El usuario ya existe o los datos no son válidos
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /auth/login:
     post:
-      summary: Autentica un usuario y devuelve un JWT
-      tags:
-        - Auth
+      tags: [Auth]
+      summary: Iniciar sesión
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginInput'
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 6 }
       responses:
         '200':
-          description: Login exitoso, devuelve el token
+          description: Sesión iniciada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renovar el token de acceso
+      description: El refresh token es rotativo; el anterior queda revocado.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: Tokens nuevos
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  token:
-                    type: string
-        '401':
-          description: Credenciales inválidas
+                  token: { type: string }
+                  refreshToken: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /categories/:
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cerrar sesión (revoca el refresh token)
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '204': { description: Sesión cerrada }
+
+  /auth/me:
     get:
-      summary: Lista todas las categorías
-      tags:
-        - Categories
-      security:
-        - bearerAuth: []
+      tags: [Auth]
+      summary: Datos del token actual
       responses:
         '200':
-          description: Lista de categorías
+          description: Payload del JWT
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Category'
-        '401':
-          description: No autorizado
-    post:
-      summary: Crea una categoría (solo ADMIN)
-      tags:
-        - Categories
-      security:
-        - bearerAuth: []
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      email: { type: string }
+                      role: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- Perfil
+  /profile/me:
+    get:
+      tags: [Perfil]
+      summary: Ver mi perfil
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Perfil]
+      summary: Editar nombre y email
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CategoryInput'
+              type: object
+              required: [name, email]
+              properties:
+                name: { type: string, minLength: 1 }
+                email: { type: string, format: email }
       responses:
-        '201':
-          description: Categoría creada
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /profile/me/avatar:
+    post:
+      tags: [Perfil]
+      summary: Subir foto de perfil
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar: { type: string, format: binary }
+      responses:
+        '200':
+          description: Perfil con el nuevo `avatarUrl` (servido desde `/uploads/avatars/...`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /profile/me/password:
+    put:
+      tags: [Perfil]
+      summary: Cambiar contraseña
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, minLength: 1 }
+                newPassword: { type: string, minLength: 6 }
+      responses:
+        '200': { description: Contraseña cambiada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------------------------------------------------------- Usuarios
+  /users:
+    get:
+      tags: [Usuarios]
+      summary: Listar usuarios (ADMIN)
+      responses:
+        '200':
+          description: Usuarios
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Category'
-        '400':
-          description: La categoría ya existe o los datos no son válidos
-        '401':
-          description: No autorizado
-        '403':
-          description: Rol insuficiente
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}/toggle-active:
+    patch:
+      tags: [Usuarios]
+      summary: Activar / desactivar un usuario (ADMIN)
+      description: Un usuario desactivado no puede iniciar sesión ni conectarse al socket.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Usuario con el nuevo `isActive`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Empresa
+  /company:
+    get:
+      tags: [Empresa]
+      summary: Datos de la empresa de esta instalación
+      description: Una instalación = una empresa. Fila única con id 1.
+      responses:
+        '200':
+          description: Empresa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Company' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Empresa]
+      summary: Cambiar el nombre de la empresa (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '200':
+          description: Empresa actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Company' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Categorías
+  /categories:
+    get:
+      tags: [Categorías]
+      summary: Listar categorías
+      responses:
+        '200':
+          description: Categorías (sin las eliminadas)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Categorías]
+      summary: Crear categoría (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /categories/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
-      summary: Obtiene una categoría por ID
-      tags:
-        - Categories
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      tags: [Categorías]
+      summary: Ver una categoría
       responses:
         '200':
-          description: Categoría encontrada
+          description: Categoría
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Category'
-        '404':
-          description: Categoría no encontrada
+              schema: { $ref: '#/components/schemas/Category' }
+        '404': { $ref: '#/components/responses/NotFound' }
     put:
-      summary: Actualiza una categoría (solo ADMIN)
-      tags:
-        - Categories
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      tags: [Categorías]
+      summary: Editar categoría (ADMIN)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/CategoryInput'
+            schema: { $ref: '#/components/schemas/CategoryInput' }
       responses:
         '200':
-          description: Categoría actualizada
-        '403':
-          description: Rol insuficiente
-        '404':
-          description: Categoría no encontrada
+          description: Actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     delete:
-      summary: Elimina una categoría (solo ADMIN)
-      tags:
-        - Categories
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      tags: [Categorías]
+      summary: Eliminar categoría (ADMIN, soft delete)
       responses:
-        '200':
-          description: Categoría eliminada
-        '403':
-          description: Rol insuficiente
-        '404':
-          description: Categoría no encontrada
+        '200': { description: Eliminada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
-  /products/:
+  # ---------------------------------------------------------------- Productos
+  /products:
     get:
-      summary: Lista todos los productos (con su categoría)
-      tags:
-        - Products
-      security:
-        - bearerAuth: []
+      tags: [Productos]
+      summary: Listar productos
       responses:
         '200':
-          description: Lista de productos
+          description: Productos (sin los eliminados)
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/Product'
+                items: { $ref: '#/components/schemas/Product' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
-      summary: Crea un producto (solo ADMIN)
-      tags:
-        - Products
-      security:
-        - bearerAuth: []
+      tags: [Productos]
+      summary: Crear producto (ADMIN)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ProductCreateInput'
+            schema: { $ref: '#/components/schemas/ProductCreateInput' }
       responses:
         '201':
-          description: Producto creado
+          description: Creado
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Product'
-        '400':
-          description: SKU duplicado, categoría inválida, o datos no válidos
-        '403':
-          description: Rol insuficiente
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
-  /products/{id}:
+  /products/expiring-soon:
     get:
-      summary: Obtiene un producto por ID
-      tags:
-        - Products
-      security:
-        - bearerAuth: []
+      tags: [Productos]
+      summary: Productos que vencen pronto
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+        - name: days
+          in: query
+          schema: { type: integer, default: 7 }
       responses:
         '200':
-          description: Producto encontrado
+          description: Productos con `expirationDate` dentro del plazo
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product'
-        '404':
-          description: Producto no encontrado
-    put:
-      summary: Actualiza un producto (solo ADMIN). No permite editar el stock.
-      tags:
-        - Products
-      security:
-        - bearerAuth: []
+                type: array
+                items: { $ref: '#/components/schemas/Product' }
+
+  /products/barcode/{code}:
+    get:
+      tags: [Productos]
+      summary: Buscar producto por código de barras
       parameters:
-        - name: id
+        - name: code
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
+          schema: { type: string }
+      responses:
+        '200':
+          description: Producto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /products/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Productos]
+      summary: Ver un producto
+      responses:
+        '200':
+          description: Producto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    put:
+      tags: [Productos]
+      summary: Editar producto (ADMIN)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ProductUpdateInput'
+            schema: { $ref: '#/components/schemas/ProductUpdateInput' }
       responses:
         '200':
-          description: Producto actualizado
-        '403':
-          description: Rol insuficiente
-        '404':
-          description: Producto no encontrado
+          description: Actualizado (un cambio de precio queda en el historial)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     delete:
-      summary: Elimina un producto (solo ADMIN)
-      tags:
-        - Products
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
+      tags: [Productos]
+      summary: Eliminar producto (ADMIN, soft delete)
+      responses:
+        '200': { description: Eliminado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /products/{id}/price-history:
+    get:
+      tags: [Productos]
+      summary: Historial de precios del producto
+      parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '200':
-          description: Producto eliminado
-        '403':
-          description: Rol insuficiente
-        '404':
-          description: Producto no encontrado
+          description: Cambios de precio, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
 
-  /movements/:
+  # ---------------------------------------------------------------- Movimientos
+  /movements:
     get:
-      summary: Lista los movimientos de stock (más recientes primero)
-      tags:
-        - Movements
-      security:
-        - bearerAuth: []
+      tags: [Movimientos]
+      summary: Listar movimientos de stock
       parameters:
         - name: productId
           in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: Filtra los movimientos de un producto específico
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Lista de movimientos
+          description: Movimientos
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/StockMovement'
+                items: { $ref: '#/components/schemas/Movement' }
     post:
-      summary: Registra un movimiento de stock (ADMIN o EMPLOYEE)
-      tags:
-        - Movements
-      security:
-        - bearerAuth: []
+      tags: [Movimientos]
+      summary: Registrar entrada, salida o ajuste (ADMIN, EMPLOYE)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/MovementInput'
+            schema: { $ref: '#/components/schemas/MovementInput' }
       responses:
         '201':
-          description: Movimiento registrado y stock actualizado
+          description: Movimiento creado; el stock del producto se actualiza
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/StockMovement'
-        '400':
-          description: Producto inexistente o stock insuficiente para una salida (OUT)
+              schema: { $ref: '#/components/schemas/Movement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
-  /reports/low-stock:
+  # ---------------------------------------------------------------- Proveedores
+  /suppliers:
     get:
-      summary: Productos con stock en o por debajo del mínimo
-      tags:
-        - Reports
-      security:
-        - bearerAuth: []
+      tags: [Proveedores]
+      summary: Listar proveedores
       responses:
         '200':
-          description: Lista de productos con stock bajo
+          description: Proveedores
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/Product'
+                items: { $ref: '#/components/schemas/Supplier' }
+    post:
+      tags: [Proveedores]
+      summary: Crear proveedor (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplierInput' }
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Supplier' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
-  /reports/movements:
+  /suppliers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
-      summary: Movimientos filtrados por rango de fechas
-      tags:
-        - Reports
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: from
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date
-        - name: to
-          in: query
-          required: false
-          schema:
-            type: string
-            format: date
+      tags: [Proveedores]
+      summary: Ver un proveedor
       responses:
         '200':
-          description: Lista de movimientos en el rango indicado
+          description: Proveedor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Supplier' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Proveedores]
+      summary: Editar proveedor (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SupplierInput' }
+      responses:
+        '200':
+          description: Actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Supplier' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Proveedores]
+      summary: Eliminar proveedor (ADMIN)
+      responses:
+        '200': { description: Eliminado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Solicitudes de compra
+  /purchase-requests:
+    get:
+      tags: [Solicitudes de compra]
+      summary: Listar solicitudes
+      description: ADMIN ve todas; EMPLOYE solo las suyas.
+      responses:
+        '200':
+          description: Solicitudes
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/StockMovement'
+                items: { $ref: '#/components/schemas/PurchaseRequest' }
+    post:
+      tags: [Solicitudes de compra]
+      summary: Crear solicitud (cualquier usuario)
+      description: Aprobarla no sube stock; solo autoriza la compra.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseRequestInput' }
+      responses:
+        '201':
+          description: Creada (estado PENDING)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
-  /reports/inventory-value:
+  /purchase-requests/alerts:
     get:
-      summary: Valor total del inventario
-      tags:
-        - Reports
-      security:
-        - bearerAuth: []
+      tags: [Solicitudes de compra]
+      summary: Alertas de solicitudes (ADMIN)
       responses:
         '200':
-          description: Valor total calculado (stock × price) y cantidad de productos
+          description: Por vencer, aprobadas sin orden y productos por vencer
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  totalValue:
-                    type: number
-                  totalProducts:
-                    type: integer
+                  expiringSoon:
+                    type: array
+                    items: { $ref: '#/components/schemas/PurchaseRequest' }
+                  approvedUnfulfilled:
+                    type: array
+                    items: { $ref: '#/components/schemas/PurchaseRequest' }
+                  expiringSoonProducts:
+                    type: array
+                    items: { $ref: '#/components/schemas/Product' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/status:
+    patch:
+      tags: [Solicitudes de compra]
+      summary: Aprobar o rechazar (ADMIN)
+      description: Avisa a quien la pidió (campanita + socket) si el estado cambió.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseRequestStatusInput' }
+      responses:
+        '200':
+          description: Solicitud actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/comments:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Comentarios]
+      summary: Hilo de comentarios de una solicitud
+      description: Quien pidió la solicitud y los ADMIN. Otro empleado recibe 404.
+      responses:
+        '200':
+          description: Comentarios en orden cronológico
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Comment' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Comentarios]
+      summary: Comentar en una solicitud
+      description: Avisa a los ADMIN activos y a quien la pidió (menos al autor). Sin edición ni borrado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommentInput' }
+      responses:
+        '201':
+          description: Comentario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------- Órdenes de compra
+  /purchase-orders:
+    get:
+      tags: [Órdenes de compra]
+      summary: Listar órdenes
+      responses:
+        '200':
+          description: Órdenes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PurchaseOrder' }
+    post:
+      tags: [Órdenes de compra]
+      summary: Crear orden (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseOrderInput' }
+      responses:
+        '201':
+          description: Creada (estado PENDING)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-orders/{id}:
+    get:
+      tags: [Órdenes de compra]
+      summary: Ver una orden
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Orden
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /purchase-orders/{id}/receive:
+    patch:
+      tags: [Órdenes de compra]
+      summary: Marcar como recibida (ADMIN)
+      description: Recepción completa (no parcial). Sube el stock con movimientos IN y avisa a quien pidió cada solicitud vinculada.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Orden recibida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-orders/{id}/send-email:
+    post:
+      tags: [Órdenes de compra]
+      summary: Enviar (o reenviar) la orden al email del proveedor (ADMIN)
+      description: |
+        Usa Resend. Sin `EMAIL_FROM` configurado (sin dominio verificado) funciona en **modo prueba**:
+        el correo va a `EMAIL_TEST_TO` y el asunto indica el destinatario real.
+        Falla con 400 si el proveedor no tiene email o falta el nombre de la empresa.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Enviado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order: { $ref: '#/components/schemas/PurchaseOrder' }
+                  testMode: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-orders/{id}/comments:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Comentarios]
+      summary: Hilo de comentarios de una orden (ADMIN)
+      responses:
+        '200':
+          description: Comentarios en orden cronológico
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Comentarios]
+      summary: Comentar en una orden (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommentInput' }
+      responses:
+        '201':
+          description: Comentario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Notificaciones
+  /notifications:
+    get:
+      tags: [Notificaciones]
+      summary: Avisos de la campanita
+      description: |
+        ADMIN: avisos calculados (stock bajo, por vencer, pendientes, aprobadas sin orden) + sus avisos guardados.
+        EMPLOYE: solo sus avisos guardados. Los calculados siempre cuentan como no leídos.
+      responses:
+        '200':
+          description: Avisos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  unread: { type: integer }
+                  notifications:
+                    type: array
+                    items: { $ref: '#/components/schemas/Notification' }
+
+  /notifications/read-all:
+    patch:
+      tags: [Notificaciones]
+      summary: Marcar todos mis avisos guardados como leídos
+      responses:
+        '200':
+          description: Cantidad marcada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notificaciones]
+      summary: Marcar un aviso guardado como leído
+      description: Solo afecta avisos del propio usuario (`updated` = 0 si es ajeno o ya estaba leído).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Cantidad marcada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+
+  # ---------------------------------------------------------------- Reportes
+  /reports/low-stock:
+    get:
+      tags: [Reportes]
+      summary: Productos con stock en o bajo el mínimo
+      responses:
+        '200':
+          description: Productos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Product' }
+
+  /reports/movements:
+    get:
+      tags: [Reportes]
+      summary: Movimientos por rango de fechas
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Movimientos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Movement' }
+
+  /reports/inventory-value:
+    get:
+      tags: [Reportes]
+      summary: Valor total del inventario
+      responses:
+        '200':
+          description: Totales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalValue: { type: number }
+                  totalProducts: { type: integer }
+
+  /reports/inventory-value-breakdown:
+    get:
+      tags: [Reportes]
+      summary: Capital activo vs. inmovilizado
+      parameters:
+        - name: days
+          in: query
+          description: Días sin movimiento para considerar un producto inmovilizado
+          schema: { type: integer, default: 60 }
+      responses:
+        '200':
+          description: Desglose
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  daysThreshold: { type: integer }
+                  totalValue: { type: number }
+                  activeValue: { type: number }
+                  immobilizedValue: { type: number }
+                  immobilizedProducts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        sku: { type: string }
+                        name: { type: string }
+                        value: { type: number }
+
+  /reports/stock-forecast:
+    get:
+      tags: [Reportes]
+      summary: Pronóstico de agotamiento según el ritmo de ventas
+      parameters:
+        - name: velocityDays
+          in: query
+          description: Ventana para calcular las ventas diarias
+          schema: { type: integer, default: 30 }
+        - name: alertDays
+          in: query
+          description: Umbral de días restantes para marcarlo urgente
+          schema: { type: integer, default: 14 }
+      responses:
+        '200':
+          description: Pronóstico
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  velocityWindowDays: { type: integer }
+                  forecast:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productId: { type: string, format: uuid }
+                        productName: { type: string }
+                        currentStock: { type: integer }
+                        dailyVelocity: { type: number }
+                        daysRemaining: { type: number, nullable: true }
+                        willRunOutSoon: { type: boolean }
+                  urgent:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  # ---------------------------------------------------------------- Auditoría
+  /audit-logs:
+    get:
+      tags: [Auditoría]
+      summary: Registro de auditoría (ADMIN, últimos 200)
+      parameters:
+        - name: entityType
+          in: query
+          schema: { type: string, example: PurchaseOrder }
+        - name: action
+          in: query
+          description: "Ej.: `EMAIL` para ver solo los correos enviados a proveedores"
+          schema: { type: string }
+      responses:
+        '200':
+          description: Registros, del más reciente al más antiguo
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditLog' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /audit-logs/metrics:
+    get:
+      tags: [Auditoría]
+      summary: Métricas de auditoría (ADMIN)
+      responses:
+        '200':
+          description: Métricas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalCount: { type: integer }
+                  byAction:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        action: { type: string }
+                        count: { type: integer }
+                  byEntityType:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        entityType: { type: string }
+                        count: { type: integer }
+                  recentActivity:
+                    type: array
+                    description: Fechas de cada acción de los últimos 7 días (el cliente las agrupa por día local)
+                    items: { type: string, format: date-time }
+                  emails:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      testMode: { type: integer }
+                      last:
+                        type: object
+                        nullable: true
+                        properties:
+                          createdAt: { type: string, format: date-time }
+                          changes:
+                            type: object
+                            properties:
+                              to: { type: string }
+                              testMode: { type: boolean }
+                          user:
+                            type: object
+                            properties:
+                              name: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Asistente
+  /assistant/chat:
+    post:
+      tags: [Asistente]
+      summary: Preguntar al asistente IA (solo lectura)
+      description: Usa Gemini con herramientas de consulta; nunca crea, edita ni borra datos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '200':
+          description: Respuesta del asistente
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
