@@ -27,9 +27,9 @@ export async function logAudit(
   }
 }
 
-export async function getAuditLogs(entityType?: string) {
+export async function getAuditLogs(entityType?: string, action?: string) {
   return prisma.auditLog.findMany({
-    where: entityType ? { entityType } : {},
+    where: { ...(entityType && { entityType }), ...(action && { action }) },
     include: { user: { select: { id: true, name: true, email: true } } },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -37,7 +37,7 @@ export async function getAuditLogs(entityType?: string) {
 }
 
 export async function getAuditMetrics() {
-  const [totalCount, byAction, byEntityType, last7Days] = await Promise.all([
+  const [totalCount, byAction, byEntityType, last7Days, emailTotal, emailTest, lastEmail] = await Promise.all([
     prisma.auditLog.count(),
 
     prisma.auditLog.groupBy({
@@ -56,21 +56,25 @@ export async function getAuditMetrics() {
         createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
       },
       select: { createdAt: true },
+      orderBy: { createdAt: "asc" },
+    }),
+
+    // correos de órdenes enviados a proveedores (acción EMAIL)
+    prisma.auditLog.count({ where: { action: "EMAIL" } }),
+    prisma.auditLog.count({ where: { action: "EMAIL", changes: { path: ["testMode"], equals: true } } }),
+    prisma.auditLog.findFirst({
+      where: { action: "EMAIL" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, changes: true, user: { select: { name: true } } },
     }),
   ]);
-
-  // Agrupar "last7Days" por fecha (día), ya que Prisma no agrupa por día directamente
-  const activityByDay: Record<string, number> = {};
-  for (const log of last7Days) {
-    const day = log.createdAt.toISOString().split("T")[0]!; // "2026-09-21"
-    activityByDay[day] = (activityByDay[day] ?? 0) + 1;
-  }
 
   return {
     totalCount,
     byAction: byAction.map((a) => ({ action: a.action, count: a._count.action })),
     byEntityType: byEntityType.map((e) => ({ entityType: e.entityType, count: e._count.entityType })),
-    activityByDay, // { "2026-09-15": 3, "2026-09-16": 7, ... }
- 
+    // ponytail: timestamps crudos para que el cliente agrupe por día en su zona horaria; agregar por día en SQL si crece mucho
+    recentActivity: last7Days.map((l) => l.createdAt),
+    emails: { total: emailTotal, testMode: emailTest, last: lastEmail },
   };
 }
