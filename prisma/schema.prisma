@@ -53,6 +53,7 @@ model User {
   plan             PlanCode          @default(BASIC)
   lastCompanyId    String? // empresa que se abre al iniciar sesión
   memberships      Membership[]
+  invitationsSent  Invitation[]
   ownedCompanies   Company[]         @relation("CompanyOwner")
   movements        StockMovement[]
   purchaseRequests PurchaseRequest[]
@@ -252,6 +253,7 @@ model Company {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   memberships      Membership[]
+  invitations      Invitation[]
   categories       Category[]
   suppliers        Supplier[]
   products         Product[]
@@ -277,4 +279,22 @@ model Membership {
 
   @@unique([userId, companyId])
   @@index([companyId])
+}
+
+// Invitación a una empresa: el link lleva un token aleatorio; acá solo se guarda su hash (sha256)
+model Invitation {
+  id          String    @id @default(uuid())
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id])
+  email       String
+  role        Role      @default(EMPLOYE)
+  tokenHash   String    @unique
+  invitedById String
+  invitedBy   User      @relation(fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([companyId, email])
 }

@@ -11,7 +11,7 @@ export const prismaRoot = new PrismaClient({ adapter })
 // Modelos que pertenecen a una empresa (tienen companyId)
 const TENANT_MODELS = new Set([
   "Category", "Supplier", "Product", "StockMovement",
-  "PurchaseRequest", "PurchaseOrder", "AuditLog", "Notification",
+  "PurchaseRequest", "PurchaseOrder", "AuditLog", "Notification", "Invitation",
 ])
 
 type Data = Record<string, unknown>

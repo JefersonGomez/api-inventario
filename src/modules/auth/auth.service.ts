@@ -72,7 +72,7 @@ export function listUserCompanies(userId: string) {
 
 // Arma la sesión de un usuario en una empresa. `preferred` = la pedida (o la última usada);
 // si no tiene acceso a esa, abre la primera empresa activa.
-async function openSession(userId: string, preferred: string | null, strict = false) {
+export async function openSession(userId: string, preferred: string | null, strict = false) {
   const companies = await listUserCompanies(userId);
   if (companies.length === 0) {
     throw new Error("No tienes acceso a ninguna empresa activa. Contacta a un administrador.");

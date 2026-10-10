@@ -740,6 +740,107 @@ paths:
               schema: { $ref: '#/components/schemas/CompanyAccess' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /invitations:
+    get:
+      tags: [Usuarios]
+      summary: Invitaciones pendientes de la empresa activa (ADMIN)
+      responses:
+        '200':
+          description: Pendientes (sin aceptar, sin anular y sin vencer)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Usuarios]
+      summary: Invitar a alguien a la empresa (ADMIN)
+      description: |
+        Devuelve el `link` (con el token) **solo esta vez**; vence en 7 días. Invitar de nuevo al mismo email
+        anula la anterior. Usuarios activos + invitaciones pendientes no pueden pasar `maxUsersPerCompany` del plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [ADMIN, EMPLOYE], default: EMPLOYE }
+      responses:
+        '201':
+          description: Invitación creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  link: { type: string, example: "http://localhost:5173/invite/<token>" }
+                  invitation: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /invitations/{id}:
+    delete:
+      tags: [Usuarios]
+      summary: Anular una invitación pendiente (ADMIN)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '204': { description: Anulada }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invitations/token/{token}:
+    get:
+      tags: [Usuarios]
+      summary: Ver una invitación por su link (público)
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Datos para mostrar en la página del link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [valid, expired, revoked, accepted] }
+                  email: { type: string }
+                  role: { type: string, enum: [ADMIN, EMPLOYE] }
+                  company: { type: string }
+                  invitedBy: { type: string }
+                  expiresAt: { type: string, format: date-time }
+                  userExists: { type: boolean, description: "true = entra con su contraseña; false = crea cuenta" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invitations/token/{token}/accept:
+    post:
+      tags: [Usuarios]
+      summary: Aceptar una invitación (público)
+      description: Cuenta nueva = `name` + `password`; cuenta existente = su `password`. Devuelve la sesión ya abierta en esa empresa.
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                name: { type: string }
+                password: { type: string, minLength: 6 }
+      responses:
+        '200':
+          description: Sesión
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
   # ---------------------------------------------------------------- Categorías
   /categories:
     get:

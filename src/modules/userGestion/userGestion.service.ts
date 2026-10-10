@@ -3,6 +3,7 @@
 import { prismaRoot } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
+import { assertUserSlot } from "../invitations/invitation.service.ts";
 
 export async function getAllUsers() {
   const memberships = await prismaRoot.membership.findMany({
@@ -29,6 +30,9 @@ export async function toggleUserActive(targetUserId: string, requestingUserId: s
   if (membership.company.ownerId === targetUserId) {
     throw new Error("No se puede desactivar al dueño de la empresa");
   }
+
+  // reactivar ocupa un lugar del plan
+  if (!membership.isActive) await assertUserSlot(companyId);
 
   const updated = await prismaRoot.membership.update({
     where: { id: membership.id },
