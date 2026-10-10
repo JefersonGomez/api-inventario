@@ -1,6 +1,7 @@
 import request from "supertest"
 import bcrypt from "bcrypt"
 import app from "../../app.ts"
+import { resetDb } from "../../test/helpers.ts"
 import { prisma } from "../../config/database.ts"
 
 describe("POST /movements", () => {
@@ -12,6 +13,7 @@ describe("POST /movements", () => {
   let productId: string
 
   beforeAll(async () => {
+    await resetDb()
     // Creamos un admin directo con Prisma (el registro público solo crea EMPLOYEE)
     const passwordHash = await bcrypt.hash(adminPassword, 10)
     await prisma.user.create({
@@ -48,10 +50,7 @@ describe("POST /movements", () => {
   })
 
   afterAll(async () => {
-    await prisma.stockMovement.deleteMany({ where: { productId } })
-    await prisma.product.deleteMany({ where: { id: productId } })
-    await prisma.category.deleteMany({ where: { id: categoryId } })
-    await prisma.user.deleteMany({ where: { email: adminEmail } })
+    await resetDb()
     await prisma.$disconnect()
   })
 

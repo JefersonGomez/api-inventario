@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import type { Server as HttpServer } from "node:http";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/database.ts";
+import { corsOrigins } from "../config/cors.ts";
 import type { AuthPayload } from "../types/express.d.ts";
 
 // El socket no transporta datos: solo avisa "esto cambió" y el cliente vuelve a pedirlo por la API normal.
@@ -24,7 +25,7 @@ export const STOCK_TOPICS = [
 export const REQUEST_TOPICS = ["purchase-requests", "purchase-request-alerts", "notifications"];
 
 export function initRealtime(httpServer: HttpServer) {
-  io = new Server(httpServer, { cors: { origin: "http://localhost:5173" } });
+  io = new Server(httpServer, { cors: { origin: corsOrigins } });
 
   io.use(async (socket, next) => {
     try {

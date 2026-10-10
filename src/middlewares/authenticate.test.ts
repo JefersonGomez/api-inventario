@@ -1,5 +1,6 @@
 import request from "supertest"
 import app from "../app.ts"
+import { resetDb } from "../test/helpers.ts"
 import { prisma } from "../config/database.ts"
 
 describe("Middleware Authenticated", () => {
@@ -8,6 +9,7 @@ describe("Middleware Authenticated", () => {
   let token: string
 
   beforeAll(async () => {
+    await resetDb()
     await request(app).post("/auth/register").send({
       name: "Middleware Test",
       email: testEmail,
@@ -23,7 +25,7 @@ describe("Middleware Authenticated", () => {
   })
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: testEmail } })
+    await resetDb()
     await prisma.$disconnect()
   })
 

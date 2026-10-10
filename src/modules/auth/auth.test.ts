@@ -1,13 +1,19 @@
 import request from "supertest"
 import app from "../../app.ts"
+import { resetDb } from "../../test/helpers.ts"
 import { prisma } from "../../config/database.ts"
 
 describe("POST /auth/register", () => {
+  beforeAll(async () => {
+    await resetDb()
+  })
+
   afterEach(async () => {
     await prisma.user.deleteMany({ where: { email: "test@example.com" } })
   })
 
   afterAll(async () => {
+    await resetDb()
     await prisma.$disconnect()
   })
 

@@ -18,10 +18,11 @@ import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
 import path from 'node:path';
 import cors from "cors"
+import { corsOrigins } from "./config/cors.ts"
 
 const app = Express()
 app.use(cors({
-  origin: "http://localhost:5173"
+  origin: corsOrigins
 }))
 app.use(Express.json())
 

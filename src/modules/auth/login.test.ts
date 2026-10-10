@@ -1,5 +1,6 @@
 import request from "supertest"
 import app from "../../app.ts"
+import { resetDb } from "../../test/helpers.ts"
 import { prisma } from "../../config/database.ts"
 
 describe("POST /auth/login", () => {
@@ -7,6 +8,7 @@ describe("POST /auth/login", () => {
   const testPassword = "123456"
 
   beforeAll(async () => {
+    await resetDb()
     // Nos apoyamos en el endpoint real de registro para crear el usuario de prueba
     await request(app).post("/auth/register").send({
       name: "Login Test",
@@ -16,7 +18,7 @@ describe("POST /auth/login", () => {
   })
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: testEmail } })
+    await resetDb()
     await prisma.$disconnect()
   })
 
