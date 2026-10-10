@@ -50,6 +50,7 @@ model User {
   auditLogs AuditLog[]
   refreshTokens RefreshToken[]
   notifications Notification[]
+  comments Comment[]
 }
 
 model Category {
@@ -119,6 +120,7 @@ model PurchaseRequest {
   product       Product               @relation(fields: [productId], references: [id])
   requestedBy   User                  @relation(fields: [requestedById], references: [id])
   purchaseOrder   PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
+  comments        Comment[]
 
 }
 
@@ -133,6 +135,7 @@ model PurchaseOrder {
   createdBy   User                @relation(fields: [createdById], references: [id])
   items       PurchaseOrderItem[]
   fulfilledRequests PurchaseRequest[] 
+  comments    Comment[]
 }
 
 model PurchaseOrderItem {
@@ -181,4 +184,20 @@ model Notification {
   user      User      @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])
+}
+
+// Hilo de comentarios de una solicitud o de una orden: exactamente uno de los dos ids va con valor
+model Comment {
+  id                String           @id @default(uuid())
+  authorId          String
+  body              String
+  purchaseRequestId String?
+  purchaseOrderId   String?
+  createdAt         DateTime         @default(now())
+  author            User             @relation(fields: [authorId], references: [id])
+  purchaseRequest   PurchaseRequest? @relation(fields: [purchaseRequestId], references: [id])
+  purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
+
+  @@index([purchaseRequestId, createdAt])
+  @@index([purchaseOrderId, createdAt])
 }

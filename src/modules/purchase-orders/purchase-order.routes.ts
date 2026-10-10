@@ -1,6 +1,8 @@
 // purchase-order.router.ts
 import { Router } from "express";
 import { validate } from "../../middlewares/validate.middleware.ts";
+import { createCommentSchema } from "../comments/comment.schema.ts";
+import { getCommentsHandler, addCommentHandler } from "../comments/comment.controller.ts";
 
 import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { createPurchaseOrderSchema } from "./purchase-order.schema.js";
@@ -31,4 +33,14 @@ purchaseOrderRouter.patch(
   Authenticated,
   Authorize("ADMIN"),
   receivePurchaseOrderHandler
+);
+
+// hilo de comentarios de la orden: solo admins
+purchaseOrderRouter.get("/:id/comments", Authenticated, Authorize("ADMIN"), getCommentsHandler("order"));
+purchaseOrderRouter.post(
+  "/:id/comments",
+  validate(createCommentSchema),
+  Authenticated,
+  Authorize("ADMIN"),
+  addCommentHandler("order")
 );

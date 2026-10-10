@@ -2,6 +2,8 @@
 import { Router } from "express";
 import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate } from "../../middlewares/validate.middleware.ts";
+import { createCommentSchema } from "../comments/comment.schema.ts";
+import { getCommentsHandler, addCommentHandler } from "../comments/comment.controller.ts";
 import {
   createPurchaseRequestSchema,
   updateStatusSchema,
@@ -38,4 +40,13 @@ purchaseRequestRouter.get(
   Authenticated,
   Authorize("ADMIN"),
   getPurchaseRequestAlertsHandler
+);
+
+// hilo de comentarios: quien pidió la solicitud y los admins (el service valida el acceso)
+purchaseRequestRouter.get("/:id/comments", Authenticated, getCommentsHandler("request"));
+purchaseRequestRouter.post(
+  "/:id/comments",
+  validate(createCommentSchema),
+  Authenticated,
+  addCommentHandler("request")
 );
