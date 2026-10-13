@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { prismaRoot } from "../config/database.ts";
 import { runWithCompany } from "../shared/tenant.ts";
+import { jwtSecret } from "../config/env.ts";
 
 // Token = { id, companyId }. El rol y si sigue activo se leen de la membresía en cada
 // petición: quitar a alguien de una empresa o cambiarle el rol aplica al instante.
@@ -19,8 +20,7 @@ export async function Authenticated(
     if (!token) {
       return res.status(401).json({ message: "Formato de token inválido" });
     }
-    const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
-    const payload = jwt.verify(token, clave) as { id?: string; companyId?: string };
+    const payload = jwt.verify(token, jwtSecret()) as { id?: string; companyId?: string };
     if (!payload.id || !payload.companyId) {
       return res.status(401).json({ message: "Sesión anterior a multi-empresa, vuelve a iniciar sesión" });
     }

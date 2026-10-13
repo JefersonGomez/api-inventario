@@ -5,7 +5,7 @@ import { prisma } from "../config/database.ts"
 
 describe("Middleware Authenticated", () => {
   const testEmail = "middleware-test@example.com"
-  const testPassword = "123456"
+  const testPassword = "Clave-segura-1"
   let token: string
 
   beforeAll(async () => {

@@ -27,7 +27,7 @@ describe("Invitaciones", () => {
     const info = await request(app).get(`/invitations/token/${token}`)
     expect(info.body).toMatchObject({ status: "valid", email: "nuevo@test.com", role: "EMPLOYE", userExists: false })
 
-    const accepted = await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Nuevo", password: "123456" })
+    const accepted = await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Nuevo", password: "Clave-segura-1" })
     expect(accepted.status).toBe(200)
     expect(accepted.body.company.id).toBe(admin.companyId)
     expect(accepted.body.user.role).toBe("EMPLOYE")
@@ -35,7 +35,7 @@ describe("Invitaciones", () => {
     // la sesión devuelta sirve y ve los datos de esa empresa
     expect((await request(app).get("/products").set({ Authorization: `Bearer ${accepted.body.token}` })).status).toBe(200)
     // el link ya no se puede reutilizar
-    expect((await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Otro", password: "123456" })).status).toBe(400)
+    expect((await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Otro", password: "Clave-segura-1" })).status).toBe(400)
     // quien invitó recibe el aviso
     expect(await prisma.notification.count({ where: { userId: admin.user.id, type: "memberJoined" } })).toBe(1)
   })
@@ -64,12 +64,12 @@ describe("Invitaciones", () => {
 
     // anular
     expect((await request(app).delete(`/invitations/${second.body.invitation.id}`).set(admin.auth)).status).toBe(204)
-    expect((await request(app).post(`/invitations/token/${tokenOf(second.body.link)}/accept`).send({ name: "A", password: "123456" })).status).toBe(400)
+    expect((await request(app).post(`/invitations/token/${tokenOf(second.body.link)}/accept`).send({ name: "A", password: "Clave-segura-1" })).status).toBe(400)
 
     // vencer
     const third = await request(app).post("/invitations").set(admin.auth).send({ email: "b@test.com" })
     await prisma.invitation.update({ where: { id: third.body.invitation.id }, data: { expiresAt: new Date(Date.now() - 1000) } })
-    const expired = await request(app).post(`/invitations/token/${tokenOf(third.body.link)}/accept`).send({ name: "B", password: "123456" })
+    const expired = await request(app).post(`/invitations/token/${tokenOf(third.body.link)}/accept`).send({ name: "B", password: "Clave-segura-1" })
     expect(expired.status).toBe(400)
     expect(expired.body.error).toContain("venció")
   })

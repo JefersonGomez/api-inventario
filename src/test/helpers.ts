@@ -2,6 +2,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prismaRoot } from "../config/database.ts";
+import { jwtSecret } from "../config/env.ts";
 
 // Vacía todas las tablas. Se niega a correr si la URL no apunta a una base "_test":
 // un .env mal cargado nunca debe poder borrar la base real.
@@ -29,7 +30,7 @@ export async function createUser(role: "ADMIN" | "EMPLOYE", companyId?: string) 
   await prismaRoot.membership.create({ data: { userId: user.id, companyId: cid, role } });
   const token = jwt.sign(
     { id: user.id, companyId: cid },
-    process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo",
+    jwtSecret(),
     { expiresIn: "15m" }
   );
   return { user, companyId: cid, token, auth: { Authorization: `Bearer ${token}` } };

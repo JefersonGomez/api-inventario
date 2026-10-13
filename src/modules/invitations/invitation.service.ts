@@ -10,6 +10,7 @@ import { currentCompanyId, runWithCompany } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { openSession } from "../auth/auth.service.ts";
+import { newPasswordSchema } from "../../shared/password.ts";
 
 const EXPIRY_DAYS = 7;
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
@@ -121,6 +122,8 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
     if (!user.isActive) throw new Error("Tu cuenta está desactivada");
   } else {
     if (!input.name?.trim()) throw new Error("Indica tu nombre");
+    const policy = newPasswordSchema.safeParse(input.password);
+    if (!policy.success) throw new Error(policy.error.issues[0]!.message);
     user = await prismaRoot.user.create({
       data: { name: input.name.trim(), email: inv.email, passwordHash: await bcrypt.hash(input.password, 10) },
     });

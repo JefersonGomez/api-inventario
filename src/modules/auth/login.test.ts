@@ -5,7 +5,7 @@ import { prisma } from "../../config/database.ts"
 
 describe("POST /auth/login", () => {
   const testEmail = "login-test@example.com"
-  const testPassword = "123456"
+  const testPassword = "Clave-segura-1"
 
   beforeAll(async () => {
     await resetDb()
@@ -44,7 +44,7 @@ describe("POST /auth/login", () => {
 it("debería rechazar login con email que no existe", async () => {
   const response = await request(app).post("/auth/login").send({
     email: "no-existe@example.com",
-    password: "123456"
+    password: "Clave-segura-1"
   })
   expect(response.status).toBe(401)  // antes 400
 })

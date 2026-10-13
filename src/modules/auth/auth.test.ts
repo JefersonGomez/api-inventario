@@ -23,7 +23,7 @@ describe("POST /auth/register", () => {
       .send({
         name: "Test",
         email: "test@example.com",
-        password: "123456"
+        password: "Clave-segura-1"
       })
 
     expect(response.status).toBe(201)
@@ -41,7 +41,7 @@ describe("POST /auth/register", () => {
       .send({
         name: "Test",
         email: "test@example.com",
-        password: "123456"
+        password: "Clave-segura-1"
       })
 
     // Intentamos crearlo de nuevo con el mismo email
@@ -50,7 +50,7 @@ describe("POST /auth/register", () => {
       .send({
         name: "Test 2",
         email: "test@example.com",
-        password: "123456"
+        password: "Clave-segura-1"
       })
 
     expect(response.status).toBe(400)

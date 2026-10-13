@@ -20,12 +20,22 @@ import swaggerUi from "swagger-ui-express"
 import path from 'node:path';
 import cors from "cors"
 import { corsOrigins } from "./config/cors.ts"
+import helmet from "helmet"
+import { sanitizeErrors, notFound, errorHandler } from "./middlewares/error.middleware.ts"
 
 const app = Express()
+// Detrás de un proxy (Caddy/Nginx) la IP real viene en X-Forwarded-For: TRUST_PROXY = cuántos proxies
+// hay delante (normalmente 1). Sin esto el límite de intentos vería la IP del proxy para todos.
+app.set("trust proxy", Number(process.env.TRUST_PROXY ?? 0))
+app.use(helmet({
+  // las fotos de perfil se piden desde otro origen (el frontend)
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}))
 app.use(cors({
   origin: corsOrigins
 }))
-app.use(Express.json())
+app.use(Express.json({ limit: "100kb" }))
+app.use(sanitizeErrors)
 
 
 app.use("/auth",authRouter)
@@ -55,6 +65,10 @@ const documentParse = parse(file);
 
 // ✅ Pasa swaggerUi.serve y swaggerUi.setup() juntos en app.use
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(documentParse));
+
+// siempre al final: ruta inexistente y errores no capturados
+app.use(notFound)
+app.use(errorHandler)
 
 
 export default app;

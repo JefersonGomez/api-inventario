@@ -3,6 +3,7 @@ import type { Server as HttpServer } from "node:http";
 import jwt from "jsonwebtoken";
 import { prismaRoot } from "../config/database.ts";
 import { corsOrigins } from "../config/cors.ts";
+import { jwtSecret } from "../config/env.ts";
 import { currentCompanyIdOrNull } from "./tenant.ts";
 
 // El socket no transporta datos: solo avisa "esto cambió" y el cliente vuelve a pedirlo por la API normal.
@@ -31,8 +32,7 @@ export function initRealtime(httpServer: HttpServer) {
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
-      const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
-      const payload = jwt.verify(token, clave) as { id?: string; companyId?: string };
+      const payload = jwt.verify(token, jwtSecret()) as { id?: string; companyId?: string };
       if (!payload.id || !payload.companyId) return next(new Error("unauthorized"));
       const membership = await prismaRoot.membership.findUnique({
         where: { userId_companyId: { userId: payload.id, companyId: payload.companyId } },

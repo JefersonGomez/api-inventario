@@ -126,8 +126,8 @@ describe("Sesión, cambio de empresa y planes", () => {
 
   it("login devuelve la empresa activa y sus empresas; el refresh conserva la empresa", async () => {
     const owner = await createUser("ADMIN")
-    await prisma.user.update({ where: { id: owner.user.id }, data: { passwordHash: await bcrypt.hash("123456", 4) } })
-    const login = await request(app).post("/auth/login").send({ email: owner.user.email, password: "123456" })
+    await prisma.user.update({ where: { id: owner.user.id }, data: { passwordHash: await bcrypt.hash("Clave-segura-1", 4) } })
+    const login = await request(app).post("/auth/login").send({ email: owner.user.email, password: "Clave-segura-1" })
     expect(login.status).toBe(200)
     expect(login.body.company.id).toBe(owner.companyId)
     expect(login.body.user.role).toBe("ADMIN")
@@ -164,9 +164,9 @@ describe("Sesión, cambio de empresa y planes", () => {
 
   it("registrarse crea una empresa nueva y vacía", async () => {
     await createUser("ADMIN") // otra empresa con datos
-    const reg = await request(app).post("/auth/register").send({ name: "Nueva", email: "nueva@test.com", password: "123456", company: "Ferretería Nueva" })
+    const reg = await request(app).post("/auth/register").send({ name: "Nueva", email: "nueva@test.com", password: "Clave-segura-1", company: "Ferretería Nueva" })
     expect(reg.status).toBe(201)
-    const login = await request(app).post("/auth/login").send({ email: "nueva@test.com", password: "123456" })
+    const login = await request(app).post("/auth/login").send({ email: "nueva@test.com", password: "Clave-segura-1" })
     expect(login.body.company.name).toBe("Ferretería Nueva")
     const products = await request(app).get("/products").set({ Authorization: `Bearer ${login.body.token}` })
     expect(products.body).toEqual([])

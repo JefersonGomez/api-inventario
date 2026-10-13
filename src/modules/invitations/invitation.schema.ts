@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { newPasswordSchema } from "../../shared/password.ts";
 
 export const createInvitationSchema = z.object({
   email: z.email("Email inválido"),
@@ -7,5 +8,6 @@ export const createInvitationSchema = z.object({
 
 export const acceptInvitationSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(), // solo si la cuenta es nueva
-  password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+  // para cuenta nueva exige la política completa; para una existente es la que ya tiene (se valida contra el hash)
+  password: z.string().min(1, "La contraseña es requerida").max(200),
 });

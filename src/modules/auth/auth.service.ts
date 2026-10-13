@@ -4,6 +4,7 @@ import { prismaRoot as prisma } from "../../config/database.ts";
 import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import crypto from "crypto";
+import { jwtSecret } from "../../config/env.ts";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
@@ -46,8 +47,7 @@ export async function Register(
 
 function signAccessToken(userId: string, companyId: string) {
   const opciones: SignOptions = { expiresIn: ACCESS_TOKEN_EXPIRY };
-  const clave = process.env.JWT_SECRET_KEY || "clave_secreta_por_defecto_desarrollo";
-  return jwt.sign({ id: userId, companyId }, clave, opciones);
+  return jwt.sign({ id: userId, companyId }, jwtSecret(), opciones);
 }
 
 // Refresh token persistido: "id.secret"; el id ubica la fila, el secret la valida
