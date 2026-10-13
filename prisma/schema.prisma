@@ -52,6 +52,8 @@ model User {
   email            String            @unique
   passwordHash     String
   createdAt        DateTime          @default(now()) // Corregido: createAt -> createdAt
+  termsAcceptedAt  DateTime? // cuándo aceptó los términos y la política de privacidad
+  termsVersion     String? // versión que aceptó (src/config/legal.ts)
   isPlatformOwner  Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
   avatarUrl        String?
   phone            String?

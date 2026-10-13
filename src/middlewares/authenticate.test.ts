@@ -10,7 +10,7 @@ describe("Middleware Authenticated", () => {
 
   beforeAll(async () => {
     await resetDb()
-    await request(app).post("/auth/register").send({
+    await request(app).post("/auth/register").send({ acceptTerms: true,
       name: "Middleware Test",
       email: testEmail,
       password: testPassword

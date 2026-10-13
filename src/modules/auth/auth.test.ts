@@ -20,7 +20,7 @@ describe("POST /auth/register", () => {
   it("debería registrar un usuario nuevo correctamente", async () => {
     const response = await request(app)
       .post("/auth/register")
-      .send({
+      .send({ acceptTerms: true,
         name: "Test",
         email: "test@example.com",
         password: "Clave-segura-1"
@@ -38,7 +38,7 @@ describe("POST /auth/register", () => {
     // Primero creamos el usuario
     await request(app)
       .post("/auth/register")
-      .send({
+      .send({ acceptTerms: true,
         name: "Test",
         email: "test@example.com",
         password: "Clave-segura-1"
@@ -47,7 +47,7 @@ describe("POST /auth/register", () => {
     // Intentamos crearlo de nuevo con el mismo email
     const response = await request(app)
       .post("/auth/register")
-      .send({
+      .send({ acceptTerms: true,
         name: "Test 2",
         email: "test@example.com",
         password: "Clave-segura-1"

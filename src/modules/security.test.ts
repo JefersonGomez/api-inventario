@@ -62,7 +62,7 @@ describe("Seguridad", () => {
 
   describe("contraseñas", () => {
     const register = (password: string, email = "nuevo@test.com") =>
-      request(app).post("/auth/register").send({ name: "Nuevo", email, password })
+      request(app).post("/auth/register").send({ acceptTerms: true, name: "Nuevo", email, password })
 
     it("exige 8 caracteres y rechaza las más comunes", async () => {
       expect((await register("1234567")).status).toBe(400)
@@ -92,9 +92,9 @@ describe("Seguridad", () => {
       const admin = await createUser("ADMIN")
       const { body } = await request(app).post("/invitations").set(admin.auth).send({ email: "inv@test.com" })
       const token = body.link.split("/invite/")[1]
-      const weak = await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Inv", password: "password" })
+      const weak = await request(app).post(`/invitations/token/${token}/accept`).send({ acceptTerms: true, name: "Inv", password: "password" })
       expect(weak.status).toBe(400)
-      const ok = await request(app).post(`/invitations/token/${token}/accept`).send({ name: "Inv", password: "Clave-segura-1" })
+      const ok = await request(app).post(`/invitations/token/${token}/accept`).send({ acceptTerms: true, name: "Inv", password: "Clave-segura-1" })
       expect(ok.status).toBe(200)
     })
   })

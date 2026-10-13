@@ -10,7 +10,7 @@ describe("POST /auth/login", () => {
   beforeAll(async () => {
     await resetDb()
     // Nos apoyamos en el endpoint real de registro para crear el usuario de prueba
-    await request(app).post("/auth/register").send({
+    await request(app).post("/auth/register").send({ acceptTerms: true,
       name: "Login Test",
       email: testEmail,
       password: testPassword

@@ -11,6 +11,7 @@ import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { openSession } from "../auth/auth.service.ts";
 import { newPasswordSchema } from "../../shared/password.ts";
+import { TERMS_VERSION, TERMS_REQUIRED_MESSAGE } from "../../config/legal.ts";
 
 const EXPIRY_DAYS = 7;
 const hashToken = (token: string) => crypto.createHash("sha256").update(token).digest("hex");
@@ -108,7 +109,7 @@ export async function getInvitationByToken(token: string) {
 }
 
 // Aceptar: cuenta nueva (name + password) o existente (su password). Devuelve la sesión ya abierta en la empresa.
-export async function acceptInvitation(token: string, input: { name?: string; password: string }) {
+export async function acceptInvitation(token: string, input: { name?: string; password: string; acceptTerms?: boolean }) {
   const inv = await findByToken(token);
   if (!inv) throw new Error("Invitación no encontrada");
   const status = statusOf(inv);
@@ -122,10 +123,17 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
     if (!user.isActive) throw new Error("Tu cuenta está desactivada");
   } else {
     if (!input.name?.trim()) throw new Error("Indica tu nombre");
+    if (input.acceptTerms !== true) throw new Error(TERMS_REQUIRED_MESSAGE);
     const policy = newPasswordSchema.safeParse(input.password);
     if (!policy.success) throw new Error(policy.error.issues[0]!.message);
     user = await prismaRoot.user.create({
-      data: { name: input.name.trim(), email: inv.email, passwordHash: await bcrypt.hash(input.password, 10) },
+      data: {
+        name: input.name.trim(),
+        email: inv.email,
+        passwordHash: await bcrypt.hash(input.password, 10),
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
+      },
     });
   }
   const userId = user.id;

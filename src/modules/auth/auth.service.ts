@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import crypto from "crypto";
 import { jwtSecret } from "../../config/env.ts";
+import { TERMS_VERSION } from "../../config/legal.ts";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
@@ -33,6 +34,8 @@ export async function Register(
         name,
         email,
         passwordHash,
+        termsAcceptedAt: new Date(),
+        termsVersion: TERMS_VERSION,
         ...(extra.phone && { phone: extra.phone }),
         ...(extra.company && { company: extra.company }),
       },

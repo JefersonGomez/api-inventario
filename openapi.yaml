@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "3.4.0"
+  version: "3.5.0"
   description: |
     API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
@@ -475,13 +475,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, email, password]
+              required: [name, email, password, acceptTerms]
               properties:
                 name: { type: string, minLength: 1 }
                 email: { type: string, format: email }
                 password: { type: string, minLength: 8, maxLength: 72, description: Sin las contraseñas más comunes }
                 phone: { type: string, maxLength: 30 }
                 company: { type: string, maxLength: 120 }
+                acceptTerms: { type: boolean, enum: [true], description: Obligatoria. Aceptación de los términos y la política de privacidad (se guarda con fecha y versión). }
       responses:
         '201':
           description: Usuario creado
@@ -867,6 +868,7 @@ paths:
               properties:
                 name: { type: string }
                 password: { type: string, minLength: 6 }
+                acceptTerms: { type: boolean, description: Obligatoria (true) solo si la invitación crea una cuenta nueva }
       responses:
         '200':
           description: Sesión

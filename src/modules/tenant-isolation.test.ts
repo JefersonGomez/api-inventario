@@ -164,7 +164,7 @@ describe("Sesión, cambio de empresa y planes", () => {
 
   it("registrarse crea una empresa nueva y vacía", async () => {
     await createUser("ADMIN") // otra empresa con datos
-    const reg = await request(app).post("/auth/register").send({ name: "Nueva", email: "nueva@test.com", password: "Clave-segura-1", company: "Ferretería Nueva" })
+    const reg = await request(app).post("/auth/register").send({ acceptTerms: true, name: "Nueva", email: "nueva@test.com", password: "Clave-segura-1", company: "Ferretería Nueva" })
     expect(reg.status).toBe(201)
     const login = await request(app).post("/auth/login").send({ email: "nueva@test.com", password: "Clave-segura-1" })
     expect(login.body.company.name).toBe("Ferretería Nueva")
