@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "3.0.0"
+  version: "3.1.0"
   description: |
     API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
@@ -203,7 +203,12 @@ components:
         barcode: { type: string, nullable: true }
         name: { type: string }
         description: { type: string, nullable: true }
-        price: { type: string, description: "Decimal(10,2) serializado como texto", example: "1250.00" }
+        price: { type: string, description: "Precio de venta. Decimal(10,2) serializado como texto", example: "1250.00" }
+        cost:
+          type: string
+          nullable: true
+          description: "Costo promedio ponderado (Decimal(12,4) como texto). null = sin costo conocido. Se recalcula al recibir órdenes."
+          example: "980.0000"
         stock: { type: integer }
         minStock: { type: integer }
         categoryId: { type: string, format: uuid }
@@ -225,6 +230,7 @@ components:
         name: { type: string, minLength: 1 }
         description: { type: string }
         price: { type: number, exclusiveMinimum: true, minimum: 0 }
+        cost: { type: number, minimum: 0, nullable: true, description: Costo inicial (opcional) }
         stock: { type: number, minimum: 0 }
         minStock: { type: number, minimum: 0 }
         categoryId: { type: string, format: uuid }
@@ -240,6 +246,7 @@ components:
         barcode: { type: string }
         description: { type: string }
         price: { type: number, exclusiveMinimum: true, minimum: 0 }
+        cost: { type: number, minimum: 0, nullable: true, description: "Omitido = no se toca; null = borra el costo" }
         minStock: { type: number, minimum: 0 }
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
@@ -1431,7 +1438,10 @@ paths:
   /reports/inventory-value:
     get:
       tags: [Reportes]
-      summary: Valor total del inventario
+      summary: Valor del inventario a costo
+      description: |
+        `totalValue` = stock × costo promedio de los productos activos (lo que hay invertido).
+        Los productos con stock y sin costo no suman: se cuentan en `productsWithoutCost`.
       responses:
         '200':
           description: Totales
@@ -1440,13 +1450,15 @@ paths:
               schema:
                 type: object
                 properties:
-                  totalValue: { type: number }
+                  totalValue: { type: number, description: Valor a costo }
+                  retailValue: { type: number, description: "Valor a precio de venta (referencia)" }
                   totalProducts: { type: integer }
+                  productsWithoutCost: { type: integer, description: Productos con stock y sin costo cargado }
 
   /reports/inventory-value-breakdown:
     get:
       tags: [Reportes]
-      summary: Capital activo vs. inmovilizado
+      summary: Capital activo vs. inmovilizado (a costo)
       parameters:
         - name: days
           in: query
@@ -1464,6 +1476,7 @@ paths:
                   totalValue: { type: number }
                   activeValue: { type: number }
                   immobilizedValue: { type: number }
+                  productsWithoutCost: { type: integer }
                   immobilizedProducts:
                     type: array
                     items:
@@ -1472,7 +1485,8 @@ paths:
                         id: { type: string, format: uuid }
                         sku: { type: string }
                         name: { type: string }
-                        value: { type: number }
+                        value: { type: number, description: Valor a costo (0 si no tiene costo) }
+                        hasCost: { type: boolean }
 
   /reports/stock-forecast:
     get:

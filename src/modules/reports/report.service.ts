@@ -36,18 +36,31 @@ export async function getMovementsReport(from?: string, to?: string) {
   return movements;
 }
 
+// Valor del inventario A COSTO (stock × costo promedio), que es lo que espera un contador.
+// Los productos con stock y sin costo conocido no suman: se cuentan en `productsWithoutCost`
+// para avisarlo en pantalla, en vez de inventarles un valor.
+// `retailValue` (stock × precio de venta) queda como referencia de lo que valdría vendido.
 export async function getInventoryValueReport() {
-  const allProducts = await prisma.product.findMany();
+  const products = await prisma.product.findMany({
+    where: { deletedAt: null },
+    select: { stock: true, price: true, cost: true },
+  });
 
   let totalValue = 0;
+  let retailValue = 0;
+  let productsWithoutCost = 0;
 
-  for (const product of allProducts) {
-    totalValue += product.stock * Number(product.price);
+  for (const product of products) {
+    retailValue += product.stock * Number(product.price);
+    if (product.cost !== null) totalValue += product.stock * Number(product.cost);
+    else if (product.stock > 0) productsWithoutCost++;
   }
 
   return {
     totalValue: Number(totalValue.toFixed(2)),
-    totalProducts: allProducts.length
+    retailValue: Number(retailValue.toFixed(2)),
+    totalProducts: products.length,
+    productsWithoutCost,
   };
 }
 
@@ -56,7 +69,7 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
 
   const allProducts = await prisma.product.findMany({
     where: { deletedAt: null },
-    select: { id: true, name: true, sku: true, stock: true, price: true },
+    select: { id: true, name: true, sku: true, stock: true, cost: true },
   });
 
   // Traemos, en una sola consulta, los productos que SÍ tuvieron
@@ -70,21 +83,22 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
 
   let activeValue = 0;
   let immobilizedValue = 0;
-  const immobilizedProducts: { id: string; name: string; sku: string; value: number }[] = [];
+  let productsWithoutCost = 0;
+  const immobilizedProducts: { id: string; name: string; sku: string; value: number; hasCost: boolean }[] = [];
 
   for (const product of allProducts) {
-    const value = product.stock * Number(product.price);
+    const hasCost = product.cost !== null;
+    if (!hasCost && product.stock > 0) productsWithoutCost++;
+    const value = hasCost ? product.stock * Number(product.cost) : 0;
 
     if (activeProductIds.has(product.id)) {
       activeValue += value;
     } else {
       immobilizedValue += value;
-      immobilizedProducts.push({
-        id: product.id,
-        name: product.name,
-        sku: product.sku,
-        value: Number(value.toFixed(2)),
-      });
+      // sin stock no hay capital atrapado; sin costo se lista igual (con valor "—") para que se complete
+      if (product.stock > 0) {
+        immobilizedProducts.push({ id: product.id, name: product.name, sku: product.sku, value: Number(value.toFixed(2)), hasCost });
+      }
     }
   }
 
@@ -97,6 +111,7 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
     totalValue: Number((activeValue + immobilizedValue).toFixed(2)),
     activeValue: Number(activeValue.toFixed(2)),
     immobilizedValue: Number(immobilizedValue.toFixed(2)),
+    productsWithoutCost,
     immobilizedProducts,
   };
 }

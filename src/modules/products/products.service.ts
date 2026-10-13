@@ -21,7 +21,8 @@ export async function createProduct(
   minStock: number,
   categoryId: string,
   expirationDate?: Date, // ← nuevo parámetro, al final para no romper el orden existente
-  supplierId?: string | null
+  supplierId?: string | null,
+  cost?: number | null
 ) {
   await assertSupplierExists(supplierId);
   const { maxProducts } = (await getCompany()).limits;
@@ -57,6 +58,7 @@ export async function createProduct(
       categoryId: categoryId,
       expirationDate: expirationDate ?? null, // ← nuevo
       supplierId: supplierId ?? null,
+      cost: cost ?? null,
     },
     include: withSupplier,
   });
@@ -102,7 +104,8 @@ export async function updateProduct(
   categoryId: string,
   userId: string,
   expirationDate?: Date, // ← nuevo parámetro, al final
-  supplierId?: string | null
+  supplierId?: string | null,
+  cost?: number | null // undefined = no tocar; null = borrar el costo
 ) {
   await assertSupplierExists(supplierId);
   const existCategory = await prisma.category.findFirst({
@@ -124,12 +127,13 @@ export async function updateProduct(
       categoryId: categoryId,
       expirationDate: expirationDate ?? null, // ← nuevo
       ...(supplierId !== undefined && { supplierId }),
+      ...(cost !== undefined && { cost }),
     },
     include: withSupplier,
   });
 
   await logAudit(userId, "UPDATE", "Product", id, {
-    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId
+    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost
   });
 
   return updatedProduct;

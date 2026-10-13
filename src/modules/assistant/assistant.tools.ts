@@ -14,7 +14,7 @@ export const toolDeclarations = [
   },
   {
     name: "getInventoryValueReport",
-    description: "Devuelve el valor total del inventario (stock × precio de todos los productos activos) y la cantidad total de productos. Útil para preguntas sobre cuánto dinero hay invertido en inventario.",
+    description: "Devuelve el valor total del inventario a COSTO (stock × costo promedio de compra; es lo que hay invertido), el valor a precio de venta como referencia (retailValue), la cantidad de productos y cuántos productos con stock no tienen costo cargado (esos no suman al total). Útil para preguntas sobre cuánto dinero hay invertido en inventario.",
     parameters: {
       type: Type.OBJECT,
       properties: {},
@@ -22,7 +22,7 @@ export const toolDeclarations = [
   },
   {
     name: "getAllProducts",
-    description: "Devuelve la lista completa de productos activos, con su categoría, precio, stock actual y stock mínimo. Útil para preguntas generales sobre qué productos existen o sus datos puntuales.",
+    description: "Devuelve la lista completa de productos activos, con su categoría, precio de venta, costo (puede ser null), stock actual y stock mínimo. Útil para preguntas generales sobre qué productos existen o sus datos puntuales.",
     parameters: {
       type: Type.OBJECT,
       properties: {},

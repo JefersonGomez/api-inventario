@@ -100,6 +100,7 @@ model Product {
   name               String
   description        String?
   price              Decimal             @db.Decimal(10, 2)
+  cost               Decimal?            @db.Decimal(12, 4) // costo promedio ponderado; null = sin costo conocido
   stock              Int                 @default(0)
   minStock           Int                 @default(0)
   categoryId         String

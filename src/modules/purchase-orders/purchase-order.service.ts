@@ -120,6 +120,21 @@ export async function receivePurchaseOrder(id: string, userId: string) {
     }
 
     for (const item of order.items) {
+      // Costo promedio ponderado: se calcula con el stock ANTES de que entre esta compra.
+      // Sin stock o sin costo previo no hay nada que ponderar: el costo pasa a ser el de la compra.
+      const before = await tx.product.findFirst({
+        where: { id: item.productId, deletedAt: null },
+        select: { stock: true, cost: true },
+      });
+      if (before) {
+        const unitCost = Number(item.unitCost);
+        const hasBase = before.cost !== null && before.stock > 0;
+        const newCost = hasBase
+          ? (before.stock * Number(before.cost) + item.quantity * unitCost) / (before.stock + item.quantity)
+          : unitCost;
+        await tx.product.update({ where: { id: item.productId }, data: { cost: Number(newCost.toFixed(4)) } });
+      }
+
       await createMovement(
         item.productId,
         userId,

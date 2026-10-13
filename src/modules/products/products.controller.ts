@@ -15,7 +15,7 @@ const PRODUCT_TOPICS = [...STOCK_TOPICS, "product-price-history"];
 
 export async function CreateProductController(req: Request, res: Response) {
   try {
-    const { sku, barcode, name, description, price, stock, minStock, categoryId,expirationDate, supplierId } = req.body;
+    const { sku, barcode, name, description, price, stock, minStock, categoryId,expirationDate, supplierId, cost } = req.body;
 
     const created = await createProduct(
       sku,
@@ -27,7 +27,8 @@ export async function CreateProductController(req: Request, res: Response) {
       minStock,
       categoryId,
       expirationDate,
-      supplierId
+      supplierId,
+      cost
     );
     emit(EVERYONE, PRODUCT_TOPICS);
     res.status(201).json(created);
@@ -62,13 +63,13 @@ export async function getProductByIdController(req: Request, res: Response) {
 export async function updateProductController(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { name, barcode, description, price, minStock, categoryId,expirationDate, supplierId } = req.body;
+    const { name, barcode, description, price, minStock, categoryId,expirationDate, supplierId, cost } = req.body;
     
     if (!id || typeof id !== "string") {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" });
     }
 
-    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id,expirationDate,supplierId);
+    const updated = await updateProduct(id, name, barcode, description, price, minStock, categoryId,req.user!.id,expirationDate,supplierId,cost);
     emit(EVERYONE, PRODUCT_TOPICS);
     res.status(200).json(updated);
   } catch (error) {
