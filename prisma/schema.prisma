@@ -15,6 +15,12 @@ enum Role {
   EMPLOYE
 }
 
+// Moneda en la que la empresa muestra sus montos (los valores se guardan sin conversión)
+enum CurrencyCode {
+  CRC
+  USD
+}
+
 // Plan de la cuenta del dueño; los límites viven en src/config/plans.ts
 enum PlanCode {
   BASIC
@@ -249,6 +255,7 @@ model Comment {
 model Company {
   id               String            @id @default(uuid())
   name             String
+  currency         CurrencyCode      @default(CRC)
   ownerId          String
   owner            User              @relation("CompanyOwner", fields: [ownerId], references: [id])
   createdAt        DateTime          @default(now())

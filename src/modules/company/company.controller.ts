@@ -12,7 +12,7 @@ export async function getCompanyHandler(_req: Request, res: Response) {
 
 export async function updateCompanyHandler(req: Request, res: Response) {
   try {
-    res.json(await service.updateCompany(req.body.name, req.user!.id));
+    res.json(await service.updateCompany(req.body, req.user!.id));
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
@@ -28,7 +28,7 @@ export async function listMyCompaniesHandler(req: Request, res: Response) {
 
 export async function createCompanyHandler(req: Request, res: Response) {
   try {
-    res.status(201).json(await service.createCompany(req.user!.id, req.body.name));
+    res.status(201).json(await service.createCompany(req.user!.id, req.body.name, req.body.currency));
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }

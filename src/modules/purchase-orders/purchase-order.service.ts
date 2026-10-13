@@ -5,6 +5,7 @@ import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { sendEmail, escapeHtml } from "../../shared/email.ts";
+import { formatMoney } from "../../shared/money.ts";
 import { getCompany } from "../company/company.service.ts";
 
 export async function createPurchaseOrder(
@@ -182,15 +183,15 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
   });
   if (!order) throw new Error("Orden de compra no encontrada");
   if (!order.supplier.email) throw new Error("El proveedor no tiene email cargado");
-  const { name: company } = await getCompany();
+  const { name: company, currency } = await getCompany();
   if (!company) throw new Error("Configura el nombre de la empresa en Configuración antes de enviar");
 
   const total = order.items.reduce((sum, i) => sum + i.quantity * Number(i.unitCost), 0);
   const cell = 'style="padding:6px 10px;border-bottom:1px solid #e5e5e0"';
   const rows = order.items
     .map((i) => `<tr><td ${cell}>${escapeHtml(i.product.name)}</td><td ${cell} align="right">${i.quantity}</td>`
-      + `<td ${cell} align="right">${Number(i.unitCost).toFixed(2)}</td>`
-      + `<td ${cell} align="right">${(i.quantity * Number(i.unitCost)).toFixed(2)}</td></tr>`)
+      + `<td ${cell} align="right">${formatMoney(Number(i.unitCost), currency)}</td>`
+      + `<td ${cell} align="right">${formatMoney(i.quantity * Number(i.unitCost), currency)}</td></tr>`)
     .join("");
   const html = `<div style="font-family:Arial,sans-serif;color:#1a1a18;max-width:640px">
   <h2 style="margin:0 0 4px">${escapeHtml(company)}</h2>
@@ -202,7 +203,7 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
       <th ${cell}>Producto</th><th ${cell} align="right">Cantidad</th><th ${cell} align="right">Costo unitario</th><th ${cell} align="right">Subtotal</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-    <tfoot><tr><td colspan="3" ${cell} align="right"><strong>Total</strong></td><td ${cell} align="right"><strong>${total.toFixed(2)}</strong></td></tr></tfoot>
+    <tfoot><tr><td colspan="3" ${cell} align="right"><strong>Total</strong></td><td ${cell} align="right"><strong>${formatMoney(total, currency)}</strong></td></tr></tfoot>
   </table>
   <p style="margin-top:16px;color:#6b6b66;font-size:13px">Fecha: ${order.createdAt.toLocaleDateString("es")} · Creada por: ${escapeHtml(order.createdBy.name)}</p>
 </div>`;
