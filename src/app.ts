@@ -14,6 +14,7 @@ import { assistantRouter } from "./modules/assistant/assistant.routes.ts";
 import { notificationsRouter } from "./modules/notifications/notifications.routes.ts"
 import { companyRouter, companiesRouter } from "./modules/company/company.routes.ts"
 import { invitationRouter } from "./modules/invitations/invitation.routes.ts"
+import { platformRouter } from "./modules/platform/platform.routes.ts"
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -55,6 +56,7 @@ app.use("/notifications",notificationsRouter)
 app.use("/company", companyRouter)
 app.use("/companies", companiesRouter)
 app.use("/invitations", invitationRouter)
+app.use("/platform", platformRouter)
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })

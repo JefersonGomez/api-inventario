@@ -52,6 +52,7 @@ model User {
   email            String            @unique
   passwordHash     String
   createdAt        DateTime          @default(now()) // Corregido: createAt -> createdAt
+  isPlatformOwner  Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
   avatarUrl        String?
   phone            String?
   company          String?
@@ -256,6 +257,8 @@ model Company {
   id               String            @id @default(uuid())
   name             String
   currency         CurrencyCode      @default(CRC)
+  suspendedAt      DateTime? // suspendida por el dueño de la plataforma (p. ej. falta de pago)
+  suspensionReason String?
   ownerId          String
   owner            User              @relation("CompanyOwner", fields: [ownerId], references: [id])
   createdAt        DateTime          @default(now())

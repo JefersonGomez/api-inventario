@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "3.3.0"
+  version: "3.4.0"
   description: |
     API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
@@ -47,6 +47,7 @@ tags:
   - name: Reportes
   - name: Auditoría
   - name: Asistente
+  - name: Plataforma
   - name: Sistema
 
 security:
@@ -82,6 +83,15 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    CompanySuspended:
+      description: La empresa está suspendida (solo quedan disponibles /auth/me, /company, /companies, /profile/me y cambiar de empresa)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string, example: COMPANY_SUSPENDED }
+              error: { type: string, description: Motivo indicado al suspender }
     TooManyRequests:
       description: Demasiados intentos; espera unos minutos (cabecera `RateLimit-Reset`)
       content:
@@ -127,6 +137,7 @@ components:
         phone: { type: string, nullable: true }
         company: { type: string, nullable: true }
         isActive: { type: boolean }
+        isPlatformOwner: { type: boolean, description: "true = dueño de la plataforma (solo en /profile/me)" }
         createdAt: { type: string, format: date-time }
 
     CompanyAccess:
@@ -156,6 +167,8 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         currency: { type: string, enum: [CRC, USD], description: Moneda en la que se muestran los montos }
+        suspendedAt: { type: string, format: date-time, nullable: true, description: "Fecha de suspensión (null = activa)" }
+        suspensionReason: { type: string, nullable: true }
         ownerId: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -861,6 +874,85 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuthResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  # ---------------------------------------------------------------- Plataforma
+  /platform/companies:
+    get:
+      tags: [Plataforma]
+      summary: Todas las empresas de la plataforma (solo dueño de la plataforma)
+      description: |
+        Nombre, dueño, plan, uso y estado. **Nunca** devuelve datos de inventario de los clientes.
+        El dueño de la plataforma se marca solo con `npm run owner -- correo` (no hay endpoint).
+      responses:
+        '200':
+          description: Empresas, de la más reciente a la más antigua
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    name: { type: string }
+                    currency: { type: string, enum: [CRC, USD] }
+                    createdAt: { type: string, format: date-time }
+                    suspendedAt: { type: string, format: date-time, nullable: true }
+                    suspensionReason: { type: string, nullable: true }
+                    owner:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        email: { type: string }
+                    plan: { type: string, enum: [BASIC, PRO, BUSINESS] }
+                    limits: { type: object, additionalProperties: true }
+                    users: { type: integer, description: Miembros activos }
+                    products: { type: integer, description: Productos no eliminados }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform/companies/{id}/plan:
+    patch:
+      tags: [Plataforma]
+      summary: Cambiar el plan del dueño de la empresa (solo dueño de la plataforma)
+      description: El plan es de la cuenta del dueño, así que aplica a todas sus empresas. Queda en la auditoría.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan]
+              properties:
+                plan: { type: string, enum: [BASIC, PRO, BUSINESS] }
+      responses:
+        '204': { description: Plan cambiado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform/companies/{id}/suspension:
+    patch:
+      tags: [Plataforma]
+      summary: Suspender o reactivar una empresa (solo dueño de la plataforma)
+      description: |
+        Con la empresa suspendida, sus usuarios pueden iniciar sesión pero toda ruta de datos responde
+        **403 `COMPANY_SUSPENDED`** con el motivo. No se borra nada. Queda en la auditoría.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [suspended]
+              properties:
+                suspended: { type: boolean }
+                reason: { type: string, maxLength: 300, description: Lo ve la empresa }
+      responses:
+        '204': { description: Estado cambiado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------------------------------------------------------- Categorías
   /categories:

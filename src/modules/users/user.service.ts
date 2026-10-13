@@ -4,6 +4,7 @@ import bcrypt from "bcrypt"
 // el rol es por empresa: lo agrega el controller desde req.user
 const profileSelect = {
   id: true, name: true, email: true, avatarUrl: true, phone: true, company: true, isActive: true, createdAt: true,
+  isPlatformOwner: true,
 } as const;
 
 export async function getProfile(userId: string) {
