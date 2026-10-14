@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: "Inventario API"
-  version: "3.5.0"
+  version: "3.6.0"
   description: |
     API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
@@ -228,6 +228,7 @@ components:
         name: { type: string }
         description: { type: string, nullable: true }
         price: { type: string, description: "Precio de venta. Decimal(10,2) serializado como texto", example: "1250.00" }
+        pendingReview: { type: boolean, description: "Importado sin precio (\"Por completar\"); se limpia al editarlo" }
         cost:
           type: string
           nullable: true
@@ -275,6 +276,49 @@ components:
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
         supplierId: { type: string, format: uuid, nullable: true }
+
+    ImportResult:
+      type: object
+      properties:
+        dryRun: { type: boolean }
+        created: { type: integer }
+        updated: { type: integer }
+        summary:
+          type: object
+          properties:
+            total: { type: integer }
+            toCreate: { type: integer }
+            toUpdate: { type: integer }
+            skipped: { type: integer }
+            errors: { type: integer }
+            pending: { type: integer, description: Filas que entran sin precio y quedan "Por completar" }
+            fixed: { type: integer }
+            newCategories: { type: array, items: { type: string } }
+            newSuppliers: { type: array, items: { type: string } }
+            groups:
+              type: object
+              description: Filas por tipo de problema (se cuentan aunque el arreglo esté activo)
+              properties:
+                missingCategory: { type: integer }
+                missingSku: { type: integer }
+                missingPrice: { type: integer }
+                badNumbers: { type: integer }
+                invalidDate: { type: integer }
+                barcodeConflict: { type: integer }
+                repeatedSku: { type: integer }
+                existing: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            properties:
+              rowNumber: { type: integer }
+              sku: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [create, update, skip, error] }
+              pending: { type: boolean }
+              fixes: { type: array, items: { type: string }, description: Arreglos aplicados a la fila }
+              errors: { type: array, items: { type: string } }
 
     MovementType:
       type: string
@@ -1052,6 +1096,71 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /products/import:
+    post:
+      tags: [Productos]
+      summary: Importar productos desde Excel (ADMIN)
+      description: |
+        El frontend lee el .xlsx y manda las filas. Con `dryRun: true` solo valida y devuelve la vista previa.
+        Reglas: una categoría o proveedor que no existe se crea; solo se importan las filas válidas; respeta el
+        límite de productos del plan (las actualizaciones no cuentan). Sin `options` es estricto: cualquier dato
+        faltante o inválido es error y un SKU existente se salta. `options` activa arreglos en bloque; un SKU
+        existente con `updateExisting` actualiza solo los campos que trae (nunca el stock) y deja auditoría.
+        Hasta 2000 filas (esta ruta acepta cuerpos de hasta 2 MB).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows, dryRun]
+              properties:
+                dryRun: { type: boolean }
+                options:
+                  type: object
+                  properties:
+                    defaultCategory: { type: string, maxLength: 100, description: Categoría para filas sin categoría }
+                    generateSku: { type: boolean, description: SKU automático IMP-0001… para filas sin SKU }
+                    pendingPrice: { type: boolean, description: Sin precio válido → precio 0 y marca pendingReview }
+                    fixNumbers: { type: boolean, description: Redondea stock, negativos a 0, quita costo inválido }
+                    ignoreInvalidDate: { type: boolean }
+                    dropConflictingBarcode: { type: boolean }
+                    skipRepeated: { type: boolean, description: SKU repetido en el archivo → se usa la primera fila }
+                    updateExisting: { type: boolean }
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 2000
+                  items:
+                    type: object
+                    required: [rowNumber]
+                    properties:
+                      rowNumber: { type: integer, description: Fila del Excel (para reportar errores) }
+                      sku: { type: string }
+                      name: { type: string }
+                      category: { type: string }
+                      price: { type: number }
+                      cost: { type: number }
+                      stock: { type: integer }
+                      minStock: { type: integer }
+                      barcode: { type: string }
+                      description: { type: string }
+                      supplier: { type: string }
+                      expirationDate: { type: string, example: "2027-03-31" }
+      responses:
+        '200':
+          description: Vista previa (dryRun)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportResult' }
+        '201':
+          description: Importación hecha
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportResult' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 

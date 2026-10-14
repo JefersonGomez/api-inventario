@@ -10,6 +10,7 @@ import {
   getExpiringSoonProducts
 } from "./products.service.ts";
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
+import { importProducts } from "./products-import.service.ts";
 
 const PRODUCT_TOPICS = [...STOCK_TOPICS, "product-price-history"];
 
@@ -136,5 +137,14 @@ export async function getExpiringSoonProductsHandler(req: Request, res: Response
     res.json(products);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
+  }
+}
+export async function importProductsHandler(req: Request, res: Response) {
+  try {
+    const result = await importProducts(req.body.rows, req.body.dryRun, req.user!.id, req.body.options ?? {});
+    if (!result.dryRun && result.created + result.updated > 0) emit(EVERYONE, PRODUCT_TOPICS);
+    res.status(result.dryRun ? 200 : 201).json(result);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
   }
 }

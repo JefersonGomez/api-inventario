@@ -123,6 +123,7 @@ export async function updateProduct(
       barcode: barcode || null,
       description: description ?? null,
       price: price,
+      pendingReview: false, // al editarlo (con precio válido, lo exige el schema) deja de estar "Por completar"
       minStock: minStock,
       categoryId: categoryId,
       expirationDate: expirationDate ?? null, // ← nuevo

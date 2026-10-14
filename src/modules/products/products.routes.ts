@@ -1,14 +1,18 @@
 import { Router } from "express";
 import { CreateProductController,getProductPriceHistoryHandler,getAllProductsController,getProductByIdController,updateProductController,deleteProductController,getProductByBarcodeController,
-    getExpiringSoonProductsHandler
+    getExpiringSoonProductsHandler, importProductsHandler
 } from "./products.controller.ts";
+import Express from "express";
 import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate } from "../../middlewares/validate.middleware.ts";
-import { productsSchemaCreate,productsSchemaUpdate } from "./products.schema.ts";
+import { productsSchemaCreate,productsSchemaUpdate,productsImportSchema } from "./products.schema.ts";
 export const router = Router()
 
 router.post("/",validate(productsSchemaCreate),Authenticated, Authorize("ADMIN"),CreateProductController)
 router.get("/",Authenticated,getAllProductsController)
+
+// importación desde Excel: hasta 2000 filas, por eso su propio límite de tamaño (el global es 100 KB)
+router.post("/import", Express.json({ limit: "2mb" }), validate(productsImportSchema), Authenticated, Authorize("ADMIN"), importProductsHandler)
 
 // rutas fijas antes de "/:id", o Express las toma como un id
 router.get("/expiring-soon", Authenticated, getExpiringSoonProductsHandler);

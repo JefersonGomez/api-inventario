@@ -35,7 +35,9 @@ app.use(helmet({
 app.use(cors({
   origin: corsOrigins
 }))
-app.use(Express.json({ limit: "100kb" }))
+// la importación de productos trae su propio parser con un límite mayor (products.routes.ts)
+const jsonDefault = Express.json({ limit: "100kb" })
+app.use((req, res, next) => (req.path === "/products/import" ? next() : jsonDefault(req, res, next)))
 app.use(sanitizeErrors)
 
 

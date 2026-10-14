@@ -109,6 +109,7 @@ model Product {
   name               String
   description        String?
   price              Decimal             @db.Decimal(10, 2)
+  pendingReview      Boolean             @default(false) // importado con datos faltantes (p. ej. sin precio): "Por completar"
   cost               Decimal?            @db.Decimal(12, 4) // costo promedio ponderado; null = sin costo conocido
   stock              Int                 @default(0)
   minStock           Int                 @default(0)
