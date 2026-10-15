@@ -227,15 +227,18 @@ components:
         barcode: { type: string, nullable: true }
         name: { type: string }
         description: { type: string, nullable: true }
-        price: { type: string, description: "Precio de venta. Decimal(10,2) serializado como texto", example: "1250.00" }
+        price: { type: number, description: "Precio de venta CON IVA incluido (precio de góndola)", example: 1250 }
+        unit: { $ref: '#/components/schemas/UnitOfMeasure' }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        cabys: { type: string, nullable: true, pattern: '^\d{13}$', description: Código CABYS (13 dígitos) }
         pendingReview: { type: boolean, description: "Importado sin precio (\"Por completar\"); se limpia al editarlo" }
         cost:
-          type: string
+          type: number
           nullable: true
-          description: "Costo promedio ponderado (Decimal(12,4) como texto). null = sin costo conocido. Se recalcula al recibir órdenes."
-          example: "980.0000"
-        stock: { type: integer }
-        minStock: { type: integer }
+          description: "Costo promedio ponderado. null = sin costo conocido. Se recalcula al recibir órdenes."
+          example: 980
+        stock: { type: number, description: "Hasta 3 decimales; entero si unit = UNIT" }
+        minStock: { type: number }
         categoryId: { type: string, format: uuid }
         category: { $ref: '#/components/schemas/Category' }
         supplierId: { type: string, format: uuid, nullable: true }
@@ -256,8 +259,11 @@ components:
         description: { type: string }
         price: { type: number, exclusiveMinimum: true, minimum: 0 }
         cost: { type: number, minimum: 0, nullable: true, description: Costo inicial (opcional) }
-        stock: { type: number, minimum: 0 }
+        stock: { type: number, minimum: 0, description: "Stock inicial: entra como movimiento IN con origen INITIAL. Entero si unit = UNIT; máx. 3 decimales" }
         minStock: { type: number, minimum: 0 }
+        unit: { $ref: '#/components/schemas/UnitOfMeasure' }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        cabys: { type: string, nullable: true, pattern: '^\d{13}$' }
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
         supplierId: { type: string, format: uuid, nullable: true }
@@ -273,9 +279,29 @@ components:
         price: { type: number, exclusiveMinimum: true, minimum: 0 }
         cost: { type: number, minimum: 0, nullable: true, description: "Omitido = no se toca; null = borra el costo" }
         minStock: { type: number, minimum: 0 }
+        unit: { $ref: '#/components/schemas/UnitOfMeasure', description: "No se puede pasar a UNIT si el stock actual tiene decimales" }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        cabys: { type: string, nullable: true, pattern: '^\d{13}$', description: "Omitido = no se toca; null o vacío = lo borra" }
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
         supplierId: { type: string, format: uuid, nullable: true }
+
+    UnitOfMeasure:
+      type: string
+      enum: [UNIT, KG, G, L, ML, M, CM, M2]
+      default: UNIT
+      description: "Unidad de medida (códigos de Hacienda: Unid, kg, g, L, mL, m, cm, m²). UNIT solo admite cantidades enteras."
+
+    TaxRate:
+      type: string
+      enum: [EXEMPT, RATE_1, RATE_2, RATE_4, RATE_13]
+      default: RATE_13
+      description: Tarifa de IVA del producto (el precio la incluye)
+
+    MovementSource:
+      type: string
+      enum: [MANUAL, INITIAL, PURCHASE_RECEIPT, SALE, RETURN, COUNT, TRANSFER]
+      description: "Origen del movimiento; con sourceId apunta al documento (p. ej. la orden en PURCHASE_RECEIPT)"
 
     ImportResult:
       type: object
@@ -307,6 +333,7 @@ components:
                 barcodeConflict: { type: integer }
                 repeatedSku: { type: integer }
                 existing: { type: integer }
+                badFiscal: { type: integer, description: Unidad, IVA o CABYS no reconocidos }
         rows:
           type: array
           items:
@@ -331,8 +358,10 @@ components:
         productId: { type: string, format: uuid }
         userId: { type: string, format: uuid }
         type: { $ref: '#/components/schemas/MovementType' }
-        quantity: { type: integer }
+        quantity: { type: number }
         reason: { type: string, nullable: true }
+        source: { $ref: '#/components/schemas/MovementSource' }
+        sourceId: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
         product: { $ref: '#/components/schemas/Product' }
 
@@ -357,7 +386,7 @@ components:
         product: { $ref: '#/components/schemas/Product' }
         requestedById: { type: string, format: uuid }
         requestedBy: { $ref: '#/components/schemas/UserSummary' }
-        quantity: { type: integer }
+        quantity: { type: number, description: "Hasta 3 decimales; entero si el producto es por unidad" }
         reason: { type: string, nullable: true, description: Motivo de quien pide }
         status: { $ref: '#/components/schemas/PurchaseRequestStatus' }
         rejectionReason: { type: string, nullable: true, description: Motivo del admin al rechazar }
@@ -1130,6 +1159,7 @@ paths:
                     dropConflictingBarcode: { type: boolean }
                     skipRepeated: { type: boolean, description: SKU repetido en el archivo → se usa la primera fila }
                     updateExisting: { type: boolean }
+                    ignoreBadFiscal: { type: boolean, description: "Unidad/IVA/CABYS no reconocidos → unidad actual o UNIT, IVA actual o 13 %, sin CABYS" }
                 rows:
                   type: array
                   minItems: 1
@@ -1144,12 +1174,15 @@ paths:
                       category: { type: string }
                       price: { type: number }
                       cost: { type: number }
-                      stock: { type: integer }
-                      minStock: { type: integer }
+                      stock: { type: number, description: "Entero si la unidad es UNIT; máx. 3 decimales" }
+                      minStock: { type: number }
                       barcode: { type: string }
                       description: { type: string }
                       supplier: { type: string }
                       expirationDate: { type: string, example: "2027-03-31" }
+                      unit: { type: string, example: "kg", description: "Texto libre: unidad, kg, kilos, g, L, litros, mL, m, cm, m²…" }
+                      taxRate: { type: string, example: "13 %", description: "13, 4, 2, 1, Exento (también 0.13 o 13 %)" }
+                      cabys: { type: string, example: "2391000000000" }
       responses:
         '200':
           description: Vista previa (dryRun)

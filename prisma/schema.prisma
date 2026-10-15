@@ -34,6 +34,39 @@ enum MovementType {
   ADJUSTMENT
 }
 
+// De dónde salió un movimiento de stock; con sourceId apunta al documento (orden, venta, conteo...)
+enum MovementSource {
+  MANUAL // registrado a mano en Movimientos
+  INITIAL // stock inicial al crear o importar el producto
+  PURCHASE_RECEIPT // recepción de una orden de compra (sourceId = orden)
+  SALE
+  RETURN
+  COUNT
+  TRANSFER
+}
+
+// Unidad de medida; se mapea a los códigos de Hacienda (Unid, kg, g, L, mL, m, cm, m²).
+// UNIT solo admite cantidades enteras; las demás hasta 3 decimales.
+enum UnitOfMeasure {
+  UNIT
+  KG
+  G
+  L
+  ML
+  M
+  CM
+  M2
+}
+
+// Tarifa de IVA del producto (el precio la incluye: es precio de góndola)
+enum TaxRate {
+  EXEMPT
+  RATE_1
+  RATE_2
+  RATE_4
+  RATE_13
+}
+
 enum PurchaseRequestStatus {
   PENDING
   APPROVED
@@ -108,11 +141,14 @@ model Product {
   barcode            String?
   name               String
   description        String?
-  price              Decimal             @db.Decimal(10, 2)
+  price              Decimal             @db.Decimal(10, 2) // incluye IVA
+  unit               UnitOfMeasure       @default(UNIT)
+  taxRate            TaxRate             @default(RATE_13)
+  cabys              String? // código CABYS de 13 dígitos (lo exige la factura electrónica)
   pendingReview      Boolean             @default(false) // importado con datos faltantes (p. ej. sin precio): "Por completar"
   cost               Decimal?            @db.Decimal(12, 4) // costo promedio ponderado; null = sin costo conocido
-  stock              Int                 @default(0)
-  minStock           Int                 @default(0)
+  stock              Decimal             @default(0) @db.Decimal(14, 3)
+  minStock           Decimal             @default(0) @db.Decimal(14, 3)
   categoryId         String
   supplierId         String?
   deletedAt          DateTime?
@@ -129,19 +165,22 @@ model Product {
 }
 
 model StockMovement {
-  id        String       @id @default(uuid())
+  id        String         @id @default(uuid())
   companyId String
-  company   Company      @relation(fields: [companyId], references: [id])
+  company   Company        @relation(fields: [companyId], references: [id])
   productId String
   userId    String
   type      MovementType
-  quantity  Int
+  quantity  Decimal        @db.Decimal(14, 3)
   reason    String?
-  createdAt DateTime     @default(now())
-  product   Product      @relation(fields: [productId], references: [id])
-  user      User         @relation(fields: [userId], references: [id])
+  source    MovementSource @default(MANUAL)
+  sourceId  String?
+  createdAt DateTime       @default(now())
+  product   Product        @relation(fields: [productId], references: [id])
+  user      User           @relation(fields: [userId], references: [id])
 
   @@index([companyId])
+  @@index([companyId, source, sourceId])
 }
 
 model PurchaseRequest {
@@ -150,7 +189,7 @@ model PurchaseRequest {
   company         Company               @relation(fields: [companyId], references: [id])
   productId       String
   requestedById   String
-  quantity        Int
+  quantity        Decimal               @db.Decimal(14, 3)
   reason          String?
   status          PurchaseRequestStatus @default(PENDING)
   expiresAt       DateTime?
@@ -188,7 +227,7 @@ model PurchaseOrderItem {
   id              String        @id @default(uuid())
   purchaseOrderId String
   productId       String
-  quantity        Int
+  quantity        Decimal       @db.Decimal(14, 3)
   unitCost        Decimal       @db.Decimal(10, 2)
   purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
   product         Product       @relation(fields: [productId], references: [id])

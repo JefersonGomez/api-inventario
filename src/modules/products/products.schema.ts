@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { stockSchema } from "../../shared/units.ts";
+
+const unit = z.enum(["UNIT", "KG", "G", "L", "ML", "M", "CM", "M2"]);
+const taxRate = z.enum(["EXEMPT", "RATE_1", "RATE_2", "RATE_4", "RATE_13"]);
+// CABYS: 13 dígitos; vacío = sin código (se completa antes de facturar)
+const cabys = z.string().trim().regex(/^\d{13}$/, "El código CABYS tiene 13 dígitos").nullable().optional();
 
 export const productsSchemaCreate = z.object({
   sku: z.string().min(1, "El SKU del producto es requerido"),
@@ -7,8 +13,11 @@ export const productsSchemaCreate = z.object({
   description: z.string().optional(),
   price: z.number().positive("El precio debe ser positivo"),
   cost: z.number().nonnegative("El costo no puede ser negativo").nullable().optional(),
-  stock: z.number().nonnegative("El stock no puede ser negativo"),
-  minStock: z.number().nonnegative("El stock mínimo no puede ser negativo"),
+  stock: stockSchema,
+  minStock: stockSchema,
+  unit: unit.optional(),
+  taxRate: taxRate.optional(),
+  cabys,
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
@@ -20,7 +29,10 @@ export const productsSchemaUpdate = z.object({
   description: z.string().optional(),
   price: z.number().positive("El precio debe ser positivo"),
   cost: z.number().nonnegative("El costo no puede ser negativo").nullable().optional(),
-  minStock: z.number().nonnegative("El stock mínimo no puede ser negativo"),
+  minStock: stockSchema,
+  unit: unit.optional(),
+  taxRate: taxRate.optional(),
+  cabys,
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
@@ -39,6 +51,9 @@ const importRow = z.object({
   description: z.string().max(2000).optional(),
   supplier: z.string().max(200).optional(),
   expirationDate: z.string().max(40).optional(),
+  unit: z.string().max(40).optional(),
+  taxRate: z.string().max(40).optional(),
+  cabys: z.string().max(40).optional(),
 });
 
 // arreglos en bloque elegidos en la vista previa (sin opciones = modo estricto: todo es error)
@@ -51,6 +66,7 @@ const importOptions = z.object({
   dropConflictingBarcode: z.boolean().optional(),
   skipRepeated: z.boolean().optional(),
   updateExisting: z.boolean().optional(),
+  ignoreBadFiscal: z.boolean().optional(),
 });
 
 export const productsImportSchema = z.object({

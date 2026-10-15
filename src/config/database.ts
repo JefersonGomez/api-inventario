@@ -1,6 +1,13 @@
-import { PrismaClient } from "../generated/prisma/client.ts"
+import { PrismaClient, Prisma } from "../generated/prisma/client.ts"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { currentCompanyId } from "../shared/tenant.ts"
+
+// Los Decimal (precio, costo, stock, cantidades) salen en el JSON como número, no como texto:
+// el frontend compara y suma stock, y "10.000" <= "5.000" daría verdadero comparando texto.
+// Los montos y cantidades del sistema caben de sobra en la precisión de un number.
+;(Prisma.Decimal.prototype as unknown as { toJSON(): number }).toJSON = function (this: Prisma.Decimal) {
+  return this.toNumber()
+}
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 

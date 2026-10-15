@@ -7,7 +7,8 @@ export async function getLowStockReport() {
   });
 
   const lowStockProducts = allProducts.filter(
-    (product) => product.stock <= product.minStock
+    // Number(): comparar dos Decimal con <= compara su texto ("10.000" <= "5.000" es verdadero)
+    (product) => Number(product.stock) <= Number(product.minStock)
   );
 
   return lowStockProducts;
@@ -51,9 +52,10 @@ export async function getInventoryValueReport() {
   let productsWithoutCost = 0;
 
   for (const product of products) {
-    retailValue += product.stock * Number(product.price);
-    if (product.cost !== null) totalValue += product.stock * Number(product.cost);
-    else if (product.stock > 0) productsWithoutCost++;
+    const stock = Number(product.stock);
+    retailValue += stock * Number(product.price);
+    if (product.cost !== null) totalValue += stock * Number(product.cost);
+    else if (stock > 0) productsWithoutCost++;
   }
 
   return {
@@ -88,15 +90,16 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
 
   for (const product of allProducts) {
     const hasCost = product.cost !== null;
-    if (!hasCost && product.stock > 0) productsWithoutCost++;
-    const value = hasCost ? product.stock * Number(product.cost) : 0;
+    const stock = Number(product.stock);
+    if (!hasCost && stock > 0) productsWithoutCost++;
+    const value = hasCost ? stock * Number(product.cost) : 0;
 
     if (activeProductIds.has(product.id)) {
       activeValue += value;
     } else {
       immobilizedValue += value;
       // sin stock no hay capital atrapado; sin costo se lista igual (con valor "—") para que se complete
-      if (product.stock > 0) {
+      if (stock > 0) {
         immobilizedProducts.push({ id: product.id, name: product.name, sku: product.sku, value: Number(value.toFixed(2)), hasCost });
       }
     }
@@ -135,7 +138,7 @@ export async function getStockForecast(velocityWindowDays = 30, alertThresholdDa
   });
 
   const salesMap = new Map(
-    salesByProduct.map((s) => [s.productId, s._sum.quantity ?? 0])
+    salesByProduct.map((s) => [s.productId, Number(s._sum.quantity ?? 0)])
   );
 
   const forecast = products
@@ -146,13 +149,13 @@ export async function getStockForecast(velocityWindowDays = 30, alertThresholdDa
       if (totalSold === 0) return null;
 
       const dailyVelocity = totalSold / velocityWindowDays;
-      const daysRemaining = product.stock / dailyVelocity;
+      const daysRemaining = Number(product.stock) / dailyVelocity;
 
       return {
         productId: product.id,
         productName: product.name,
         sku: product.sku,
-        currentStock: product.stock,
+        currentStock: Number(product.stock),
         dailyVelocity: Number(dailyVelocity.toFixed(2)),
         daysRemaining: Number(daysRemaining.toFixed(1)),
         willRunOutSoon: daysRemaining <= alertThresholdDays,

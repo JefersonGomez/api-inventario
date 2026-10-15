@@ -74,7 +74,7 @@ describe("Aislamiento entre empresas", () => {
 
     const movement = await request(app).post("/movements").set(A.auth).send({ productId: B.productId, type: "IN", quantity: 5 })
     expect(movement.status).toBeGreaterThanOrEqual(400)
-    expect((await prisma.product.findUniqueOrThrow({ where: { id: B.productId } })).stock).toBe(0)
+    expect(Number((await prisma.product.findUniqueOrThrow({ where: { id: B.productId } })).stock)).toBe(0)
 
     const order = await request(app).post("/purchase-orders").set(A.auth)
       .send({ supplierId: A.supplierId, items: [{ productId: B.productId, quantity: 1, unitCost: 1 }] })

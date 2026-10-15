@@ -4,6 +4,7 @@ import { currentCompanyId } from "../../shared/tenant.ts";
 import type { Role } from "../../generated/prisma/enums.ts"; // ajustá el import a como lo tengas tú
 import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
+import { assertQuantityForUnit } from "../../shared/units.ts";
 const DEFAULT_EXPIRY_DAYS = 7; 
 export async function createPurchaseRequest(
   productId: string,
@@ -20,6 +21,7 @@ export async function createPurchaseRequest(
   if (!existProduct) {
     throw new Error("El producto indicado no existe");
   }
+  assertQuantityForUnit(quantity, existProduct.unit);
 
   const finalExpiresAt =
     expiresAt ??
@@ -66,6 +68,7 @@ export async function updatePurchaseRequestStatus(
           title: updatedRequest.product.name,
           meta: {
             quantity: updatedRequest.quantity,
+            unit: updatedRequest.product.unit,
             ...(status === "REJECTED" && rejectionReason && { reason: rejectionReason }),
           },
           link: `/purchase-requests?highlight=${id}`,

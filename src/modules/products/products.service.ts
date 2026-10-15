@@ -2,6 +2,10 @@ import { prisma } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { getCompany } from "../company/company.service.ts";
+import { createMovement } from "../movements/movements.service.ts";
+import { assertQuantityForUnit } from "../../shared/units.ts";
+import type { z } from "zod";
+import type { productsSchemaCreate, productsSchemaUpdate } from "./products.schema.ts";
 // null = sin proveedor; undefined = no tocar
 async function assertSupplierExists(supplierId: string | null | undefined) {
   if (!supplierId) return;
@@ -11,19 +15,14 @@ async function assertSupplierExists(supplierId: string | null | undefined) {
 
 const withSupplier = { category: true, supplier: { select: { id: true, name: true } } };
 
-export async function createProduct(
-  sku: string,
-  barcode: string | undefined,
-  name: string,
-  description: string | undefined,
-  price: number,
-  stock: number,
-  minStock: number,
-  categoryId: string,
-  expirationDate?: Date, // ← nuevo parámetro, al final para no romper el orden existente
-  supplierId?: string | null,
-  cost?: number | null
-) {
+export type ProductCreateInput = z.infer<typeof productsSchemaCreate>;
+export type ProductUpdateInput = z.infer<typeof productsSchemaUpdate>;
+
+export async function createProduct(input: ProductCreateInput, userId: string) {
+  const { sku, barcode, name, description, price, stock, minStock, categoryId, expirationDate, supplierId, cost } = input;
+  const unit = input.unit ?? "UNIT";
+  assertQuantityForUnit(stock, unit, "El stock");
+  assertQuantityForUnit(minStock, unit, "El stock mínimo");
   await assertSupplierExists(supplierId);
   const { maxProducts } = (await getCompany()).limits;
   if (maxProducts !== null && (await prisma.product.count({ where: { deletedAt: null } })) >= maxProducts) {
@@ -45,25 +44,36 @@ export async function createProduct(
     throw new Error("La categoría es inválida");
   }
 
-  const newProduct = await prisma.product.create({
-    data: {
-      companyId: currentCompanyId(),
-      sku: sku,
-      barcode: barcode || null,
-      name: name,
-      description: description ?? null,
-      price: price,
-      stock: stock,
-      minStock: minStock,
-      categoryId: categoryId,
-      expirationDate: expirationDate ?? null, // ← nuevo
-      supplierId: supplierId ?? null,
-      cost: cost ?? null,
-    },
-    include: withSupplier,
+  // el producto nace con stock 0 y el inicial entra como movimiento (origen INITIAL): así
+  // toda unidad en stock tiene un movimiento que la explica
+  const { id } = await prisma.$transaction(async (tx) => {
+    const created = await tx.product.create({
+      data: {
+        companyId: currentCompanyId(),
+        sku: sku,
+        barcode: barcode || null,
+        name: name,
+        description: description ?? null,
+        price: price,
+        unit,
+        taxRate: input.taxRate ?? "RATE_13",
+        cabys: input.cabys || null,
+        stock: 0,
+        minStock: minStock,
+        categoryId: categoryId,
+        expirationDate: expirationDate ?? null,
+        supplierId: supplierId ?? null,
+        cost: cost ?? null,
+      },
+      select: { id: true },
+    });
+    if (stock > 0) {
+      await createMovement(created.id, userId, "IN", stock, undefined, tx, { source: "INITIAL" });
+    }
+    return created;
   });
 
-  return newProduct;
+  return prisma.product.findUniqueOrThrow({ where: { id }, include: withSupplier });
 }
 
 export async function getAllProducts() {
@@ -94,19 +104,8 @@ export async function getProductByBarcode(code: string) {
   return product;
 }
 
-export async function updateProduct(
-  id: string,
-  name: string,
-  barcode: string | undefined,
-  description: string | undefined,
-  price: number,
-  minStock: number,
-  categoryId: string,
-  userId: string,
-  expirationDate?: Date, // ← nuevo parámetro, al final
-  supplierId?: string | null,
-  cost?: number | null // undefined = no tocar; null = borrar el costo
-) {
+export async function updateProduct(id: string, input: ProductUpdateInput, userId: string) {
+  const { name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys } = input;
   await assertSupplierExists(supplierId);
   const existCategory = await prisma.category.findFirst({
     where: { id: categoryId, deletedAt: null }
@@ -115,6 +114,13 @@ export async function updateProduct(
   if (!existCategory) {
     throw new Error("Categoría ingresada inválida");
   }
+
+  const current = await prisma.product.findFirst({ where: { id, deletedAt: null }, select: { stock: true, unit: true } });
+  if (!current) throw new Error("No se encontró el producto");
+  const finalUnit = unit ?? current.unit;
+  // pasar a "por unidad" con stock fraccionado (p. ej. 2,5 kg) dejaría un stock imposible
+  assertQuantityForUnit(Number(current.stock), finalUnit, "El stock actual");
+  assertQuantityForUnit(minStock, finalUnit, "El stock mínimo");
 
   const updatedProduct = await prisma.product.update({
     where: { id: id },
@@ -126,15 +132,18 @@ export async function updateProduct(
       pendingReview: false, // al editarlo (con precio válido, lo exige el schema) deja de estar "Por completar"
       minStock: minStock,
       categoryId: categoryId,
-      expirationDate: expirationDate ?? null, // ← nuevo
+      expirationDate: expirationDate ?? null,
       ...(supplierId !== undefined && { supplierId }),
       ...(cost !== undefined && { cost }),
+      ...(unit !== undefined && { unit }),
+      ...(taxRate !== undefined && { taxRate }),
+      ...(cabys !== undefined && { cabys: cabys || null }),
     },
     include: withSupplier,
   });
 
   await logAudit(userId, "UPDATE", "Product", id, {
-    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost
+    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys
   });
 
   return updatedProduct;

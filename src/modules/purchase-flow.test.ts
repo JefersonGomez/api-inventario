@@ -40,7 +40,7 @@ describe("Flujo de compra", () => {
     // aprobar no sube stock
     const approved = await request(app).patch(`/purchase-requests/${requestId}/status`).set(admin.auth).send({ status: "APPROVED" })
     expect(approved.status).toBe(200)
-    expect((await prisma.product.findUnique({ where: { id: productId } }))!.stock).toBe(5)
+    expect(Number((await prisma.product.findUnique({ where: { id: productId } }))!.stock)).toBe(5)
 
     const order = await request(app).post("/purchase-orders").set(admin.auth).send({
       supplierId,
@@ -52,11 +52,11 @@ describe("Flujo de compra", () => {
     const received = await request(app).patch(`/purchase-orders/${order.body.id}/receive`).set(admin.auth)
     expect(received.status).toBe(200)
     expect(received.body.status).toBe("RECEIVED")
-    expect((await prisma.product.findUnique({ where: { id: productId } }))!.stock).toBe(15)
+    expect(Number((await prisma.product.findUnique({ where: { id: productId } }))!.stock)).toBe(15)
 
     // recibir dos veces no vuelve a sumar
     expect((await request(app).patch(`/purchase-orders/${order.body.id}/receive`).set(admin.auth)).status).toBe(400)
-    expect((await prisma.product.findUnique({ where: { id: productId } }))!.stock).toBe(15)
+    expect(Number((await prisma.product.findUnique({ where: { id: productId } }))!.stock)).toBe(15)
 
     const types = (await prisma.notification.findMany({ where: { userId: employee.user.id } })).map((n) => n.type)
     expect(types).toEqual(expect.arrayContaining(["requestApproved", "orderReceived"]))

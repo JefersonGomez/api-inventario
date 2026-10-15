@@ -1,14 +1,20 @@
 import { prisma, type Db } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
-import type { MovementType } from "../../generated/prisma/enums.ts";
-import type { Prisma } from "../../generated/prisma/client.ts";
+import type { MovementSource, MovementType } from "../../generated/prisma/enums.ts";
+import { Prisma } from "../../generated/prisma/client.ts";
+import { assertQuantityForUnit } from "../../shared/units.ts";
+
+// Origen del movimiento: a mano por defecto; las recepciones, ventas, conteos... pasan el suyo
+export type MovementOrigin = { source: MovementSource; sourceId?: string | null };
+
 export async function createMovement(
   productId: string,
   userId: string,
   type: MovementType,
   quantity: number,
   reason: string | undefined,
-  client: Db = prisma
+  client: Db = prisma,
+  origin: MovementOrigin = { source: "MANUAL" }
 ) {
   const existProduct = await client.product.findFirst({
     where: { id: productId, deletedAt: null } // ← nuevo
@@ -18,22 +24,25 @@ export async function createMovement(
     throw new Error("No se encontró el producto")
   }
 
-  let nuevoStock: number;
+  assertQuantityForUnit(quantity, existProduct.unit);
+
+  // aritmética con Decimal (stock con hasta 3 decimales): nada de errores de punto flotante
+  let nuevoStock: Prisma.Decimal;
 
   switch (type) {
     case "IN":
-      nuevoStock = existProduct.stock + quantity;
+      nuevoStock = existProduct.stock.plus(quantity);
       break;
 
     case "OUT":
-      nuevoStock = existProduct.stock - quantity;
-      if (nuevoStock < 0) {
+      nuevoStock = existProduct.stock.minus(quantity);
+      if (nuevoStock.isNegative()) {
         throw new Error("Stock insuficiente");
       }
       break;
 
     case "ADJUSTMENT":
-      nuevoStock = quantity;
+      nuevoStock = new Prisma.Decimal(quantity);
       break;
 
     default:
@@ -46,7 +55,7 @@ export async function createMovement(
   if (client === prisma) {
     const result = await prisma.$transaction([
       prisma.stockMovement.create({
-        data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null }
+        data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null, source: origin.source, sourceId: origin.sourceId ?? null }
       }),
       prisma.product.update({
         where: { id: productId },
@@ -59,7 +68,7 @@ export async function createMovement(
   // cuando viene un `tx` de afuera, ya estamos DENTRO de una transacción
   // más grande — no envolvemos de nuevo, solo ejecutamos secuencial
   const movement = await client.stockMovement.create({
-    data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null }
+    data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null, source: origin.source, sourceId: origin.sourceId ?? null }
   });
   await client.product.update({
     where: { id: productId },

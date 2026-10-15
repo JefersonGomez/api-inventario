@@ -10,12 +10,16 @@
 //   - fecha inválida → sin fecha                  - código de barras en conflicto → sin código
 //   - SKU repetido en el archivo → se usa el primero
 //   - SKU que ya existe → se salta (o se actualiza el producto, si se elige; el stock nunca se toca)
+//   - unidad / IVA / CABYS no reconocidos → por unidad, 13 %, sin CABYS
+// El stock inicial de los productos nuevos entra como movimiento (origen INITIAL).
 // Lo que no tiene arreglo (sin nombre, textos demasiado largos, límite del plan) queda como error.
 // Sin opciones (llamada directa a la API) todo se trata como error: el modo estricto.
 import { prisma } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { getCompany } from "../company/company.service.ts";
+import { parseTaxRate, parseUnit, roundQty } from "../../shared/units.ts";
+import type { TaxRate, UnitOfMeasure } from "../../generated/prisma/enums.ts";
 
 export type ImportRow = {
   rowNumber: number;
@@ -30,6 +34,9 @@ export type ImportRow = {
   description?: string | undefined;
   supplier?: string | undefined;
   expirationDate?: string | undefined; // AAAA-MM-DD
+  unit?: string | undefined; // texto libre: "kg", "Unidad", "litros"...
+  taxRate?: string | undefined; // "13", "13 %", "Exento", "0.04"...
+  cabys?: string | undefined;
 };
 
 export type ImportOptions = {
@@ -41,6 +48,7 @@ export type ImportOptions = {
   dropConflictingBarcode: boolean;
   skipRepeated: boolean;
   updateExisting: boolean;
+  ignoreBadFiscal: boolean;
 };
 
 export const STRICT_OPTIONS: ImportOptions = {
@@ -52,12 +60,13 @@ export const STRICT_OPTIONS: ImportOptions = {
   dropConflictingBarcode: false,
   skipRepeated: false,
   updateExisting: false,
+  ignoreBadFiscal: false,
 };
 
 // tipos de problema que se muestran agrupados en la vista previa (con su cantidad de filas)
 type Issue =
   | "missingCategory" | "missingSku" | "missingPrice" | "badNumbers" | "invalidDate"
-  | "barcodeConflict" | "repeatedSku" | "existing";
+  | "barcodeConflict" | "repeatedSku" | "existing" | "badFiscal";
 
 type Status = "create" | "update" | "skip" | "error";
 
@@ -78,32 +87,36 @@ type Prepared = {
     sku: string; name: string; category: string; price: number | null; cost: number | null;
     stock: number; minStock: number; barcode: string | null; description: string | null;
     supplier: string; expirationDate: Date | null;
+    unit: UnitOfMeasure | null; taxRate: TaxRate | null; cabys: string | null; // null = no vino en el archivo
   };
   existingId?: string;
 };
 
 const key = (v: string) => v.trim().toLowerCase();
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const isQty = (v: number | undefined) => v === undefined || (Number.isInteger(v) && v >= 0);
+// por unidad: enteros; las demás unidades: hasta 3 decimales
+const isQty = (v: number | undefined, unit: UnitOfMeasure) =>
+  v === undefined || (Number.isFinite(v) && v >= 0 && (unit === "UNIT" ? Number.isInteger(v) : roundQty(v) === v));
 
 export async function importProducts(rows: ImportRow[], dryRun: boolean, userId: string, opts: Partial<ImportOptions> = {}) {
   const options = { ...STRICT_OPTIONS, ...opts };
   const defaultCategory = options.defaultCategory.trim();
 
   const [existing, categories, suppliers, company] = await Promise.all([
-    prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, sku: true, barcode: true } }),
+    prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, sku: true, barcode: true, unit: true, stock: true } }),
     prisma.category.findMany({ where: { deletedAt: null }, select: { id: true, name: true } }),
     prisma.supplier.findMany({ select: { id: true, name: true } }),
     getCompany(),
   ]);
   const existingBySku = new Map(existing.map((p) => [key(p.sku), p.id]));
+  const existingById = new Map(existing.map((p) => [p.id, p]));
   const barcodeOwner = new Map(existing.filter((p) => p.barcode).map((p) => [key(p.barcode!), p.id]));
   const categoryByName = new Map(categories.map((c) => [key(c.name), c.id]));
   const supplierByName = new Map(suppliers.map((s) => [key(s.name), s.id]));
 
   const groups: Record<Issue, number> = {
     missingCategory: 0, missingSku: 0, missingPrice: 0, badNumbers: 0, invalidDate: 0,
-    barcodeConflict: 0, repeatedSku: 0, existing: 0,
+    barcodeConflict: 0, repeatedSku: 0, existing: 0, badFiscal: 0,
   };
   const usedSkus = new Set(existingBySku.keys());
   let skuCounter = 0;
@@ -144,7 +157,7 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
       prepared.push({
         row,
         result: { rowNumber: row.rowNumber, sku, name, status: "skip", pending: false, fixes: ["Ya existe un producto con este SKU: se salta"], errors: [] },
-        data: { sku, name, category: "", price: null, cost: null, stock: 0, minStock: 0, barcode: null, description: null, supplier: "", expirationDate: null },
+        data: { sku, name, category: "", price: null, cost: null, stock: 0, minStock: 0, barcode: null, description: null, supplier: "", expirationDate: null, unit: null, taxRate: null, cabys: null },
         existingId,
       });
       seenInFile.add(key(sku));
@@ -174,21 +187,48 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
       } else errors.push(row.price === undefined ? "Falta el precio" : "El precio debe ser un número mayor que 0");
     }
 
+    // unidad, IVA y CABYS (opcionales). Van antes de los números: la unidad decide si el stock admite decimales.
+    const unit: UnitOfMeasure | null = text(row.unit) ? parseUnit(text(row.unit)) : null;
+    let taxRate: TaxRate | null = text(row.taxRate) ? parseTaxRate(text(row.taxRate)) : null;
+    let cabys: string | null = text(row.cabys).replace(/\s/g, "") || null;
+    const badUnit = Boolean(text(row.unit)) && unit === null;
+    const badTax = Boolean(text(row.taxRate)) && taxRate === null;
+    const badCabys = cabys !== null && !/^\d{13}$/.test(cabys);
+    if (badUnit || badTax || badCabys) {
+      groups.badFiscal++;
+      if (options.ignoreBadFiscal) {
+        if (badUnit) fixes.push(`Unidad "${text(row.unit)}" no reconocida: se usa la actual o "unidad"`);
+        if (badTax) { taxRate = null; fixes.push(`IVA "${text(row.taxRate)}" no reconocido: se usa el actual o 13 %`); }
+        if (badCabys) { cabys = null; fixes.push("CABYS inválido (13 dígitos): se deja vacío"); }
+      } else {
+        if (badUnit) errors.push(`Unidad no reconocida: "${text(row.unit)}" (usa unidad, kg, g, L, mL, m, cm o m²)`);
+        if (badTax) errors.push(`IVA no reconocido: "${text(row.taxRate)}" (usa 13, 4, 2, 1 o Exento)`);
+        if (badCabys) errors.push("El código CABYS debe tener 13 dígitos");
+      }
+    }
+    const current = existingId && updating ? existingById.get(existingId) : undefined;
+    const qtyUnit: UnitOfMeasure = unit ?? current?.unit ?? "UNIT";
+    // pasar a "por unidad" un producto con stock fraccionado dejaría un stock imposible
+    if (current && unit === "UNIT" && !Number.isInteger(Number(current.stock))) {
+      errors.push(`No se puede pasar a "unidad": el stock actual (${Number(current.stock)}) tiene decimales`);
+    }
+
     // números opcionales
     let stock = row.stock ?? 0;
     let minStock = row.minStock ?? 0;
     let cost: number | null = row.cost ?? null;
     const badCost = cost !== null && (!Number.isFinite(cost) || cost < 0);
-    if (!isQty(row.stock) || !isQty(row.minStock) || badCost) {
+    const qtyRule = qtyUnit === "UNIT" ? "un número entero de 0 o más" : "un número de 0 o más (máx. 3 decimales)";
+    if (!isQty(row.stock, qtyUnit) || !isQty(row.minStock, qtyUnit) || badCost) {
       groups.badNumbers++;
       if (options.fixNumbers) {
-        const fixQty = (v: number) => (Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
-        if (!isQty(row.stock)) { stock = fixQty(stock); fixes.push(`Stock corregido a ${stock}`); }
-        if (!isQty(row.minStock)) { minStock = fixQty(minStock); fixes.push(`Stock mínimo corregido a ${minStock}`); }
+        const fixQty = (v: number) => (Number.isFinite(v) && v > 0 ? (qtyUnit === "UNIT" ? Math.round(v) : roundQty(v)) : 0);
+        if (!isQty(row.stock, qtyUnit)) { stock = fixQty(stock); fixes.push(`Stock corregido a ${stock}`); }
+        if (!isQty(row.minStock, qtyUnit)) { minStock = fixQty(minStock); fixes.push(`Stock mínimo corregido a ${minStock}`); }
         if (badCost) { cost = null; fixes.push("Costo inválido: se deja vacío"); }
       } else {
-        if (!isQty(row.stock)) errors.push("El stock debe ser un número entero de 0 o más");
-        if (!isQty(row.minStock)) errors.push("El stock mínimo debe ser un número entero de 0 o más");
+        if (!isQty(row.stock, qtyUnit)) errors.push(`El stock debe ser ${qtyRule}`);
+        if (!isQty(row.minStock, qtyUnit)) errors.push(`El stock mínimo debe ser ${qtyRule}`);
         if (badCost) errors.push("El costo no puede ser negativo");
       }
     }
@@ -251,6 +291,7 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
       data: {
         sku, name, category, price, cost, stock, minStock, barcode,
         description: text(row.description) || null, supplier: text(row.supplier), expirationDate,
+        unit, taxRate, cabys,
       },
       ...(existingId && { existingId }),
     });
@@ -308,7 +349,8 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
 
     const creates = toSave.filter((p) => p.result.status === "create");
     if (creates.length) {
-      await tx.product.createMany({
+      const created = await tx.product.createManyAndReturn({
+        select: { id: true, stock: true },
         data: creates.map(({ data, result }) => ({
           companyId,
           sku: data.sku,
@@ -323,8 +365,21 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
           categoryId: categoryByName.get(key(data.category))!,
           supplierId: data.supplier ? supplierByName.get(key(data.supplier))! : null,
           expirationDate: data.expirationDate,
+          unit: data.unit ?? "UNIT",
+          taxRate: data.taxRate ?? "RATE_13",
+          cabys: data.cabys,
         })),
       });
+      // el stock inicial queda explicado por un movimiento, igual que al crear un producto a mano
+      const initial = created.filter((p) => Number(p.stock) > 0);
+      if (initial.length) {
+        await tx.stockMovement.createMany({
+          data: initial.map((p) => ({
+            companyId, productId: p.id, userId, type: "IN" as const, quantity: p.stock,
+            reason: "Stock inicial (importación)", source: "INITIAL" as const,
+          })),
+        });
+      }
     }
 
     // actualizar existentes: solo los campos que trae el archivo; el STOCK nunca (se mueve con movimientos)
@@ -339,6 +394,9 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
         ...(data.description && { description: data.description }),
         ...(data.supplier && { supplierId: supplierByName.get(key(data.supplier))! }),
         ...(data.expirationDate && { expirationDate: data.expirationDate }),
+        ...(data.unit && { unit: data.unit }),
+        ...(data.taxRate && { taxRate: data.taxRate }),
+        ...(data.cabys && { cabys: data.cabys }),
       };
       await tx.product.update({ where: { id: existingId! }, data: changes });
       // misma forma que una edición manual: el historial de precios lee `changes.price`

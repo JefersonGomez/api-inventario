@@ -1,8 +1,9 @@
 import { z } from "zod"
+import { quantitySchema } from "../../shared/units.ts"
 
 export const createPurchaseRequestSchema = z.object({
   productId: z.uuid(),
-  quantity: z.number().positive(),
+  quantity: quantitySchema,
   reason: z.string().optional(),
   expiresAt: z.coerce.date().optional(),
 })

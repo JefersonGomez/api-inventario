@@ -7,6 +7,7 @@ import { createNotifications } from "../notifications/notifications.persist.ts";
 import { sendEmail, escapeHtml } from "../../shared/email.ts";
 import { formatMoney } from "../../shared/money.ts";
 import { getCompany } from "../company/company.service.ts";
+import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -27,12 +28,15 @@ export async function createPurchaseOrder(
 
   const existingProducts = await prisma.product.findMany({
     where: { id: { in: productIds }, deletedAt: null },
-    select: { id: true },
+    select: { id: true, name: true, unit: true },
   });
   if (existingProducts.length !== productIds.length) {
     const foundIds = new Set(existingProducts.map((p) => p.id));
     const missingIds = productIds.filter((id) => !foundIds.has(id));
     throw new Error(`Los siguientes productos no existen: ${missingIds.join(", ")}`);
+  }
+  for (const p of existingProducts) {
+    assertQuantityForUnit(items.find((i) => i.productId === p.id)!.quantity, p.unit, `La cantidad de "${p.name}"`);
   }
 
   if (fulfilledRequestIds && fulfilledRequestIds.length > 0) {
@@ -132,9 +136,11 @@ export async function receivePurchaseOrder(id: string, userId: string) {
       });
       if (before) {
         const unitCost = Number(item.unitCost);
-        const hasBase = before.cost !== null && before.stock > 0;
+        const qty = Number(item.quantity);
+        const stockBefore = Number(before.stock);
+        const hasBase = before.cost !== null && stockBefore > 0;
         const newCost = hasBase
-          ? (before.stock * Number(before.cost) + item.quantity * unitCost) / (before.stock + item.quantity)
+          ? (stockBefore * Number(before.cost) + qty * unitCost) / (stockBefore + qty)
           : unitCost;
         await tx.product.update({ where: { id: item.productId }, data: { cost: Number(newCost.toFixed(4)) } });
       }
@@ -143,9 +149,10 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         item.productId,
         userId,
         "IN",
-        item.quantity,
+        Number(item.quantity),
         `Recepción de orden de compra ${order.id}`,
-        tx
+        tx,
+        { source: "PURCHASE_RECEIPT", sourceId: order.id }
       );
     }
 
@@ -164,7 +171,7 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         userId: r.requestedById,
         type: "orderReceived",
         title: r.product.name,
-        meta: { quantity: r.quantity },
+        meta: { quantity: r.quantity, unit: r.product.unit },
         link: `/purchase-requests?highlight=${r.id}`,
       })),
       tx
@@ -192,12 +199,12 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
   const { name: company, currency } = await getCompany();
   if (!company) throw new Error("Configura el nombre de la empresa en Configuración antes de enviar");
 
-  const total = order.items.reduce((sum, i) => sum + i.quantity * Number(i.unitCost), 0);
+  const total = order.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitCost), 0);
   const cell = 'style="padding:6px 10px;border-bottom:1px solid #e5e5e0"';
   const rows = order.items
-    .map((i) => `<tr><td ${cell}>${escapeHtml(i.product.name)}</td><td ${cell} align="right">${i.quantity}</td>`
+    .map((i) => `<tr><td ${cell}>${escapeHtml(i.product.name)}</td><td ${cell} align="right">${formatQuantity(Number(i.quantity), i.product.unit)}</td>`
       + `<td ${cell} align="right">${formatMoney(Number(i.unitCost), currency)}</td>`
-      + `<td ${cell} align="right">${formatMoney(i.quantity * Number(i.unitCost), currency)}</td></tr>`)
+      + `<td ${cell} align="right">${formatMoney(Number(i.quantity) * Number(i.unitCost), currency)}</td></tr>`)
     .join("");
   const html = `<div style="font-family:Arial,sans-serif;color:#1a1a18;max-width:640px">
   <h2 style="margin:0 0 4px">${escapeHtml(company)}</h2>

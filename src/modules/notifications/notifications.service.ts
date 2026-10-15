@@ -17,7 +17,7 @@ async function getDerivedNotifications() {
 
     // lo más agotado primero (stock/mínimo más bajo)
     const worstFirst = [...lowStockProducts].sort(
-      (a, b) => a.stock / Math.max(a.minStock, 1) - b.stock / Math.max(b.minStock, 1)
+      (a, b) => Number(a.stock) / Math.max(Number(a.minStock), 1) - Number(b.stock) / Math.max(Number(b.minStock), 1)
     );
 
     const notifications = [
@@ -25,7 +25,7 @@ async function getDerivedNotifications() {
       id: `pr-expiring-${r.id}`,
       type: "requestExpiring" as const,
       title: r.product.name,
-      meta: { quantity: r.quantity, requester: r.requestedBy.name, expiresAt: r.expiresAt },
+      meta: { quantity: r.quantity, unit: r.product.unit, requester: r.requestedBy.name, expiresAt: r.expiresAt },
       message: `Solicitud de "${r.product.name}" está por vencer`,
       link: `/purchase-requests?highlight=${r.id}`,
       createdAt: r.createdAt,
@@ -37,7 +37,7 @@ async function getDerivedNotifications() {
         id: `pr-pending-${r.id}`,
         type: "pending" as const,
         title: r.product.name,
-        meta: { quantity: r.quantity, requester: r.requestedBy.name },
+        meta: { quantity: r.quantity, unit: r.product.unit, requester: r.requestedBy.name },
         message: `${r.requestedBy.name} solicitó ${r.quantity} de "${r.product.name}"`,
         link: `/purchase-requests?highlight=${r.id}`,
         createdAt: r.createdAt,
@@ -46,7 +46,7 @@ async function getDerivedNotifications() {
       id: `pr-unfulfilled-${r.id}`,
       type: "approved" as const,
       title: r.product.name,
-      meta: { quantity: r.quantity, requester: r.requestedBy.name },
+      meta: { quantity: r.quantity, unit: r.product.unit, requester: r.requestedBy.name },
       message: `Solicitud aprobada de "${r.product.name}" sin orden de compra`,
       link: `/purchase-orders?action=create&requestId=${r.id}`,
       createdAt: r.createdAt,
@@ -64,7 +64,7 @@ async function getDerivedNotifications() {
       id: `product-lowstock-${p.id}`,
       type: "lowStock" as const,
       title: p.name,
-      meta: { stock: p.stock, minStock: p.minStock },
+      meta: { stock: p.stock, minStock: p.minStock, unit: p.unit },
       message: `"${p.name}" tiene stock bajo (${p.stock}/${p.minStock})`,
       link: `/products?highlight=${p.id}`,
       createdAt: null,
