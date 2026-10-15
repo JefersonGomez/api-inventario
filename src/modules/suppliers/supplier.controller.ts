@@ -9,8 +9,7 @@ import {
 
 export async function createSupplierController(req: Request, res: Response) {
   try {
-    const { name, email, phone, address } = req.body
-    const supplier = await createSupplier(name, email, phone, address)
+    const supplier = await createSupplier(req.body)
     res.status(201).json(supplier)
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })
@@ -45,8 +44,7 @@ export async function updateSupplierController(req: Request, res: Response) {
     if (!id || typeof id !== "string") {
       return res.status(400).json({ message: "El ID es requerido y debe ser un texto" })
     }
-    const { name, email, phone, address } = req.body
-    const supplier = await updateSupplier(id, name, email, phone, address)
+    const supplier = await updateSupplier(id, req.body)
     res.status(200).json(supplier)
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })

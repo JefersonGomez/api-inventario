@@ -7,6 +7,8 @@ import { router as movementRouter } from "./modules/movements/mevemenst.routes.t
 import { router as profileRouter } from "./modules/users/profile.routes.ts"
 import { router as usersRouter } from "./modules/userGestion/userGestion.routes.ts"
 import { router as supplierRouter  } from "./modules/suppliers/supplier.routes.ts"
+import { router as customerRouter } from "./modules/customers/customer.routes.ts"
+import { router as productGroupRouter } from "./modules/product-groups/product-group.routes.ts"
 import {purchaseOrderRouter as purchaseOrderRouter} from "./modules/purchase-orders/purchase-order.routes.ts"
 import{purchaseRequestRouter as purchaseRequestRouter} from "./modules/purchase-requests/purchase-request.routes.ts"
 import { auditRouter } from "./modules/audit/audit.routes.ts";
@@ -50,6 +52,8 @@ app.use("/profile", profileRouter)
 app.use("/uploads", Express.static(path.join(process.cwd(), "uploads")))
 app.use("/users", usersRouter)
 app.use("/suppliers", supplierRouter)
+app.use("/customers", customerRouter)
+app.use("/product-groups", productGroupRouter)
 app.use("/purchase-orders",purchaseOrderRouter)
 app.use("/purchase-requests", purchaseRequestRouter)
 app.use("/audit-logs", auditRouter);

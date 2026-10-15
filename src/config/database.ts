@@ -19,6 +19,8 @@ export const prismaRoot = new PrismaClient({ adapter })
 const TENANT_MODELS = new Set([
   "Category", "Supplier", "Product", "StockMovement",
   "PurchaseRequest", "PurchaseOrder", "AuditLog", "Notification", "Invitation",
+  "ProductGroup", "Customer", "Document", "DocumentSequence",
+  // DocumentLine y DocumentPayment no tienen companyId: se crean y leen siempre a través de su Document
 ])
 
 type Data = Record<string, unknown>

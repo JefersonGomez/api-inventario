@@ -5,6 +5,9 @@ const unit = z.enum(["UNIT", "KG", "G", "L", "ML", "M", "CM", "M2"]);
 const taxRate = z.enum(["EXEMPT", "RATE_1", "RATE_2", "RATE_4", "RATE_13"]);
 // CABYS: 13 dígitos; vacío = sin código (se completa antes de facturar)
 const cabys = z.string().trim().regex(/^\d{13}$/, "El código CABYS tiene 13 dígitos").nullable().optional();
+// variante: producto base + un valor por cada atributo del grupo ({ "Talla": "M" }); null = producto suelto
+const groupId = z.string().uuid().nullable().optional();
+const attributes = z.record(z.string().trim().min(1).max(40), z.string().trim().max(60)).nullable().optional();
 
 export const productsSchemaCreate = z.object({
   sku: z.string().min(1, "El SKU del producto es requerido"),
@@ -18,6 +21,8 @@ export const productsSchemaCreate = z.object({
   unit: unit.optional(),
   taxRate: taxRate.optional(),
   cabys,
+  groupId,
+  attributes,
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
@@ -33,6 +38,8 @@ export const productsSchemaUpdate = z.object({
   unit: unit.optional(),
   taxRate: taxRate.optional(),
   cabys,
+  groupId,
+  attributes,
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),

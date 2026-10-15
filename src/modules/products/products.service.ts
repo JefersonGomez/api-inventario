@@ -1,4 +1,5 @@
 import { prisma } from "../../config/database.ts";
+import { Prisma } from "../../generated/prisma/client.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { getCompany } from "../company/company.service.ts";
@@ -6,6 +7,7 @@ import { createMovement } from "../movements/movements.service.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import type { z } from "zod";
 import type { productsSchemaCreate, productsSchemaUpdate } from "./products.schema.ts";
+import { normalizeVariant } from "../product-groups/product-group.service.ts";
 // null = sin proveedor; undefined = no tocar
 async function assertSupplierExists(supplierId: string | null | undefined) {
   if (!supplierId) return;
@@ -13,7 +15,11 @@ async function assertSupplierExists(supplierId: string | null | undefined) {
   if (!supplier) throw new Error("El proveedor indicado no existe");
 }
 
-const withSupplier = { category: true, supplier: { select: { id: true, name: true } } };
+const withSupplier = {
+  category: true,
+  supplier: { select: { id: true, name: true } },
+  group: { select: { id: true, name: true, attributeNames: true } },
+};
 
 export type ProductCreateInput = z.infer<typeof productsSchemaCreate>;
 export type ProductUpdateInput = z.infer<typeof productsSchemaUpdate>;
@@ -24,6 +30,7 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
   assertQuantityForUnit(stock, unit, "El stock");
   assertQuantityForUnit(minStock, unit, "El stock mínimo");
   await assertSupplierExists(supplierId);
+  const variant = await normalizeVariant(input.groupId, input.attributes);
   const { maxProducts } = (await getCompany()).limits;
   if (maxProducts !== null && (await prisma.product.count({ where: { deletedAt: null } })) >= maxProducts) {
     throw new Error(`Tu plan permite ${maxProducts} productos. Mejora tu plan para agregar más.`);
@@ -58,6 +65,8 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
         unit,
         taxRate: input.taxRate ?? "RATE_13",
         cabys: input.cabys || null,
+        groupId: variant.groupId,
+        ...(variant.attributes && { attributes: variant.attributes }),
         stock: 0,
         minStock: minStock,
         categoryId: categoryId,
@@ -106,6 +115,8 @@ export async function getProductByBarcode(code: string) {
 
 export async function updateProduct(id: string, input: ProductUpdateInput, userId: string) {
   const { name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys } = input;
+  // groupId omitido = no tocar la variante; null = deja de ser variante
+  const variant = input.groupId === undefined ? undefined : await normalizeVariant(input.groupId, input.attributes, id);
   await assertSupplierExists(supplierId);
   const existCategory = await prisma.category.findFirst({
     where: { id: categoryId, deletedAt: null }
@@ -122,7 +133,9 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
   assertQuantityForUnit(Number(current.stock), finalUnit, "El stock actual");
   assertQuantityForUnit(minStock, finalUnit, "El stock mínimo");
 
-  const updatedProduct = await prisma.product.update({
+  // sin include: un update con varias relaciones incluidas corre como transacción interna y adapter-pg
+  // las carga en paralelo sobre la misma conexión (aviso de pg). Se lee completo al final.
+  await prisma.product.update({
     where: { id: id },
     data: {
       name: name,
@@ -138,15 +151,16 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
       ...(unit !== undefined && { unit }),
       ...(taxRate !== undefined && { taxRate }),
       ...(cabys !== undefined && { cabys: cabys || null }),
+      ...(variant && { groupId: variant.groupId, attributes: variant.attributes ?? Prisma.DbNull }),
     },
-    include: withSupplier,
   });
 
   await logAudit(userId, "UPDATE", "Product", id, {
-    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys
+    name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys,
+    ...(variant && { groupId: variant.groupId, attributes: variant.attributes }),
   });
 
-  return updatedProduct;
+  return prisma.product.findUniqueOrThrow({ where: { id }, include: withSupplier });
 }
 
 export async function deleteProduct(id: string,userId:string) {

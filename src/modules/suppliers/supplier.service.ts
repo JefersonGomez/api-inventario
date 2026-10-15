@@ -1,12 +1,19 @@
 import { prisma } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts";
+import type { SupplierInput } from "./supplier.schema.ts";
 
-export async function createSupplier(
-  name: string,
-  email: string | undefined,
-  phone: string | undefined,
-  address: string | undefined
-) {
+// crear y editar mandan el proveedor completo ("" o ausente = sin dato)
+const toData = ({ name, email, phone, address, idType, idNumber }: SupplierInput) => ({
+  name,
+  email: email || null,
+  phone: phone || null,
+  address: address || null,
+  idType: idNumber ? (idType ?? null) : null,
+  idNumber: idNumber || null,
+})
+
+export async function createSupplier(input: SupplierInput) {
+  const { name } = input
   const existingSupplier = await prisma.supplier.findFirst({ where: { name } })
 
   if (existingSupplier) {
@@ -14,13 +21,7 @@ export async function createSupplier(
   }
 
   const newSupplier = await prisma.supplier.create({
-    data: {
-      companyId: currentCompanyId(),
-      name,
-      email: email ?? null,
-      phone: phone ?? null,
-      address: address ?? null,
-    },
+    data: { companyId: currentCompanyId(), ...toData(input) },
   })
 
   return newSupplier
@@ -47,21 +48,10 @@ export async function getSupplierById(id: string) {
   return supplier
 }
 
-export async function updateSupplier(
-  id: string,
-  name: string,
-  email: string | undefined,
-  phone: string | undefined,
-  address: string | undefined
-) {
+export async function updateSupplier(id: string, input: SupplierInput) {
   const updatedSupplier = await prisma.supplier.update({
     where: { id },
-    data: {
-      name,
-      email: email ?? null,
-      phone: phone ?? null,
-      address: address ?? null,
-    },
+    data: toData(input),
   })
 
   return updatedSupplier

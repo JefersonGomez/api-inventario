@@ -4,6 +4,8 @@ import { PLANS } from "../../config/plans.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { listUserCompanies } from "../auth/auth.service.ts";
+import type { Prisma } from "../../generated/prisma/client.ts";
+import type { UpdateCompanyInput } from "./company.schema.ts";
 
 // Empresa activa + plan de su dueño (los límites del plan aplican a la empresa)
 export async function getCompany() {
@@ -15,13 +17,17 @@ export async function getCompany() {
   return { ...rest, plan: owner.plan, limits: PLANS[owner.plan] };
 }
 
-export async function updateCompany(input: { name?: string; currency?: "CRC" | "USD" }, userId: string) {
-  const data = {
-    ...(input.name !== undefined && { name: input.name }),
-    ...(input.currency !== undefined && { currency: input.currency }),
-  };
+export async function updateCompany(input: UpdateCompanyInput, userId: string) {
+  // solo los campos que vinieron; en los datos fiscales "" se guarda como null (borrar)
+  const data = Object.fromEntries(
+    Object.entries(input)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, k === "name" || k === "currency" ? v : v || null])
+  ) as Prisma.CompanyUpdateInput;
+  // sin número no hay tipo de identificación
+  if ("idNumber" in data && !data.idNumber) data.idType = null;
   const company = await prismaRoot.company.update({ where: { id: currentCompanyId() }, data });
-  await logAudit(userId, "UPDATE", "Company", company.id, data);
+  await logAudit(userId, "UPDATE", "Company", company.id, data as Prisma.InputJsonValue);
   return company;
 }
 

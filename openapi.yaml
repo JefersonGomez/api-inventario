@@ -40,6 +40,8 @@ tags:
   - name: Productos
   - name: Movimientos
   - name: Proveedores
+  - name: Clientes
+  - name: Productos base
   - name: Solicitudes de compra
   - name: Órdenes de compra
   - name: Comentarios
@@ -167,6 +169,16 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         currency: { type: string, enum: [CRC, USD], description: Moneda en la que se muestran los montos }
+        legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
+        idType: { $ref: '#/components/schemas/IdType' }
+        idNumber: { type: string, nullable: true, description: Sin guiones }
+        economicActivity: { type: string, nullable: true, description: Código de actividad económica ante Hacienda }
+        invoiceEmail: { type: string, nullable: true, description: Correo que aparece en los comprobantes }
+        phone: { type: string, nullable: true }
+        province: { type: string, nullable: true, enum: ['1', '2', '3', '4', '5', '6', '7', null], description: "Código Hacienda: 1 San José, 2 Alajuela, 3 Cartago, 4 Heredia, 5 Guanacaste, 6 Puntarenas, 7 Limón" }
+        canton: { type: string, nullable: true, pattern: '^\d{2}$' }
+        district: { type: string, nullable: true, pattern: '^\d{2}$' }
+        addressDetail: { type: string, nullable: true, description: Otras señas }
         suspendedAt: { type: string, format: date-time, nullable: true, description: "Fecha de suspensión (null = activa)" }
         suspensionReason: { type: string, nullable: true }
         ownerId: { type: string, format: uuid }
@@ -200,6 +212,12 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
 
+    IdType:
+      type: string
+      nullable: true
+      enum: [FISICA, JURIDICA, DIMEX, NITE, EXTRANJERO, null]
+      description: "Física 9 dígitos, jurídica y NITE 10, DIMEX 11 o 12, extranjero hasta 20 letras/números. Tipo y número van juntos; el número se guarda sin guiones."
+
     Supplier:
       type: object
       properties:
@@ -208,6 +226,8 @@ components:
         email: { type: string, nullable: true }
         phone: { type: string, nullable: true }
         address: { type: string, nullable: true }
+        idType: { $ref: '#/components/schemas/IdType' }
+        idNumber: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
 
     SupplierInput:
@@ -218,6 +238,55 @@ components:
         email: { type: string, format: email, description: "vacío (\"\") se acepta" }
         phone: { type: string }
         address: { type: string }
+        idType: { $ref: '#/components/schemas/IdType' }
+        idNumber: { type: string, nullable: true }
+
+    Customer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        idType: { $ref: '#/components/schemas/IdType' }
+        idNumber: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        economicActivity: { type: string, nullable: true }
+        creditLimit: { type: number, nullable: true, description: null = cliente de contado }
+        creditDays: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    CustomerInput:
+      type: object
+      required: [name]
+      description: Crear y editar mandan el cliente completo ("" o ausente = sin dato). La identificación es única por empresa entre los clientes activos.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
+        idType: { $ref: '#/components/schemas/IdType' }
+        idNumber: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        economicActivity: { type: string, nullable: true }
+        creditLimit: { type: number, minimum: 0, nullable: true }
+        creditDays: { type: integer, minimum: 1, maximum: 365, nullable: true, description: Se ignora sin límite de crédito }
+
+    ProductGroup:
+      type: object
+      description: Producto base que agrupa variantes. Cada variante es un Product normal con groupId y sus atributos.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        attributeNames: { type: array, items: { type: string }, example: [Talla, Color] }
+        _count: { type: object, properties: { products: { type: integer, description: Variantes activas } } }
+
+    ProductGroupInput:
+      type: object
+      required: [name, attributeNames]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 160 }
+        attributeNames: { type: array, minItems: 1, maxItems: 5, items: { type: string, maxLength: 40 }, description: "Sin repetidos. No se puede quitar un atributo que usan variantes activas." }
 
     Product:
       type: object
@@ -231,6 +300,12 @@ components:
         unit: { $ref: '#/components/schemas/UnitOfMeasure' }
         taxRate: { $ref: '#/components/schemas/TaxRate' }
         cabys: { type: string, nullable: true, pattern: '^\d{13}$', description: Código CABYS (13 dígitos) }
+        groupId: { type: string, format: uuid, nullable: true, description: Producto base si es una variante }
+        group:
+          type: object
+          nullable: true
+          properties: { id: { type: string }, name: { type: string }, attributeNames: { type: array, items: { type: string } } }
+        attributes: { type: object, nullable: true, additionalProperties: { type: string }, example: { Talla: M, Color: Rojo } }
         pendingReview: { type: boolean, description: "Importado sin precio (\"Por completar\"); se limpia al editarlo" }
         cost:
           type: number
@@ -264,6 +339,8 @@ components:
         unit: { $ref: '#/components/schemas/UnitOfMeasure' }
         taxRate: { $ref: '#/components/schemas/TaxRate' }
         cabys: { type: string, nullable: true, pattern: '^\d{13}$' }
+        groupId: { type: string, format: uuid, nullable: true, description: "Variante: un valor por cada atributo del producto base, sin repetir la combinación de otra variante" }
+        attributes: { type: object, nullable: true, additionalProperties: { type: string } }
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
         supplierId: { type: string, format: uuid, nullable: true }
@@ -282,6 +359,8 @@ components:
         unit: { $ref: '#/components/schemas/UnitOfMeasure', description: "No se puede pasar a UNIT si el stock actual tiene decimales" }
         taxRate: { $ref: '#/components/schemas/TaxRate' }
         cabys: { type: string, nullable: true, pattern: '^\d{13}$', description: "Omitido = no se toca; null o vacío = lo borra" }
+        groupId: { type: string, format: uuid, nullable: true, description: "Omitido = no se toca la variante; null = deja de ser variante" }
+        attributes: { type: object, nullable: true, additionalProperties: { type: string } }
         categoryId: { type: string, format: uuid }
         expirationDate: { type: string, format: date }
         supplierId: { type: string, format: uuid, nullable: true }
@@ -794,8 +873,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Empresa]
-      summary: Cambiar el nombre y/o la moneda de la empresa (ADMIN)
-      description: Al menos uno de los dos campos. Cambiar la moneda solo cambia cómo se muestran los montos; no convierte valores.
+      summary: Cambiar nombre, moneda y datos fiscales de la empresa (ADMIN)
+      description: |
+        Al menos un campo. Cambiar la moneda solo cambia cómo se muestran los montos; no convierte valores.
+        Los datos fiscales (emisor de los comprobantes) son opcionales hasta que la empresa facture; "" o null los borra.
       requestBody:
         required: true
         content:
@@ -805,6 +886,17 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 120 }
                 currency: { type: string, enum: [CRC, USD] }
+                legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
+                idType: { $ref: '#/components/schemas/IdType' }
+                idNumber: { type: string, nullable: true, description: Sin guiones }
+                economicActivity: { type: string, nullable: true, description: Código de actividad económica ante Hacienda }
+                invoiceEmail: { type: string, nullable: true, description: Correo que aparece en los comprobantes }
+                phone: { type: string, nullable: true }
+                province: { type: string, nullable: true, enum: ['1', '2', '3', '4', '5', '6', '7', null], description: "Código Hacienda: 1 San José, 2 Alajuela, 3 Cartago, 4 Heredia, 5 Guanacaste, 6 Puntarenas, 7 Limón" }
+                canton: { type: string, nullable: true, pattern: '^\d{2}$' }
+                district: { type: string, nullable: true, pattern: '^\d{2}$' }
+                addressDetail: { type: string, nullable: true, description: Otras señas }
+
       responses:
         '200':
           description: Empresa actualizada
@@ -1315,6 +1407,115 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
 
   # ---------------------------------------------------------------- Proveedores
+  /customers:
+    get:
+      tags: [Clientes]
+      summary: Listar clientes activos
+      responses:
+        '200':
+          description: Clientes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Customer' } }
+    post:
+      tags: [Clientes]
+      summary: Registrar cliente (ADMIN o EMPLOYE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerInput' }
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /customers/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Clientes]
+      summary: Ver un cliente
+      responses:
+        '200':
+          description: Cliente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Clientes]
+      summary: Editar cliente (ADMIN o EMPLOYE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerInput' }
+      responses:
+        '200':
+          description: Actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      tags: [Clientes]
+      summary: Borrar cliente (ADMIN). Soft delete; los comprobantes emitidos lo siguen referenciando
+      responses:
+        '204': { description: Borrado }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /product-groups:
+    get:
+      tags: [Productos base]
+      summary: Listar productos base (con cuántas variantes tienen)
+      responses:
+        '200':
+          description: Productos base
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ProductGroup' } }
+    post:
+      tags: [Productos base]
+      summary: Crear producto base (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductGroupInput' }
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductGroup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /product-groups/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [Productos base]
+      summary: Editar producto base (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductGroupInput' }
+      responses:
+        '200':
+          description: Actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductGroup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      tags: [Productos base]
+      summary: Borrar producto base (ADMIN). Sus variantes quedan como productos sueltos (conservan sus atributos)
+      responses:
+        '204': { description: Borrado }
+
   /suppliers:
     get:
       tags: [Proveedores]

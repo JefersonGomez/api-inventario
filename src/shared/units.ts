@@ -41,7 +41,7 @@ export function parseUnit(raw: string): UnitOfMeasure | null {
 }
 
 export function parseTaxRate(raw: string): TaxRate | null {
-  const v = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[s%]/g, "").replace(",", ".")
+  const v = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[\s%]/g, "").replace(",", ".")
   if (["exento", "exenta", "e", "0", "no"].includes(v)) return "EXEMPT"
   const n = Number(v)
   const pct = n > 0 && n < 1 ? Math.round(n * 100) : n // 0.13 → 13
