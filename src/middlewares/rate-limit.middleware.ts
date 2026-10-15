@@ -1,4 +1,4 @@
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 
 // Los tests lo apagan con RATE_LIMIT_OFF=1 (se lee en cada petición para poder encenderlo en uno solo).
 const off = () => process.env.RATE_LIMIT_OFF === "1";
@@ -13,7 +13,7 @@ export const loginLimiter = rateLimit({
   standardHeaders: "draft-7",
   legacyHeaders: false,
   skip: off,
-  keyGenerator: (req) => `${req.ip}|${String(req.body?.email ?? "").toLowerCase()}`,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? "")}|${String(req.body?.email ?? "").toLowerCase()}`,
   message: tooMany,
 });
 
