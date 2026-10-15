@@ -4,3 +4,4 @@ dist
 /src/generated/prisma
 uploads/avatars/*
 !uploads/avatars/.gitkeep
+.env.test

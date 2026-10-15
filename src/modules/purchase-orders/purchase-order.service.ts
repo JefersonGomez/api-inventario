@@ -55,8 +55,10 @@ export async function createPurchaseOrder(
     }
   }
 
-  // ← clave: guardamos el resultado en una variable, SIN "return" todavía
-  const order = await prisma.purchaseOrder.create({
+  // Sin include: un create con escritura anidada corre en una transacción interna, y un include de
+  // varias relaciones ahí hace que Prisma (adapter-pg) lance consultas en paralelo sobre la misma
+  // conexión (aviso de pg, error en pg@9). La orden completa se lee después.
+  const { id } = await prisma.purchaseOrder.create({
     data: {
       companyId: currentCompanyId(),
       supplierId,
@@ -74,21 +76,22 @@ export async function createPurchaseOrder(
         },
       }),
     },
+    select: { id: true },
+  });
+
+  await logAudit(createdById, "CREATE", "PurchaseOrder", id, {
+    supplierId,
+    items,
+  });
+
+  return prisma.purchaseOrder.findUniqueOrThrow({
+    where: { id },
     include: {
       supplier: true,
       items: { include: { product: true } },
       fulfilledRequests: true,
     },
   });
-
-  // ahora sí se ejecuta, porque todavía no hicimos return
-  await logAudit(createdById, "CREATE", "PurchaseOrder", order.id, {
-    supplierId,
-    items,
-  });
-
-  // el return va al final, después de todo lo que tenía que pasar antes
-  return order;
 }
 
 export async function getAllPurchaseOrders() {
@@ -106,7 +109,7 @@ export async function getPurchaseOrderById(id: string) {
 }
 
 export async function receivePurchaseOrder(id: string, userId: string) {
-  return prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
       include: { items: true },
@@ -146,10 +149,9 @@ export async function receivePurchaseOrder(id: string, userId: string) {
       );
     }
 
-    const received = await tx.purchaseOrder.update({
+    await tx.purchaseOrder.update({
       where: { id },
       data: { status: "RECEIVED", receivedAt: new Date() },
-      include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
     });
 
     // quien pidió el producto se entera de que ya llegó (el admin que recibe no se avisa a sí mismo)
@@ -169,8 +171,12 @@ export async function receivePurchaseOrder(id: string, userId: string) {
     );
 
     await logAudit(userId, "RECEIVE", "PurchaseOrder", id, undefined, tx);
+  });
 
-    return received;
+  // fuera de la transacción por lo mismo que en createPurchaseOrder (include de varias relaciones)
+  return prisma.purchaseOrder.findUniqueOrThrow({
+    where: { id },
+    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
   });
 }
 const orderNumber = (id: string) => id.slice(0, 8).toUpperCase();
