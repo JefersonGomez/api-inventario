@@ -46,11 +46,14 @@ describe("Aislamiento entre empresas", () => {
     for (const path of ["/products", "/categories", "/suppliers", "/purchase-requests"]) {
       const res = await request(app).get(path).set(A.auth)
       expect(res.status).toBe(200)
-      expect(res.body).toHaveLength(1)
+      // los listados paginados responden { items, total }; categorías y proveedores (sin page), un arreglo
+      const list = Array.isArray(res.body) ? res.body : res.body.items
+      expect(list).toHaveLength(1)
+      if (!Array.isArray(res.body)) expect(res.body.total).toBe(1)
       expect(JSON.stringify(res.body)).not.toContain(B.companyId)
     }
     const products = await request(app).get("/products").set(A.auth)
-    expect(products.body[0].name).toBe("Producto A")
+    expect(products.body.items[0].name).toBe("Producto A")
   })
 
   it("no puede leer, editar ni borrar por id un registro de otra empresa", async () => {
@@ -98,13 +101,13 @@ describe("Aislamiento entre empresas", () => {
 
     await request(app).put("/company").set(B.auth).send({ name: "Empresa B renombrada" })
     const audit = await request(app).get("/audit-logs").set(A.auth)
-    expect(audit.body.every((l: { companyId: string }) => l.companyId === A.companyId)).toBe(true)
+    expect(audit.body.items.every((l: { companyId: string }) => l.companyId === A.companyId)).toBe(true)
     expect((await request(app).get("/company").set(A.auth)).body.name).not.toBe("Empresa B renombrada")
   })
 
   it("el asistente IA solo consulta datos de su empresa", async () => {
-    const products = (await runWithCompany(A.companyId, () => toolExecutors.getAllProducts!({}))) as { name: string }[]
-    expect(products.map((p) => p.name)).toEqual(["Producto A"])
+    const products = (await runWithCompany(A.companyId, () => toolExecutors.searchProducts!({}))) as { items: { name: string }[] }
+    expect(products.items.map((p) => p.name)).toEqual(["Producto A"])
   })
 
   it("los usuarios de la empresa B no aparecen en la gestión de A ni se pueden desactivar", async () => {
@@ -169,7 +172,7 @@ describe("Sesión, cambio de empresa y planes", () => {
     const login = await request(app).post("/auth/login").send({ email: "nueva@test.com", password: "Clave-segura-1" })
     expect(login.body.company.name).toBe("Ferretería Nueva")
     const products = await request(app).get("/products").set({ Authorization: `Bearer ${login.body.token}` })
-    expect(products.body).toEqual([])
+    expect(products.body).toMatchObject({ items: [], total: 0 })
   })
 
   it("el plan limita cuántas empresas se pueden crear", async () => {

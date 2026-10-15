@@ -2,6 +2,8 @@ import { prisma } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
 import { logAudit } from "../audit/audit.service.ts"
 import type { CustomerInput } from "./customer.schema.ts"
+import { catalogResult, contains, type CatalogQuery } from "../../shared/pagination.ts"
+import type { Prisma } from "../../generated/prisma/client.ts"
 
 // Crear y editar mandan el cliente completo ("" o ausente = sin dato)
 function toData(input: CustomerInput) {
@@ -37,8 +39,19 @@ export async function createCustomer(input: CustomerInput, userId: string) {
   return customer
 }
 
-export function getCustomers() {
-  return prisma.customer.findMany({ where: { deletedAt: null }, orderBy: { name: "asc" } })
+// Sin page: lista completa. q busca por nombre, correo o el inicio de la identificación (sin guiones)
+export function getCustomers(f: CatalogQuery) {
+  const where: Prisma.CustomerWhereInput = {
+    deletedAt: null,
+    ...(f.q && {
+      OR: [{ name: contains(f.q) }, { email: contains(f.q) }, { idNumber: { startsWith: f.q.replace(/[\s-]/g, "").toUpperCase() } }],
+    }),
+  }
+  return catalogResult(
+    f,
+    () => prisma.customer.count({ where }),
+    (page) => prisma.customer.findMany({ where, orderBy: { name: "asc" }, ...page })
+  )
 }
 
 export async function getCustomerById(id: string) {

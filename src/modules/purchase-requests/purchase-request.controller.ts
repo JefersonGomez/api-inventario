@@ -21,10 +21,17 @@ export async function createPurchaseRequestHandler(req: Request, res: Response) 
 
 export async function getAllPurchaseRequestsHandler(req: Request, res: Response) {
   try {
-    const requests = await service.getAllPurchaseRequests(req.user!);
-    res.status(200).json(requests);
+    res.status(200).json(await service.listPurchaseRequests(req.user!, res.locals.query));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+export async function getPurchaseRequestByIdHandler(req: Request, res: Response) {
+  try {
+    res.status(200).json(await service.getPurchaseRequestById(req.user!, String(req.params.id)));
+  } catch (error) {
+    res.status(404).json({ error: (error as Error).message });
   }
 }
 

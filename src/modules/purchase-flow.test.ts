@@ -77,7 +77,7 @@ describe("Flujo de compra", () => {
   it("cada empleado ve solo sus solicitudes", async () => {
     const mine = await request(app).get("/purchase-requests").set(otherEmployee.auth)
     expect(mine.status).toBe(200)
-    expect(mine.body).toHaveLength(0)
+    expect(mine.body).toMatchObject({ items: [], total: 0 })
   })
 
   it("comentarios: quien pidió y admins sí; otro empleado no; órdenes solo admins", async () => {

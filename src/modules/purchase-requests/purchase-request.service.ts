@@ -5,6 +5,9 @@ import type { Role } from "../../generated/prisma/enums.ts"; // ajustá el impor
 import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
+import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
+import type { Prisma } from "../../generated/prisma/client.ts";
+import type { PurchaseRequestListQuery } from "./purchase-request.schema.ts";
 const DEFAULT_EXPIRY_DAYS = 7; 
 export async function createPurchaseRequest(
   productId: string,
@@ -33,12 +36,36 @@ export async function createPurchaseRequest(
   });
 }
 
-export async function getAllPurchaseRequests(user: { id: string; role: string }) {
-  return prisma.purchaseRequest.findMany({
-    where: user.role === "ADMIN" ? {} : { requestedById: user.id },
-    include: { product: true, requestedBy: { select: { id: true, name: true, email: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+const requestInclude = { product: true, requestedBy: { select: { id: true, name: true, email: true } } } as const;
+
+// el empleado solo ve las suyas; el ADMIN, todas
+const visibleTo = (user: { id: string; role: string }) => (user.role === "ADMIN" ? {} : { requestedById: user.id });
+
+export async function listPurchaseRequests(user: { id: string; role: string }, f: PurchaseRequestListQuery) {
+  const where: Prisma.PurchaseRequestWhereInput = {
+    ...visibleTo(user),
+    ...(f.status && { status: f.status }),
+    ...(f.unlinked && { status: "APPROVED", purchaseOrderId: null }),
+    ...(f.q && {
+      OR: [
+        { product: { name: contains(f.q) } },
+        { product: { sku: contains(f.q) } },
+        { requestedBy: { name: contains(f.q) } },
+      ],
+    }),
+  };
+  const [total, items] = await Promise.all([
+    prisma.purchaseRequest.count({ where }),
+    prisma.purchaseRequest.findMany({ where, include: requestInclude, orderBy: { createdAt: "desc" }, ...pageArgs(f) }),
+  ]);
+  return pageResult(items, total, f);
+}
+
+// para los enlaces ?highlight= (el resaltado puede no estar en la página actual)
+export async function getPurchaseRequestById(user: { id: string; role: string }, id: string) {
+  const request = await prisma.purchaseRequest.findFirst({ where: { id, ...visibleTo(user) }, include: requestInclude });
+  if (!request) throw new Error("Solicitud no encontrada");
+  return request;
 }
 
 export async function updatePurchaseRequestStatus(

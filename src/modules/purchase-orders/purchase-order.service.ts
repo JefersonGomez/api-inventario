@@ -8,6 +8,9 @@ import { sendEmail, escapeHtml } from "../../shared/email.ts";
 import { formatMoney } from "../../shared/money.ts";
 import { getCompany } from "../company/company.service.ts";
 import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
+import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
+import type { Prisma } from "../../generated/prisma/client.ts";
+import type { PurchaseOrderListQuery } from "./purchase-order.schema.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -98,11 +101,22 @@ export async function createPurchaseOrder(
   });
 }
 
-export async function getAllPurchaseOrders() {
-  return prisma.purchaseOrder.findMany({
-    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+export async function listPurchaseOrders(f: PurchaseOrderListQuery) {
+  const where: Prisma.PurchaseOrderWhereInput = {
+    ...(f.status && { status: f.status }),
+    ...(f.supplierId && { supplierId: f.supplierId }),
+    ...(f.q && { OR: [{ supplier: { name: contains(f.q) } }, { id: { startsWith: f.q.toLowerCase() } }] }),
+  };
+  const [total, items] = await Promise.all([
+    prisma.purchaseOrder.count({ where }),
+    prisma.purchaseOrder.findMany({
+      where,
+      include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+      orderBy: { createdAt: "desc" },
+      ...pageArgs(f),
+    }),
+  ]);
+  return pageResult(items, total, f);
 }
 
 export async function getPurchaseOrderById(id: string) {

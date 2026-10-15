@@ -21,11 +21,16 @@ export const toolDeclarations = [
     },
   },
   {
-    name: "getAllProducts",
-    description: "Devuelve la lista completa de productos activos, con su categoría, precio de venta, costo (puede ser null), stock actual y stock mínimo. Útil para preguntas generales sobre qué productos existen o sus datos puntuales.",
+    name: "searchProducts",
+    description: "Busca productos activos por nombre, SKU, código de barras, categoría o producto base (variantes). Devuelve hasta 100 coincidencias, con su categoría, precio de venta (incluye IVA), costo (puede ser null), unidad, stock actual y stock mínimo, y el total de coincidencias. Sin texto de búsqueda devuelve los primeros 100 por nombre. Útil para preguntas sobre productos puntuales.",
     parameters: {
       type: Type.OBJECT,
-      properties: {},
+      properties: {
+        query: {
+          type: Type.STRING,
+          description: "Texto a buscar (nombre, SKU, código de barras, categoría o producto base). Opcional.",
+        },
+      },
     },
   },
   {
@@ -46,6 +51,9 @@ export const toolDeclarations = [
 export const toolExecutors: Record<string, (args: any) => Promise<unknown>> = {
   getLowStockReport: () => reportsService.getLowStockReport(),
   getInventoryValueReport: () => reportsService.getInventoryValueReport(),
-  getAllProducts: () => productService.getAllProducts(),
-  getMovements: (args) => movementsService.getMovements(args?.productId),
+  // ponytail: tope de 100 resultados por consulta; si hiciera falta más, agregar paginación a la herramienta
+  searchProducts: (args) =>
+    productService.listProducts({ view: "flat", page: 1, pageSize: 100, ...(args?.query && { q: String(args.query) }) }),
+  getMovements: (args) =>
+    movementsService.listMovements({ page: 1, pageSize: 100, ...(args?.productId && { productId: String(args.productId) }) }),
 };

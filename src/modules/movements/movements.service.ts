@@ -3,6 +3,8 @@ import { currentCompanyId } from "../../shared/tenant.ts"
 import type { MovementSource, MovementType } from "../../generated/prisma/enums.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
+import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
+import type { MovementListQuery } from "./movements.schema.ts";
 
 // Origen del movimiento: a mano por defecto; las recepciones, ventas, conteos... pasan el suyo
 export type MovementOrigin = { source: MovementSource; sourceId?: string | null };
@@ -78,20 +80,27 @@ export async function createMovement(
   return movement;
 }
 
-export async function getMovements(productId?: string) {
-  // ✅ Solo definimos 'where' si productId tiene un valor
-  const whereClause = productId ? { productId } : {};
-
-  const movements = await prisma.stockMovement.findMany({
-    where: whereClause,
-    include: {
-      product: true,
-      user: {
-        select: { id: true, name: true, email: true }
-      }
-    },
-    orderBy: { createdAt: "desc" } // Asegúrate de que en tu schema se llame createdAt
-  });
-
-  return movements;
+export async function listMovements(f: MovementListQuery) {
+  const where: Prisma.StockMovementWhereInput = {
+    ...(f.productId && { productId: f.productId }),
+    ...(f.type && { type: f.type }),
+    ...(f.source && { source: f.source }),
+    ...((f.from || f.to) && { createdAt: { ...(f.from && { gte: f.from }), ...(f.to && { lte: f.to }) } }),
+    ...(f.q && {
+      OR: [{ product: { name: contains(f.q) } }, { product: { sku: contains(f.q) } }, { reason: contains(f.q) }],
+    }),
+  };
+  const [total, items] = await Promise.all([
+    prisma.stockMovement.count({ where }),
+    prisma.stockMovement.findMany({
+      where,
+      include: {
+        product: { select: { id: true, name: true, sku: true, unit: true } },
+        user: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      ...pageArgs(f),
+    }),
+  ]);
+  return pageResult(items, total, f);
 }

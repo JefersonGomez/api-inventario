@@ -1,7 +1,7 @@
 import type { Request, Response } from "express"
 import {
   createSupplier,
-  getAllSuppliers,
+  listSuppliers,
   getSupplierById,
   updateSupplier,
   deleteSupplier,
@@ -18,8 +18,7 @@ export async function createSupplierController(req: Request, res: Response) {
 
 export async function getAllSuppliersController(req: Request, res: Response) {
   try {
-    const suppliers = await getAllSuppliers()
-    res.status(200).json(suppliers)
+    res.status(200).json(await listSuppliers(res.locals.query))
   } catch (error) {
     res.status(500).json({ error: (error as Error).message })
   }

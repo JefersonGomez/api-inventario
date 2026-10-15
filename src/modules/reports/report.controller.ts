@@ -1,5 +1,17 @@
 import type { Request, Response } from "express";
-import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast } from "./report.service.ts";
+import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast, getDashboardSummary } from "./report.service.ts";
+
+export async function getDashboardController(req: Request, res: Response) {
+  try {
+    // inicio del mes según el navegador; sin él (o inválido), el del servidor
+    const raw = typeof req.query.since === "string" ? new Date(req.query.since) : null;
+    const now = new Date();
+    const since = raw && !Number.isNaN(raw.getTime()) ? raw : new Date(now.getFullYear(), now.getMonth(), 1);
+    res.status(200).json(await getDashboardSummary(req.user!, since));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
 
 export async function getLowStockController(req: Request, res: Response) {
   try {

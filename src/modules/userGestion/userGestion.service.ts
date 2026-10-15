@@ -4,15 +4,27 @@ import { prismaRoot } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { assertUserSlot } from "../invitations/invitation.service.ts";
+import { catalogResult, contains, type CatalogQuery } from "../../shared/pagination.ts";
 
-export async function getAllUsers() {
-  const memberships = await prismaRoot.membership.findMany({
-    where: { companyId: currentCompanyId() },
-    include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+// Sin page: todos los miembros. q busca por nombre o correo.
+export async function getAllUsers(f: CatalogQuery) {
+  const where = {
+    companyId: currentCompanyId(),
+    ...(f.q && { user: { OR: [{ name: contains(f.q) }, { email: contains(f.q) }] } }),
+  };
   // misma forma que antes para el frontend: role e isActive salen de la membresía
-  return memberships.map((m) => ({ ...m.user, role: m.role, isActive: m.isActive }));
+  const toUser = (m: { user: object; role: string; isActive: boolean }) => ({ ...m.user, role: m.role, isActive: m.isActive });
+  const result = await catalogResult(
+    f,
+    () => prismaRoot.membership.count({ where }),
+    (page) => prismaRoot.membership.findMany({
+      where,
+      include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true } } },
+      orderBy: { createdAt: "desc" },
+      ...page,
+    })
+  );
+  return Array.isArray(result) ? result.map(toUser) : { ...result, items: result.items.map(toUser) };
 }
 
 export async function toggleUserActive(targetUserId: string, requestingUserId: string) {

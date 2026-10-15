@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { stockSchema } from "../../shared/units.ts";
+import { pageQuery, queryFlag } from "../../shared/pagination.ts";
 
 const unit = z.enum(["UNIT", "KG", "G", "L", "ML", "M", "CM", "M2"]);
 const taxRate = z.enum(["EXEMPT", "RATE_1", "RATE_2", "RATE_4", "RATE_13"]);
@@ -81,3 +82,16 @@ export const productsImportSchema = z.object({
   dryRun: z.boolean(),
   options: importOptions.optional(),
 });
+
+// GET /products: flat = productos (selector, variantes de un grupo); grouped = productos base con su
+// resumen primero y después los productos sueltos (tabla de Productos)
+export const productListQuerySchema = z.object({
+  ...pageQuery,
+  view: z.enum(["flat", "grouped"]).default("flat"),
+  categoryId: z.string().uuid().optional(),
+  supplierId: z.string().uuid().optional(),
+  groupId: z.string().uuid().optional(),
+  pending: queryFlag, // importados "Por completar"
+  lowStock: queryFlag, // stock <= mínimo
+});
+export type ProductListQuery = z.infer<typeof productListQuerySchema>;

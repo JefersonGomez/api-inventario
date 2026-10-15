@@ -63,6 +63,19 @@ components:
       bearerFormat: JWT
 
   parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Q:
+      name: q
+      in: query
+      description: Texto a buscar (sin distinguir mayúsculas)
+      schema: { type: string, maxLength: 100 }
     Id:
       name: id
       in: path
@@ -106,6 +119,16 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    PageMeta:
+      type: object
+      description: "Respuesta de un listado paginado: { items, total, page, pageSize, pageCount }"
+      properties:
+        items: { type: array, items: { type: object } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        pageCount: { type: integer }
+
     Error:
       type: object
       description: "`error` puede ser un texto o la lista de issues de Zod"
@@ -833,17 +856,25 @@ paths:
     get:
       tags: [Usuarios]
       summary: Usuarios de la empresa activa (ADMIN)
+      description: "Sin `page`: lista completa (la usan los selectores). Con `page`: paginado. q busca por nombre o correo."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
       responses:
         '200':
-          description: Usuarios
+          description: Lista completa o página
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/User' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
+                oneOf:
+                  - type: array
+                    items: { $ref: '#/components/schemas/User' }
+                  - allOf:
+                      - $ref: '#/components/schemas/PageMeta'
+                      - type: object
+                        properties:
+                          items: { type: array, items: { $ref: '#/components/schemas/User' } }
   /users/{id}/toggle-active:
     patch:
       tags: [Usuarios]
@@ -1192,15 +1223,50 @@ paths:
   /products:
     get:
       tags: [Productos]
-      summary: Listar productos
+      summary: Listar productos (paginado, búsqueda y filtros en el servidor)
+      description: |
+        `view=flat` (por defecto): productos; lo usa el selector con búsqueda y el despliegue de un producto base (`groupId`).
+        `view=grouped`: la tabla de Productos — primero los productos base (`kind: group`, con el resumen de sus
+        variantes: variantCount, minPrice, maxPrice, totalStock, unit, lowCount) y después los productos sueltos
+        (`kind: product`), paginados como una sola lista; trae además `pendingCount`.
+        `q` busca en nombre, SKU, código de barras (exacto), categoría y producto base.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - name: view
+          in: query
+          schema: { type: string, enum: [flat, grouped], default: flat }
+        - name: categoryId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: supplierId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: groupId
+          in: query
+          description: "Variantes de un producto base"
+          schema: { type: string, format: uuid }
+        - name: pending
+          in: query
+          description: "Importados Por completar"
+          schema: { type: string, enum: ['1', '0', 'true', 'false'] }
+        - name: lowStock
+          in: query
+          description: "stock <= stock mínimo"
+          schema: { type: string, enum: ['1', 'true'] }
       responses:
         '200':
-          description: Productos (sin los eliminados)
+          description: Página de productos
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Product' }
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Productos]
@@ -1377,19 +1443,38 @@ paths:
   /movements:
     get:
       tags: [Movimientos]
-      summary: Listar movimientos de stock
+      summary: Listar movimientos de stock (paginado, más recientes primero)
+      description: "`q` busca en el nombre/SKU del producto y en el motivo."
       parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
         - name: productId
           in: query
           schema: { type: string, format: uuid }
+        - name: type
+          in: query
+          schema: { type: string, enum: [IN, OUT, ADJUSTMENT] }
+        - name: source
+          in: query
+          schema: { $ref: '#/components/schemas/MovementSource' }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Movimientos
+          description: Página de movimientos
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Movement' }
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Movement' } }
     post:
       tags: [Movimientos]
       summary: Registrar entrada, salida o ajuste (ADMIN, EMPLOYE)
@@ -1411,12 +1496,25 @@ paths:
     get:
       tags: [Clientes]
       summary: Listar clientes activos
+      description: "Sin `page`: lista completa (la usan los selectores). Con `page`: paginado. q busca por nombre, correo o inicio de la identificación."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
       responses:
         '200':
-          description: Clientes
+          description: Lista completa o página
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/Customer' } }
+              schema:
+                oneOf:
+                  - type: array
+                    items: { $ref: '#/components/schemas/Customer' }
+                  - allOf:
+                      - $ref: '#/components/schemas/PageMeta'
+                      - type: object
+                        properties:
+                          items: { type: array, items: { $ref: '#/components/schemas/Customer' } }
     post:
       tags: [Clientes]
       summary: Registrar cliente (ADMIN o EMPLOYE)
@@ -1520,14 +1618,25 @@ paths:
     get:
       tags: [Proveedores]
       summary: Listar proveedores
+      description: "Sin `page`: lista completa (la usan los selectores). Con `page`: paginado. q busca por nombre, correo o inicio de la identificación. Cada proveedor trae _count.products."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
       responses:
         '200':
-          description: Proveedores
+          description: Lista completa o página
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/Supplier' }
+                oneOf:
+                  - type: array
+                    items: { $ref: '#/components/schemas/Supplier' }
+                  - allOf:
+                      - $ref: '#/components/schemas/PageMeta'
+                      - type: object
+                        properties:
+                          items: { type: array, items: { $ref: '#/components/schemas/Supplier' } }
     post:
       tags: [Proveedores]
       summary: Crear proveedor (ADMIN)
@@ -1585,16 +1694,30 @@ paths:
   /purchase-requests:
     get:
       tags: [Solicitudes de compra]
-      summary: Listar solicitudes
-      description: ADMIN ve todas; EMPLOYE solo las suyas.
+      summary: Listar solicitudes (paginado)
+      description: "ADMIN ve todas; EMPLOYE solo las suyas. `q` busca en el producto y en quién pidió."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        - name: unlinked
+          in: query
+          description: "Aprobadas que todavía no están en una orden"
+          schema: { type: string, enum: ['1', 'true'] }
       responses:
         '200':
-          description: Solicitudes
+          description: Página de solicitudes
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/PurchaseRequest' }
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/PurchaseRequest' } }
     post:
       tags: [Solicitudes de compra]
       summary: Crear solicitud (cualquier usuario)
@@ -1689,18 +1812,46 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ---------------------------------------------------------------- Órdenes de compra
+  /purchase-requests/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [Solicitudes de compra]
+      summary: Ver una solicitud (para los enlaces ?highlight=)
+      description: El empleado solo puede ver las suyas (otra → 404).
+      responses:
+        '200':
+          description: Solicitud
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /purchase-orders:
     get:
       tags: [Órdenes de compra]
-      summary: Listar órdenes
+      summary: Listar órdenes (paginado)
+      description: "`q` busca por nombre del proveedor o por el inicio del id (N.º de orden)."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, RECEIVED, CANCELLED] }
+        - name: supplierId
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Órdenes
+          description: Página de órdenes
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '#/components/schemas/PurchaseOrder' }
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/PurchaseOrder' } }
     post:
       tags: [Órdenes de compra]
       summary: Crear orden (ADMIN)
@@ -1853,6 +2004,30 @@ paths:
                   updated: { type: integer }
 
   # ---------------------------------------------------------------- Reportes
+  /reports/dashboard:
+    get:
+      tags: [Reportes]
+      summary: Totales del panel calculados en el servidor
+      description: Las solicitudes respetan el rol (el empleado cuenta solo las suyas).
+      parameters:
+        - name: since
+          in: query
+          description: Inicio del mes en la zona del navegador (por defecto, el del servidor)
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Totales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  units: { type: number, description: Unidades en stock (suma de todos los productos) }
+                  dispatchedSince: { type: number, description: Salidas (OUT) desde since }
+                  stockByCategory: { type: array, items: { type: object, properties: { name: { type: string }, value: { type: number } } } }
+                  recentMovements: { type: array, items: { $ref: '#/components/schemas/Movement' } }
+                  requests: { type: object, additionalProperties: { type: integer }, example: { PENDING: 2, APPROVED: 1 } }
+
   /reports/low-stock:
     get:
       tags: [Reportes]
@@ -1980,25 +2155,31 @@ paths:
   /audit-logs:
     get:
       tags: [Auditoría]
-      summary: Registro de auditoría (ADMIN, últimos 200)
+      summary: Registro de auditoría (ADMIN, paginado)
+      description: "`q` busca por nombre de usuario o por el inicio del id de la entidad."
       parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
         - name: entityType
           in: query
           schema: { type: string, example: PurchaseOrder }
         - name: action
           in: query
-          description: "Ej.: `EMAIL` para ver solo los correos enviados a proveedores"
+          description: "Ej.: EMAIL para ver solo los correos enviados a proveedores"
           schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Registros, del más reciente al más antiguo
+          description: Página del registro
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/AuditLog' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
+              schema: { $ref: '#/components/schemas/PageMeta' }
   /audit-logs/metrics:
     get:
       tags: [Auditoría]

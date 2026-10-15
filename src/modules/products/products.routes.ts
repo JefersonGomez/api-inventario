@@ -4,12 +4,12 @@ import { CreateProductController,getProductPriceHistoryHandler,getAllProductsCon
 } from "./products.controller.ts";
 import Express from "express";
 import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
-import { validate } from "../../middlewares/validate.middleware.ts";
-import { productsSchemaCreate,productsSchemaUpdate,productsImportSchema } from "./products.schema.ts";
+import { validate, validateQuery } from "../../middlewares/validate.middleware.ts";
+import { productsSchemaCreate,productsSchemaUpdate,productsImportSchema,productListQuerySchema } from "./products.schema.ts";
 export const router = Router()
 
 router.post("/",validate(productsSchemaCreate),Authenticated, Authorize("ADMIN"),CreateProductController)
-router.get("/",Authenticated,getAllProductsController)
+router.get("/", validateQuery(productListQuerySchema), Authenticated, getAllProductsController)
 
 // importación desde Excel: hasta 2000 filas, por eso su propio límite de tamaño (el global es 100 KB)
 router.post("/import", Express.json({ limit: "2mb" }), validate(productsImportSchema), Authenticated, Authorize("ADMIN"), importProductsHandler)

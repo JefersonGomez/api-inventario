@@ -1,5 +1,35 @@
 import { prisma } from "../../config/database.ts"
 
+// Panel: los números ya calculados (antes el navegador bajaba todos los productos y movimientos).
+// since = inicio del mes en la zona del navegador (el servidor puede estar en UTC).
+// Las solicitudes respetan lo que ve cada rol: el empleado cuenta solo las suyas.
+export async function getDashboardSummary(user: { id: string; role: string }, since: Date) {
+  const mine = user.role === "ADMIN" ? {} : { requestedById: user.id }
+  const [units, dispatched, byCategory, categories, recent, requestCounts] = await Promise.all([
+    prisma.product.aggregate({ where: { deletedAt: null }, _sum: { stock: true } }),
+    prisma.stockMovement.aggregate({ where: { type: "OUT", createdAt: { gte: since } }, _sum: { quantity: true } }),
+    prisma.product.groupBy({ by: ["categoryId"], where: { deletedAt: null }, _sum: { stock: true } }),
+    prisma.category.findMany({ select: { id: true, name: true } }),
+    prisma.stockMovement.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 4,
+      include: { product: { select: { id: true, name: true, sku: true, unit: true } } },
+    }),
+    prisma.purchaseRequest.groupBy({ by: ["status"], where: mine, _count: { _all: true } }),
+  ])
+  const names = new Map(categories.map((c) => [c.id, c.name]))
+  return {
+    units: Number(units._sum.stock ?? 0),
+    dispatchedSince: Number(dispatched._sum.quantity ?? 0),
+    stockByCategory: byCategory
+      .map((c) => ({ name: names.get(c.categoryId) ?? "—", value: Number(c._sum.stock ?? 0) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8),
+    recentMovements: recent,
+    requests: Object.fromEntries(requestCounts.map((r) => [r.status, r._count._all])) as Record<string, number>,
+  }
+}
+
 export async function getLowStockReport() {
   const allProducts = await prisma.product.findMany({
     where: { deletedAt: null },

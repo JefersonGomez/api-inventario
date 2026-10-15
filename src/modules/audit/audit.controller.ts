@@ -3,12 +3,7 @@ import * as service from "./audit.service.ts";
 
 export async function getAuditLogsHandler(req: Request, res: Response) {
   try {
-    const { entityType, action } = req.query;
-    const logs = await service.getAuditLogs(
-      typeof entityType === "string" ? entityType : undefined,
-      typeof action === "string" ? action : undefined
-    );
-    res.json(logs);
+    res.json(await service.listAuditLogs(res.locals.query));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

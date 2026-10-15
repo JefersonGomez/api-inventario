@@ -3,6 +3,8 @@ import { prisma, type Db } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 
 import type { Prisma } from "../../generated/prisma/client.ts"; // ajustá el path si es distinto
+import { z } from "zod";
+import { contains, pageArgs, pageQuery, pageResult } from "../../shared/pagination.ts";
 
 type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE"  | "ACTIVATE" | "DEACTIVATE" | "EMAIL";
 
@@ -30,13 +32,33 @@ export async function logAudit(
   }
 }
 
-export async function getAuditLogs(entityType?: string, action?: string) {
-  return prisma.auditLog.findMany({
-    where: { ...(entityType && { entityType }), ...(action && { action }) },
-    include: { user: { select: { id: true, name: true, email: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+// GET /audit-logs: más recientes primero (antes: los últimos 200 sin paginar)
+export const auditListQuerySchema = z.object({
+  ...pageQuery,
+  entityType: z.string().max(60).optional(),
+  action: z.string().max(30).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type AuditListQuery = z.infer<typeof auditListQuerySchema>;
+
+export async function listAuditLogs(f: AuditListQuery) {
+  const where: Prisma.AuditLogWhereInput = {
+    ...(f.entityType && { entityType: f.entityType }),
+    ...(f.action && { action: f.action }),
+    ...((f.from || f.to) && { createdAt: { ...(f.from && { gte: f.from }), ...(f.to && { lte: f.to }) } }),
+    ...(f.q && { OR: [{ user: { name: contains(f.q) } }, { entityId: { startsWith: f.q } }] }),
+  };
+  const [total, items] = await Promise.all([
+    prisma.auditLog.count({ where }),
+    prisma.auditLog.findMany({
+      where,
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+      ...pageArgs(f),
+    }),
+  ]);
+  return pageResult(items, total, f);
 }
 
 export async function getAuditMetrics() {

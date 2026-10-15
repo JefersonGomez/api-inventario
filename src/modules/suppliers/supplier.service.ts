@@ -1,6 +1,8 @@
 import { prisma } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts";
 import type { SupplierInput } from "./supplier.schema.ts";
+import { catalogResult, contains, type CatalogQuery } from "../../shared/pagination.ts";
+import type { Prisma } from "../../generated/prisma/client.ts";
 
 // crear y editar mandan el proveedor completo ("" o ausente = sin dato)
 const toData = ({ name, email, phone, address, idType, idNumber }: SupplierInput) => ({
@@ -27,12 +29,21 @@ export async function createSupplier(input: SupplierInput) {
   return newSupplier
 }
 
-export async function getAllSuppliers() {
-  const suppliers = await prisma.supplier.findMany({
-    include: { products: true },
-  })
-
-  return suppliers
+// Sin page: lista completa (selectores). _count en vez de traer todos los productos de cada proveedor.
+export function listSuppliers(f: CatalogQuery) {
+  const where: Prisma.SupplierWhereInput = f.q
+    ? { OR: [{ name: contains(f.q) }, { email: contains(f.q) }, { idNumber: { startsWith: f.q.replace(/[\s-]/g, "") } }] }
+    : {}
+  return catalogResult(
+    f,
+    () => prisma.supplier.count({ where }),
+    (page) => prisma.supplier.findMany({
+      where,
+      include: { _count: { select: { products: { where: { deletedAt: null } } } } },
+      orderBy: { name: "asc" },
+      ...page,
+    })
+  )
 }
 
 export async function getSupplierById(id: string) {

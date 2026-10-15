@@ -1,4 +1,6 @@
-import { prisma } from "../../config/database.ts";
+import { prisma, prismaRoot } from "../../config/database.ts";
+import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
+import type { ProductListQuery } from "./products.schema.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
@@ -85,12 +87,108 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
   return prisma.product.findUniqueOrThrow({ where: { id }, include: withSupplier });
 }
 
-export async function getAllProducts() {
-  const allProducts = await prisma.product.findMany({
-    where: { deletedAt: null }, // ← nuevo
-    include: withSupplier
-  });
-  return allProducts;
+// Filtros de producto compartidos por las dos vistas. lowStock compara dos columnas (stock <= minStock).
+function productWhere(f: ProductListQuery): Prisma.ProductWhereInput {
+  return {
+    deletedAt: null,
+    ...(f.categoryId && { categoryId: f.categoryId }),
+    ...(f.supplierId && { supplierId: f.supplierId }),
+    ...(f.groupId && { groupId: f.groupId }),
+    ...(f.pending !== undefined && { pendingReview: f.pending }),
+    ...(f.lowStock && { stock: { lte: prismaRoot.product.fields.minStock } }),
+    ...(f.q && {
+      OR: [
+        { name: contains(f.q) },
+        { sku: contains(f.q) },
+        { barcode: f.q },
+        { category: { name: contains(f.q) } },
+        { group: { name: contains(f.q) } },
+      ],
+    }),
+  };
+}
+
+const hasFilters = (f: ProductListQuery) =>
+  Boolean(f.q || f.categoryId || f.supplierId || f.pending !== undefined || f.lowStock);
+
+export async function listProducts(f: ProductListQuery) {
+  if (f.view === "grouped" && !f.groupId) return listProductsGrouped(f);
+  const where = productWhere(f);
+  const [total, items] = await Promise.all([
+    prisma.product.count({ where }),
+    prisma.product.findMany({ where, include: withSupplier, orderBy: [{ name: "asc" }, { sku: "asc" }], ...pageArgs(f) }),
+  ]);
+  return pageResult(items, total, f);
+}
+
+// Vista de la tabla: productos base (con el resumen de sus variantes) y después productos sueltos,
+// paginados como una sola lista. Las variantes de cada grupo se piden aparte al desplegarlo.
+async function listProductsGrouped(f: ProductListQuery) {
+  const filtered = hasFilters(f);
+  const groupWhere: Prisma.ProductGroupWhereInput = {
+    deletedAt: null,
+    // con filtros, un producto base entra si alguna variante cumple (o si la búsqueda coincide con su nombre)
+    ...(filtered && {
+      OR: [
+        { products: { some: productWhere(f) } },
+        ...(f.q && !(f.categoryId || f.supplierId || f.pending !== undefined || f.lowStock) ? [{ name: contains(f.q) }] : []),
+      ],
+    }),
+  };
+  const looseWhere: Prisma.ProductWhereInput = { ...productWhere(f), groupId: null };
+
+  const [groupTotal, looseTotal, pendingCount] = await Promise.all([
+    prisma.productGroup.count({ where: groupWhere }),
+    prisma.product.count({ where: looseWhere }),
+    prisma.product.count({ where: { deletedAt: null, pendingReview: true } }),
+  ]);
+  const { skip, take } = pageArgs(f);
+  const groups = skip < groupTotal
+    ? await prisma.productGroup.findMany({ where: groupWhere, orderBy: { name: "asc" }, skip, take })
+    : [];
+  const looseTake = take - groups.length;
+  const loose = looseTake > 0
+    ? await prisma.product.findMany({
+        where: looseWhere,
+        include: withSupplier,
+        orderBy: [{ name: "asc" }, { sku: "asc" }],
+        skip: Math.max(0, skip - groupTotal),
+        take: looseTake,
+      })
+    : [];
+
+  const summaries = await summarizeGroups(groups.map((g) => g.id));
+  const items = [
+    ...groups.map((g) => ({ kind: "group" as const, ...g, ...summaries.get(g.id) })),
+    ...loose.map((p) => ({ kind: "product" as const, ...p })),
+  ];
+  return { ...pageResult(items, groupTotal + looseTotal, f), pendingCount };
+}
+
+// Resumen de las variantes de cada producto base: cuántas, rango de precios (sin las "Por
+// completar"), stock total (si todas usan la misma unidad) y cuántas están bajo el mínimo
+async function summarizeGroups(ids: string[]) {
+  const empty = { variantCount: 0, minPrice: null as number | null, maxPrice: null as number | null, totalStock: null as number | null, unit: null as string | null, lowCount: 0 };
+  const out = new Map(ids.map((id) => [id, { ...empty }]));
+  if (!ids.length) return out;
+  const base = { groupId: { in: ids }, deletedAt: null };
+  const [all, priced, low, units] = await Promise.all([
+    prisma.product.groupBy({ by: ["groupId"], where: base, _count: { _all: true }, _sum: { stock: true } }),
+    prisma.product.groupBy({ by: ["groupId"], where: { ...base, pendingReview: false }, _min: { price: true }, _max: { price: true } }),
+    prisma.product.groupBy({ by: ["groupId"], where: { ...base, stock: { lte: prismaRoot.product.fields.minStock } }, _count: { _all: true } }),
+    prisma.product.groupBy({ by: ["groupId", "unit"], where: base }),
+  ]);
+  for (const r of all) Object.assign(out.get(r.groupId!)!, { variantCount: r._count._all, totalStock: Number(r._sum.stock ?? 0) });
+  for (const r of priced) Object.assign(out.get(r.groupId!)!, { minPrice: Number(r._min.price), maxPrice: Number(r._max.price) });
+  for (const r of low) out.get(r.groupId!)!.lowCount = r._count._all;
+  const unitsBy = new Map<string, string[]>();
+  for (const r of units) unitsBy.set(r.groupId!, [...(unitsBy.get(r.groupId!) ?? []), r.unit]);
+  for (const [id, list] of unitsBy) {
+    const s = out.get(id)!;
+    if (list.length === 1) s.unit = list[0]!;
+    else s.totalStock = null; // kg + unidades no se suman
+  }
+  return out;
 }
 
 export async function getProductById(idProduct: string) {

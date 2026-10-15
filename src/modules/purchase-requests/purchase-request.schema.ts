@@ -1,4 +1,14 @@
 import { z } from "zod"
+import { pageQuery, queryFlag } from "../../shared/pagination.ts"
+
+// GET /purchase-requests: más recientes primero. q busca en el producto (nombre/SKU) y en quién pidió.
+// unlinked = aprobadas que todavía no están en ninguna orden (las que se pueden pasar a una orden)
+export const purchaseRequestListQuerySchema = z.object({
+  ...pageQuery,
+  status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
+  unlinked: queryFlag,
+})
+export type PurchaseRequestListQuery = z.infer<typeof purchaseRequestListQuerySchema>
 import { quantitySchema } from "../../shared/units.ts"
 
 export const createPurchaseRequestSchema = z.object({

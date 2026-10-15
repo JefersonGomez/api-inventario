@@ -20,8 +20,7 @@ export async function createPurchaseOrderHandler(req: Request, res: Response) {
 }
 export async function getAllPurchaseOrdersHandler(req: Request, res: Response) {
   try {
-    const orders = await service.getAllPurchaseOrders();
-    res.json(orders);
+    res.json(await service.listPurchaseOrders(res.locals.query));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

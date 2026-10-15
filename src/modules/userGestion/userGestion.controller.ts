@@ -3,7 +3,7 @@ import { getAllUsers, toggleUserActive } from "./userGestion.service.ts"
 
 export async function getAllUsersController(req: Request, res: Response) {
   try {
-    const users = await getAllUsers()
+    const users = await getAllUsers(res.locals.query)
     res.status(200).json(users)
   } catch (error) {
     res.status(500).json({ error: (error as Error).message })

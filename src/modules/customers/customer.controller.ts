@@ -5,8 +5,9 @@ import { emit, EVERYONE } from "../../shared/realtime.ts"
 const TOPICS = ["customers"]
 
 export async function getCustomersController(_req: Request, res: Response) {
+  // filtros validados por validateQuery(catalogQuerySchema)
   try {
-    res.status(200).json(await getCustomers())
+    res.status(200).json(await getCustomers(res.locals.query))
   } catch (error) {
     res.status(500).json({ error: (error as Error).message })
   }

@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import {
   createProduct,
-  getAllProducts,
+  listProducts,
   getProductById,
   updateProduct,
   deleteProduct,
@@ -27,8 +27,7 @@ export async function CreateProductController(req: Request, res: Response) {
 
 export async function getAllProductsController(req: Request, res: Response) {
   try {
-    const products = await getAllProducts();
-    res.status(200).json(products);
+    res.status(200).json(await listProducts(res.locals.query));
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
