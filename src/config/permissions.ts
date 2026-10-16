@@ -26,6 +26,11 @@ export type Permission = (typeof PERMISSIONS)[number]
 // Permisos que una persona puede usar para autorizar en la caja con su PIN
 export const AUTHORIZING_PERMISSIONS: Permission[] = ["sales.discount", "sales.void"]
 
+// Quién necesita código de caja: quien abre caja o autoriza con PIN
+export const needsPin = (perms: readonly string[]) =>
+  perms.includes("cash.manage") || AUTHORIZING_PERMISSIONS.some((p) => perms.includes(p))
+export const canAuthorize = (perms: readonly string[]) => AUTHORIZING_PERMISSIONS.some((p) => perms.includes(p))
+
 // Lo que trae cada rol. EMPLOYE (Bodega) conserva exactamente lo que podía hacer antes de los roles finos.
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ADMIN: PERMISSIONS,

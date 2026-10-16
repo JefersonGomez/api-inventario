@@ -116,17 +116,59 @@ describe("Roles, permisos y PIN de autorización", () => {
     expect(catalog.rolePermissions.CASHIER).toContain("sales.sell")
   })
 
-  it("PIN: solo quien autoriza lo define, con su contraseña y sin PIN obvio", async () => {
-    await prisma.user.update({ where: { id: manager.user.id }, data: { passwordHash: await bcrypt.hash("Clave-segura-1", 4) } })
+  it("código de caja: lo genera el admin (o el encargado para cajeros) y se muestra una sola vez", async () => {
+    const generate = (u: User, by: User) => request(app).post(`/users/${u.user.id}/pin`).set(by.auth)
+    // el contador no abre caja ni autoriza
+    expect((await generate(accountant, admin)).body.error).toMatch(/no necesita código/)
+    // el cajero no genera códigos; el encargado no genera el de otro encargado
+    expect((await generate(cashier, cashier)).status).toBe(403)
+    const manager2 = await createUser("MANAGER", admin.companyId)
+    expect((await generate(manager2, manager)).status).toBe(403)
+
+    const byManager = await generate(cashier, manager)
+    expect(byManager.status).toBe(201)
+    expect(byManager.body.pin).toMatch(/^\d{6}$/)
+    const stored = await prisma.membership.findFirstOrThrow({ where: { userId: cashier.user.id } })
+    expect(stored.pinHash).not.toContain(byManager.body.pin)
+    expect(stored.pinSetBySelf).toBe(false)
+    expect((await request(app).get("/auth/me").set(cashier.auth)).body.user).toMatchObject({ hasPin: true, pinLockedUntil: null })
+    const log = await prisma.auditLog.findFirst({ where: { entityType: "AuthorizationPin", entityId: cashier.user.id, userId: manager.user.id } })
+    expect(log).toBeTruthy()
+  })
+
+  it("código de caja: la persona lo cambia una vez y queda fijo; si lo olvida, el admin genera otro", async () => {
     const setPin = (u: User, body: object) => request(app).put("/profile/me/pin").set(u.auth).send(body)
-    expect((await setPin(cashier, { pin: "4821", password: "123456" })).body.error).toMatch(/no necesitas PIN/)
-    expect((await setPin(manager, { pin: "4821", password: "mala" })).body.error).toMatch(/contraseña/)
-    expect((await setPin(manager, { pin: "1234", password: "Clave-segura-1" })).status).toBe(400)
-    expect((await setPin(manager, { pin: "12", password: "Clave-segura-1" })).status).toBe(400)
+    // sin código generado no puede ponerse uno (salvo el admin)
+    const freshCashier = await createUser("CASHIER", admin.companyId)
+    expect((await setPin(freshCashier, { pin: "4821", password: "123456" })).body.error).toMatch(/Pide tu código/)
+    expect((await setPin(accountant, { pin: "4821", password: "123456" })).body.error).toMatch(/no necesitas código/)
+
+    expect((await setPin(cashier, { pin: "5937", password: "mala" })).body.error).toMatch(/contraseña/)
+    expect((await setPin(cashier, { pin: "1234", password: "123456" })).status).toBe(400)
+    expect((await setPin(cashier, { pin: "12", password: "123456" })).status).toBe(400)
+    expect((await setPin(cashier, { pin: "5937", password: "123456" })).status).toBe(204)
+    // ya lo cambió: queda fijo hasta que pase el plazo
+    const locked = await setPin(cashier, { pin: "6048", password: "123456" })
+    expect(locked.status).toBe(400)
+    expect(locked.body.error).toMatch(/a partir del/)
+    const me = (await request(app).get("/auth/me").set(cashier.auth)).body.user
+    expect(new Date(me.pinLockedUntil).getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000)
+    // ya no existe borrar el propio código (sería una forma de saltarse el plazo)
+    expect((await request(app).delete("/profile/me/pin").set(cashier.auth)).status).toBe(404)
+
+    // pasó el plazo → puede volver a cambiarlo
+    await prisma.membership.updateMany({ where: { userId: cashier.user.id }, data: { pinSetAt: new Date(Date.now() - 31 * 86_400_000) } })
+    expect((await setPin(cashier, { pin: "6048", password: "123456" })).status).toBe(204)
+    // lo olvidó → el admin genera otro y puede cambiarlo enseguida
+    expect((await request(app).post(`/users/${cashier.user.id}/pin`).set(admin.auth)).status).toBe(201)
+    expect((await setPin(cashier, { pin: "7159", password: "123456" })).status).toBe(204)
+
+    // el admin se pone el suyo sin que nadie se lo genere
+    expect((await setPin(admin, { pin: "3826", password: "123456" })).status).toBe(204)
+    // el encargado: se lo genera el admin y él lo cambia
+    await request(app).post(`/users/${manager.user.id}/pin`).set(admin.auth)
+    await prisma.user.update({ where: { id: manager.user.id }, data: { passwordHash: await bcrypt.hash("Clave-segura-1", 4) } })
     expect((await setPin(manager, { pin: "4821", password: "Clave-segura-1" })).status).toBe(204)
-    expect((await request(app).get("/auth/me").set(manager.auth)).body.user.hasPin).toBe(true)
-    const stored = await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })
-    expect(stored.pinHash).not.toContain("4821")
   })
 
   it("autorizar en la caja con el PIN del encargado: queda en auditoría quién autorizó", async () => {
@@ -138,11 +180,16 @@ describe("Roles, permisos y PIN de autorización", () => {
 
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "9999", permission: "sales.void" })).status).toBe(401)
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "4821", permission: "users.manage" })).status).toBe(400)
+    // el código del cajero abre su caja, pero no autoriza
+    expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "7159", permission: "sales.void" })).status).toBe(401)
 
-    // si el encargado deja de poder autorizar, su PIN se borra
+    // sin permisos de autorizar ya no autoriza, pero conserva el código (sigue abriendo caja)
     await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void"] })
-    expect((await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })).pinHash).toBeNull()
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "4821", permission: "sales.void" })).status).toBe(401)
+    expect((await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })).pinHash).not.toBeNull()
+    // si tampoco abre caja, el código ya no sirve y se borra
+    await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void", "cash.manage"] })
+    expect((await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })).pinHash).toBeNull()
   })
 
   it("el PIN tiene límite de intentos fallidos", async () => {

@@ -500,8 +500,12 @@ model Membership {
   // ajustes de esta persona sobre los permisos de su rol (claves de src/config/permissions.ts)
   grantedPermissions String[] @default([])
   revokedPermissions String[] @default([])
-  // PIN para autorizar en la caja (descuentos, anulaciones); bcrypt. Por empresa: es de esta membresía
+  // Código de caja (abrir caja y, si tiene permiso, autorizar descuentos/anulaciones); bcrypt. Por empresa.
+  // Lo genera el admin (o el encargado, para cajeros); la persona puede cambiarlo y después queda fijo
+  // hasta que pase el plazo (pinSetBySelf + pinSetAt) o el admin genere otro.
   pinHash            String?
+  pinSetAt           DateTime?
+  pinSetBySelf       Boolean  @default(false)
   createdAt          DateTime @default(now())
   user               User     @relation(fields: [userId], references: [id])
   company            Company  @relation(fields: [companyId], references: [id])

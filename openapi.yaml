@@ -21,8 +21,10 @@ info:
     (`GET /users/permissions`) y a cada persona se le pueden dar o quitar permisos sueltos
     (`PATCH /users/{id}/access`). Cada ruta indica el permiso que pide; sin él la respuesta es 403.
     Sin `costs.view`, **ninguna** respuesta incluye `cost` ni `unitCost` (se quitan antes de enviar).
-    **PIN de autorización**: quien tiene `sales.discount` o `sales.void` define un PIN de 4 a 6 dígitos
-    (`PUT /profile/me/pin`) y con él autoriza en la pantalla de otro (`POST /authorizations`).
+    **Código de caja**: quien abre caja (`cash.manage`) o autoriza (`sales.discount`, `sales.void`) tiene un código
+    de 4 a 6 dígitos. Lo genera el administrador (o el encargado, para los cajeros) con `POST /users/{id}/pin`; la persona
+    puede cambiarlo (`PUT /profile/me/pin`) y después queda fijo 30 días, salvo que el admin genere otro. Con el de
+    quien autoriza se aprueba en la pantalla de otro (`POST /authorizations`).
 
     **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas, usuarios y productos.
 
@@ -176,7 +178,8 @@ components:
         isActive: { type: boolean }
         grantedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: "Dados además del rol (solo en /users)" }
         revokedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: "Quitados al rol (solo en /users)" }
-        hasPin: { type: boolean, description: "Tiene PIN de autorización (solo en /users)" }
+        hasPin: { type: boolean, description: "Tiene código de caja (solo en /users)" }
+        needsPin: { type: boolean, description: "Abre caja o autoriza: necesita código (solo en /users)" }
         isPlatformOwner: { type: boolean, description: "true = dueño de la plataforma (solo en /profile/me)" }
         createdAt: { type: string, format: date-time }
 
@@ -792,6 +795,7 @@ paths:
                       role: { $ref: '#/components/schemas/Role' }
                       permissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: Permisos efectivos (rol + ajustes) }
                       hasPin: { type: boolean }
+                      pinLockedUntil: { type: string, format: date-time, nullable: true, description: Hasta cuándo no puede cambiar su código (null = puede) }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ---------------------------------------------------------------- Perfil
@@ -872,8 +876,11 @@ paths:
   /profile/me/pin:
     put:
       tags: [Perfil]
-      summary: Definir o cambiar mi PIN de autorización (sales.discount o sales.void)
-      description: Se confirma con la contraseña. Se rechazan PIN obvios (0000, 1234, 9876...).
+      summary: Cambiar mi código de caja
+      description: |
+        Se confirma con la contraseña y se rechazan códigos obvios (0000, 1234, 9876...). Hace falta que el código
+        lo haya generado antes el administrador (el administrador puede ponerse el suyo). Después de cambiarlo queda
+        fijo 30 días (400 con la fecha). No se puede borrar.
       requestBody:
         required: true
         content:
@@ -885,14 +892,8 @@ paths:
                 pin: { type: string, pattern: '^\d{4,6}$' }
                 password: { type: string, minLength: 1 }
       responses:
-        '204': { description: PIN guardado }
+        '204': { description: Código guardado }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    delete:
-      tags: [Perfil]
-      summary: Borrar mi PIN de autorización
-      responses:
-        '204': { description: Borrado }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /authorizations:
@@ -984,6 +985,26 @@ paths:
                     type: object
                     additionalProperties: { type: array, items: { $ref: '#/components/schemas/Permission' } }
                   authorizing: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}/pin:
+    post:
+      tags: [Usuarios]
+      summary: Generar el código de caja de una persona (users.manage; o quien autoriza, solo para cajeros)
+      description: |
+        Para quien abre caja o autoriza. Reemplaza el anterior (si lo olvidó) y le permite cambiarlo enseguida.
+        El código se devuelve **una sola vez**, para entregárselo. Queda en auditoría (`AuthorizationPin`).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '201':
+          description: Código generado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pin: { type: string, pattern: '^\d{6}$' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /users/{id}/access:

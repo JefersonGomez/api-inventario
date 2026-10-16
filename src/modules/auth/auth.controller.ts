@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { hasPin } from "../users/pin.service.ts";
+import { pinStatus } from "../users/pin.service.ts";
 import { Register, Login, refreshAccessToken, logout, switchCompany } from "./auth.service.ts";
 
 export async function RegisterController(req: Request, res: Response) {
@@ -52,7 +52,7 @@ export async function logoutCotroller(req: Request, res: Response) {
 
 // usuario de la sesión + sus permisos efectivos en la empresa activa (el frontend decide qué mostrar)
 export async function meHandler(req: Request, res: Response) {
-  res.json({ user: { ...req.user, hasPin: await hasPin(req.user!.id) } });
+  res.json({ user: { ...req.user, ...(await pinStatus(req.user!.id)) } });
 }
 export async function switchCompanyHandler(req: Request, res: Response) {
   try {

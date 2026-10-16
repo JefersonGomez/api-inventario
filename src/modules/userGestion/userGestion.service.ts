@@ -5,8 +5,9 @@ import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { assertUserSlot } from "../invitations/invitation.service.ts";
 import { catalogResult, contains, type CatalogQuery } from "../../shared/pagination.ts";
-import { AUTHORIZING_PERMISSIONS, PERMISSIONS, ROLE_PERMISSIONS, effectivePermissions, type Permission } from "../../config/permissions.ts";
+import { AUTHORIZING_PERMISSIONS, PERMISSIONS, ROLE_PERMISSIONS, effectivePermissions, needsPin, type Permission } from "../../config/permissions.ts";
 import type { UpdateAccessInput } from "./userGestion.schema.ts";
+import type { Role } from "../../generated/prisma/enums.ts";
 
 // Para la pantalla de Usuarios: qué permisos existen y cuáles trae cada rol
 export const permissionCatalog = () => ({
@@ -33,13 +34,14 @@ export async function getAllUsers(f: CatalogQuery) {
     ...(f.q && { user: { OR: [{ name: contains(f.q) }, { email: contains(f.q) }] } }),
   };
   // misma forma que antes para el frontend: role e isActive salen de la membresía
-  const toUser = (m: { user: object; role: string; isActive: boolean; grantedPermissions: string[]; revokedPermissions: string[]; pinHash: string | null }) => ({
+  const toUser = (m: { user: object; role: Role; isActive: boolean; grantedPermissions: string[]; revokedPermissions: string[]; pinHash: string | null }) => ({
     ...m.user,
     role: m.role,
     isActive: m.isActive,
     grantedPermissions: m.grantedPermissions,
     revokedPermissions: m.revokedPermissions,
     hasPin: m.pinHash !== null, // el PIN en sí nunca sale del servidor
+    needsPin: needsPin(effectivePermissions(m.role, m.grantedPermissions, m.revokedPermissions)),
   });
   const result = await catalogResult(
     f,
@@ -71,12 +73,12 @@ export async function updateUserAccess(targetUserId: string, input: UpdateAccess
   const base = ROLE_PERMISSIONS[input.role];
   const granted = input.role === "ADMIN" ? [] : input.grantedPermissions.filter((p) => !base.includes(p));
   const revoked = input.role === "ADMIN" ? [] : input.revokedPermissions.filter((p) => base.includes(p));
-  // si deja de poder autorizar en la caja, su PIN ya no sirve: se borra
-  const canAuthorize = effectivePermissions(input.role, granted, revoked).some((p) => AUTHORIZING_PERMISSIONS.includes(p));
+  // si ya no abre caja ni autoriza, su código no sirve: se borra
+  const keepsPin = needsPin(effectivePermissions(input.role, granted, revoked));
 
   const updated = await prismaRoot.membership.update({
     where: { id: membership.id },
-    data: { role: input.role, grantedPermissions: granted, revokedPermissions: revoked, ...(!canAuthorize && { pinHash: null }) },
+    data: { role: input.role, grantedPermissions: granted, revokedPermissions: revoked, ...(!keepsPin && { pinHash: null, pinSetAt: null, pinSetBySelf: false }) },
     include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true } } },
   });
   await logAudit(requestingUserId, "UPDATE", "UserAccess", targetUserId, {
@@ -90,6 +92,7 @@ export async function updateUserAccess(targetUserId: string, input: UpdateAccess
     grantedPermissions: updated.grantedPermissions,
     revokedPermissions: updated.revokedPermissions,
     hasPin: updated.pinHash !== null,
+    needsPin: keepsPin,
   };
 }
 

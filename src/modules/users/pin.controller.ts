@@ -1,5 +1,5 @@
 import type { Request, Response } from "express"
-import { authorizeWithPin, deleteMyPin, setMyPin } from "./pin.service.ts"
+import { authorizeWithPin, generatePinFor, setMyPin } from "./pin.service.ts"
 
 export async function setPinHandler(req: Request, res: Response) {
   try {
@@ -10,12 +10,12 @@ export async function setPinHandler(req: Request, res: Response) {
   }
 }
 
-export async function deletePinHandler(req: Request, res: Response) {
+// POST /users/:id/pin → { pin } (se muestra una sola vez para entregarlo)
+export async function generatePinHandler(req: Request<{ id: string }>, res: Response) {
   try {
-    await deleteMyPin(req.user!.id)
-    res.status(204).end()
+    res.status(201).json(await generatePinFor(req.params.id, req.user!))
   } catch (error) {
-    res.status(400).json({ error: (error as Error).message })
+    res.status((error as { status?: number }).status ?? 400).json({ error: (error as Error).message })
   }
 }
 
