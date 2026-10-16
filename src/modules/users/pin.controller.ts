@@ -1,5 +1,6 @@
 import type { Request, Response } from "express"
-import { authorizeWithPin, generatePinFor, setMyPin } from "./pin.service.ts"
+import { assignPinTo, authorizeWithPin, cashCodeTeam, setMyPin } from "./pin.service.ts"
+import { emit, userRoom } from "../../shared/realtime.ts"
 
 export async function setPinHandler(req: Request, res: Response) {
   try {
@@ -10,12 +11,24 @@ export async function setPinHandler(req: Request, res: Response) {
   }
 }
 
-// POST /users/:id/pin → { pin } (se muestra una sola vez para entregarlo)
-export async function generatePinHandler(req: Request<{ id: string }>, res: Response) {
+const status = (error: unknown) => (error as { status?: number }).status ?? 400
+
+// GET /users/cash-codes: personas cuyo código puede asignar quien pide
+export async function cashCodeTeamHandler(req: Request, res: Response) {
   try {
-    res.status(201).json(await generatePinFor(req.params.id, req.user!))
+    res.json(await cashCodeTeam(req.user!))
   } catch (error) {
-    res.status((error as { status?: number }).status ?? 400).json({ error: (error as Error).message })
+    res.status(status(error)).json({ error: (error as Error).message })
+  }
+}
+
+// POST /users/:id/pin { pin? } → { pin } (se muestra una sola vez para entregarlo)
+export async function assignPinHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    res.status(201).json(await assignPinTo(req.params.id, req.user!, req.body?.pin))
+    emit(userRoom(req.params.id), ["notifications", "me"]) // le llega el aviso al instante
+  } catch (error) {
+    res.status(status(error)).json({ error: (error as Error).message })
   }
 }
 

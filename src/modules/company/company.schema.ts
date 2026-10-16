@@ -23,6 +23,8 @@ export const updateCompanySchema = z
   .object({
     name: z.string().trim().min(1).max(120).optional(),
     currency: currency.optional(),
+    // días que dura un código de caja; también es lo que queda fijo después de que la persona lo cambia
+    cashCodeDays: z.number().int().min(7, "Mínimo 7 días").max(365, "Máximo 365 días").optional(),
     ...fiscalFields,
   })
   .superRefine((d, ctx) => {

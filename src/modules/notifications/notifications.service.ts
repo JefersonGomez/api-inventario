@@ -2,6 +2,8 @@ import * as purchaseRequestService from "../purchase-requests/purchase-request.s
 import * as productService from "../products/products.service.ts";
 import * as reportsService from "../reports/report.service.ts";
 import { getUserNotifications } from "./notifications.persist.ts";
+import { pinStatus } from "../users/pin.service.ts";
+import { needsPin } from "../../config/permissions.ts";
 
 // `type` + `title` + `meta` son lo que consume la campanita (agrupa por tipo y arma el detalle con i18n).
 // `message` se conserva como texto plano para quien no use los campos nuevos.
@@ -93,7 +95,23 @@ export async function getNotifications(user: { id: string; permissions: string[]
       ? (await getDerivedNotifications()).map((n) => ({ ...n, persisted: false as const, read: false }))
       : [];
 
-  const notifications = [...derived, ...stored];
+  // su código de caja: por vencer (últimos días) o vencido (no puede usar la caja hasta renovarlo)
+  const code = needsPin(user.permissions) ? await pinStatus(user.id) : null;
+  const codeNotice =
+    code && (code.pinExpired || code.pinExpiringSoon)
+      ? [{
+          id: "cash-code-expiry",
+          type: code.pinExpired ? ("cashCodeExpired" as const) : ("cashCodeExpiring" as const),
+          title: "",
+          meta: { expiresAt: code.pinExpiresAt },
+          link: "/profile?tab=cash",
+          createdAt: null,
+          persisted: false as const,
+          read: false,
+        }]
+      : [];
+
+  const notifications = [...codeNotice, ...derived, ...stored];
   return {
     total: notifications.length,
     unread: notifications.filter((n) => !n.read).length,

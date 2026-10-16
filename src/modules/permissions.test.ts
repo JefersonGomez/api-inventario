@@ -131,9 +131,26 @@ describe("Roles, permisos y PIN de autorización", () => {
     const stored = await prisma.membership.findFirstOrThrow({ where: { userId: cashier.user.id } })
     expect(stored.pinHash).not.toContain(byManager.body.pin)
     expect(stored.pinSetBySelf).toBe(false)
-    expect((await request(app).get("/auth/me").set(cashier.auth)).body.user).toMatchObject({ hasPin: true, pinLockedUntil: null })
+    expect((await request(app).get("/auth/me").set(cashier.auth)).body.user).toMatchObject({ hasPin: true, pinLockedUntil: null, pinExpired: false })
     const log = await prisma.auditLog.findFirst({ where: { entityType: "AuthorizationPin", entityId: cashier.user.id, userId: manager.user.id } })
     expect(log).toBeTruthy()
+    // le llega un aviso de que le asignaron código
+    const notes = (await request(app).get("/notifications").set(cashier.auth)).body.notifications
+    expect(notes.find((n: { type: string }) => n.type === "cashCodeAssigned")).toMatchObject({ meta: { by: manager.user.name } })
+
+    // también se puede elegir el código (con las mismas reglas)
+    const fresh = await createUser("CASHIER", admin.companyId)
+    expect((await request(app).post(`/users/${fresh.user.id}/pin`).set(admin.auth).send({ pin: "1111" })).status).toBe(400)
+    expect((await request(app).post(`/users/${fresh.user.id}/pin`).set(admin.auth).send({ pin: "5937" })).body).toEqual({ pin: "5937" })
+
+    // "Códigos del equipo": a quién puede asignarle cada uno
+    const team = async (by: User) => (await request(app).get("/users/cash-codes").set(by.auth)).body.map((u: { id: string }) => u.id)
+    const byManagerTeam = await team(manager)
+    expect(byManagerTeam).toEqual(expect.arrayContaining([cashier.user.id, fresh.user.id]))
+    expect(byManagerTeam).not.toContain(manager2.user.id)
+    expect(byManagerTeam).not.toContain(accountant.user.id)
+    expect(await team(admin)).toEqual(expect.arrayContaining([manager.user.id, manager2.user.id, cashier.user.id]))
+    expect((await request(app).get("/users/cash-codes").set(cashier.auth)).status).toBe(403)
   })
 
   it("código de caja: la persona lo cambia una vez y queda fijo; si lo olvida, el admin genera otro", async () => {
@@ -150,13 +167,27 @@ describe("Roles, permisos y PIN de autorización", () => {
     // ya lo cambió: queda fijo hasta que pase el plazo
     const locked = await setPin(cashier, { pin: "6048", password: "123456" })
     expect(locked.status).toBe(400)
-    expect(locked.body.error).toMatch(/a partir del/)
+    expect(locked.body.error).toMatch(/cuando venza/)
     const me = (await request(app).get("/auth/me").set(cashier.auth)).body.user
     expect(new Date(me.pinLockedUntil).getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000)
     // ya no existe borrar el propio código (sería una forma de saltarse el plazo)
     expect((await request(app).delete("/profile/me/pin").set(cashier.auth)).status).toBe(404)
 
-    // pasó el plazo → puede volver a cambiarlo
+    // por vencer (últimos 5 días) → aviso; vencido → aviso y ya no sirve hasta renovarlo
+    const ago = (days: number) => prisma.membership.updateMany({ where: { userId: cashier.user.id }, data: { pinSetAt: new Date(Date.now() - days * 86_400_000) } })
+    const codeNotice = async () => (await request(app).get("/notifications").set(cashier.auth)).body.notifications.find((n: { id: string }) => n.id === "cash-code-expiry")?.type
+    await ago(27)
+    expect(await codeNotice()).toBe("cashCodeExpiring")
+    // el plazo es configurable por empresa: con 60 días ya no está por vencer
+    expect((await request(app).put("/company").set(admin.auth).send({ cashCodeDays: 3 })).status).toBe(400)
+    expect((await request(app).put("/company").set(admin.auth).send({ cashCodeDays: 60 })).status).toBe(200)
+    expect(await codeNotice()).toBeUndefined()
+    await request(app).put("/company").set(admin.auth).send({ cashCodeDays: 30 })
+    await ago(31)
+    expect(await codeNotice()).toBe("cashCodeExpired")
+    expect((await request(app).get("/auth/me").set(cashier.auth)).body.user).toMatchObject({ pinExpired: true, pinLockedUntil: null })
+
+    // venció → puede renovarlo él mismo
     await prisma.membership.updateMany({ where: { userId: cashier.user.id }, data: { pinSetAt: new Date(Date.now() - 31 * 86_400_000) } })
     expect((await setPin(cashier, { pin: "6048", password: "123456" })).status).toBe(204)
     // lo olvidó → el admin genera otro y puede cambiarlo enseguida
@@ -182,6 +213,11 @@ describe("Roles, permisos y PIN de autorización", () => {
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "4821", permission: "users.manage" })).status).toBe(400)
     // el código del cajero abre su caja, pero no autoriza
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "7159", permission: "sales.void" })).status).toBe(401)
+
+    // código vencido: no autoriza hasta que se renueve
+    await prisma.membership.updateMany({ where: { userId: manager.user.id }, data: { pinSetAt: new Date(Date.now() - 31 * 86_400_000) } })
+    expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "4821", permission: "sales.void" })).status).toBe(401)
+    await prisma.membership.updateMany({ where: { userId: manager.user.id }, data: { pinSetAt: new Date() } })
 
     // sin permisos de autorizar ya no autoriza, pero conserva el código (sigue abriendo caja)
     await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void"] })

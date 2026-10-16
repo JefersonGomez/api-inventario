@@ -341,6 +341,7 @@ model Company {
   id               String             @id @default(uuid())
   name             String // nombre comercial (el que se ve en la app)
   currency         CurrencyCode       @default(CRC)
+  cashCodeDays     Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
   legalName        String? // razón social o nombre de la persona física
   idType           IdType?
