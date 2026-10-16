@@ -15,8 +15,14 @@ info:
     (`{ id, companyId }`) y todo se filtra por ella; un usuario puede estar en varias empresas
     (con un rol distinto en cada una) y cambia con `POST /auth/switch-company`.
 
-    **Roles**: `ADMIN` y `EMPLOYE` (sin la segunda E), **por empresa** (se leen de la membresía en
-    cada petición). Cada ruta indica qué rol necesita; sin el rol correcto la respuesta es 403.
+    **Roles y permisos**: 5 roles fijos **por empresa** (se leen de la membresía en cada petición):
+    `ADMIN` (Administrador, todo), `MANAGER` (Encargado), `EMPLOYE` (Bodega, sin la segunda E),
+    `CASHIER` (Cajero) y `ACCOUNTANT` (Contador). Cada rol trae un juego de permisos
+    (`GET /users/permissions`) y a cada persona se le pueden dar o quitar permisos sueltos
+    (`PATCH /users/{id}/access`). Cada ruta indica el permiso que pide; sin él la respuesta es 403.
+    Sin `costs.view`, **ninguna** respuesta incluye `cost` ni `unitCost` (se quitan antes de enviar).
+    **PIN de autorización**: quien tiene `sales.discount` o `sales.void` define un PIN de 4 a 6 dígitos
+    (`PUT /profile/me/pin`) y con él autoriza en la pantalla de otro (`POST /authorizations`).
 
     **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas, usuarios y productos.
 
@@ -142,7 +148,13 @@ components:
 
     Role:
       type: string
-      enum: [ADMIN, EMPLOYE]
+      enum: [ADMIN, MANAGER, EMPLOYE, CASHIER, ACCOUNTANT]
+
+    Permission:
+      type: string
+      enum: [products.manage, costs.view, stock.move, purchases.request, purchases.manage, suppliers.manage,
+        customers.manage, customers.delete, reports.view, audit.view, users.manage, company.manage,
+        sales.sell, cash.manage, sales.discount, sales.void, accounting.view]
 
     UserSummary:
       type: object
@@ -162,6 +174,9 @@ components:
         phone: { type: string, nullable: true }
         company: { type: string, nullable: true }
         isActive: { type: boolean }
+        grantedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: "Dados además del rol (solo en /users)" }
+        revokedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: "Quitados al rol (solo en /users)" }
+        hasPin: { type: boolean, description: "Tiene PIN de autorización (solo en /users)" }
         isPlatformOwner: { type: boolean, description: "true = dueño de la plataforma (solo en /profile/me)" }
         createdAt: { type: string, format: date-time }
 
@@ -341,6 +356,7 @@ components:
         category: { $ref: '#/components/schemas/Category' }
         supplierId: { type: string, format: uuid, nullable: true }
         supplier:
+          type: object
           allOf: [{ $ref: '#/components/schemas/SupplierSummary' }]
           nullable: true
         expirationDate: { type: string, format: date-time, nullable: true }
@@ -435,7 +451,7 @@ components:
                 barcodeConflict: { type: integer }
                 repeatedSku: { type: integer }
                 existing: { type: integer }
-                badFiscal: { type: integer, description: Unidad, IVA o CABYS no reconocidos }
+                badFiscal: { type: integer, description: "Unidad, IVA o CABYS no reconocidos" }
         rows:
           type: array
           items:
@@ -597,7 +613,7 @@ components:
         type:
           type: string
           description: >
-            Calculadas (solo ADMIN): requestExpiring, pending, approved, productExpiring, lowStock.
+            Calculadas (solo con purchases.manage): requestExpiring, pending, approved, productExpiring, lowStock.
             Guardadas: requestApproved, requestRejected, orderReceived, requestComment, orderComment.
         title: { type: string }
         meta: { type: object, additionalProperties: true }
@@ -774,6 +790,8 @@ paths:
                       id: { type: string, format: uuid }
                       companyId: { type: string, format: uuid }
                       role: { $ref: '#/components/schemas/Role' }
+                      permissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, description: Permisos efectivos (rol + ajustes) }
+                      hasPin: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ---------------------------------------------------------------- Perfil
@@ -851,11 +869,70 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /profile/me/pin:
+    put:
+      tags: [Perfil]
+      summary: Definir o cambiar mi PIN de autorización (sales.discount o sales.void)
+      description: Se confirma con la contraseña. Se rechazan PIN obvios (0000, 1234, 9876...).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin, password]
+              properties:
+                pin: { type: string, pattern: '^\d{4,6}$' }
+                password: { type: string, minLength: 1 }
+      responses:
+        '204': { description: PIN guardado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Perfil]
+      summary: Borrar mi PIN de autorización
+      responses:
+        '204': { description: Borrado }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /authorizations:
+    post:
+      tags: [Perfil]
+      summary: Autorizar una acción con el PIN de un encargado (cualquier usuario con sesión)
+      description: |
+        Busca entre los miembros activos de la empresa con ese permiso y PIN. Si coincide, devuelve quién
+        autorizó y queda en auditoría (`AUTHORIZE`, a nombre de quien autorizó). 5 intentos fallidos por
+        usuario cada 15 minutos; después 429.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin, permission]
+              properties:
+                pin: { type: string, pattern: '^\d{4,6}$' }
+                permission: { type: string, enum: [sales.discount, sales.void] }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Autorizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorizedBy: { $ref: '#/components/schemas/UserSummary' }
+                  permission: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: PIN incorrecto }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
   # ---------------------------------------------------------------- Usuarios
   /users:
     get:
       tags: [Usuarios]
-      summary: Usuarios de la empresa activa (ADMIN)
+      summary: Usuarios de la empresa activa (users.manage)
       description: "Sin `page`: lista completa (la usan los selectores). Con `page`: paginado. q busca por nombre o correo."
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -878,12 +955,59 @@ paths:
   /users/{id}/toggle-active:
     patch:
       tags: [Usuarios]
-      summary: Activar / desactivar un usuario en la empresa activa (ADMIN)
+      summary: Activar / desactivar un usuario en la empresa activa (users.manage)
       description: Corta su acceso a esta empresa al instante (sus otras empresas no cambian). No se puede desactivar al dueño ni a uno mismo.
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '200':
           description: Usuario con el nuevo `isActive`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/permissions:
+    get:
+      tags: [Usuarios]
+      summary: Catálogo de permisos y los de cada rol (users.manage)
+      responses:
+        '200':
+          description: Catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+                  rolePermissions:
+                    type: object
+                    additionalProperties: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+                  authorizing: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}/access:
+    patch:
+      tags: [Usuarios]
+      summary: Cambiar rol y permisos sueltos de una persona (users.manage)
+      description: |
+        Aplica en la siguiente petición de esa persona. No se puede cambiar el acceso propio, y el dueño de la
+        empresa siempre es ADMIN. Si deja de poder autorizar, su PIN se borra. Queda en auditoría (`UserAccess`).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+                grantedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, default: [] }
+                revokedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, default: [], description: No puede repetir uno de grantedPermissions }
+      responses:
+        '200':
+          description: Usuario con su nuevo acceso
           content:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
@@ -904,7 +1028,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
     put:
       tags: [Empresa]
-      summary: Cambiar nombre, moneda y datos fiscales de la empresa (ADMIN)
+      summary: Cambiar nombre, moneda y datos fiscales de la empresa (users.manage)
       description: |
         Al menos un campo. Cambiar la moneda solo cambia cómo se muestran los montos; no convierte valores.
         Los datos fiscales (emisor de los comprobantes) son opcionales hasta que la empresa facture; "" o null los borra.
@@ -974,7 +1098,7 @@ paths:
   /invitations:
     get:
       tags: [Usuarios]
-      summary: Invitaciones pendientes de la empresa activa (ADMIN)
+      summary: Invitaciones pendientes de la empresa activa (users.manage)
       responses:
         '200':
           description: Pendientes (sin aceptar, sin anular y sin vencer)
@@ -986,7 +1110,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Usuarios]
-      summary: Invitar a alguien a la empresa (ADMIN)
+      summary: Invitar a alguien a la empresa (users.manage)
       description: |
         Devuelve el `link` (con el token) **solo esta vez**; vence en 7 días. Invitar de nuevo al mismo email
         anula la anterior. Usuarios activos + invitaciones pendientes no pueden pasar `maxUsersPerCompany` del plan.
@@ -999,7 +1123,7 @@ paths:
               required: [email]
               properties:
                 email: { type: string, format: email }
-                role: { type: string, enum: [ADMIN, EMPLOYE], default: EMPLOYE }
+                role: { type: string, enum: [ADMIN, MANAGER, EMPLOYE, CASHIER, ACCOUNTANT], default: EMPLOYE }
       responses:
         '201':
           description: Invitación creada
@@ -1016,7 +1140,7 @@ paths:
   /invitations/{id}:
     delete:
       tags: [Usuarios]
-      summary: Anular una invitación pendiente (ADMIN)
+      summary: Anular una invitación pendiente (users.manage)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '204': { description: Anulada }
@@ -1039,7 +1163,7 @@ paths:
                 properties:
                   status: { type: string, enum: [valid, expired, revoked, accepted] }
                   email: { type: string }
-                  role: { type: string, enum: [ADMIN, EMPLOYE] }
+                  role: { type: string, enum: [ADMIN, MANAGER, EMPLOYE, CASHIER, ACCOUNTANT] }
                   company: { type: string }
                   invitedBy: { type: string }
                   expiresAt: { type: string, format: date-time }
@@ -1168,7 +1292,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Categorías]
-      summary: Crear categoría (ADMIN)
+      summary: Crear categoría (products.manage)
       requestBody:
         required: true
         content:
@@ -1197,7 +1321,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Categorías]
-      summary: Editar categoría (ADMIN)
+      summary: Editar categoría (products.manage)
       requestBody:
         required: true
         content:
@@ -1213,7 +1337,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Categorías]
-      summary: Eliminar categoría (ADMIN, soft delete)
+      summary: Eliminar categoría (products.manage, soft delete)
       responses:
         '200': { description: Eliminada }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1270,7 +1394,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [Productos]
-      summary: Crear producto (ADMIN)
+      summary: Crear producto (products.manage)
       description: Falla con 400 si se alcanzó `maxProducts` del plan.
       requestBody:
         required: true
@@ -1289,7 +1413,7 @@ paths:
   /products/import:
     post:
       tags: [Productos]
-      summary: Importar productos desde Excel (ADMIN)
+      summary: Importar productos desde Excel (products.manage)
       description: |
         El frontend lee el .xlsx y manda las filas. Con `dryRun: true` solo valida y devuelve la vista previa.
         Reglas: una categoría o proveedor que no existe se crea; solo se importan las filas válidas; respeta el
@@ -1312,7 +1436,7 @@ paths:
                     defaultCategory: { type: string, maxLength: 100, description: Categoría para filas sin categoría }
                     generateSku: { type: boolean, description: SKU automático IMP-0001… para filas sin SKU }
                     pendingPrice: { type: boolean, description: Sin precio válido → precio 0 y marca pendingReview }
-                    fixNumbers: { type: boolean, description: Redondea stock, negativos a 0, quita costo inválido }
+                    fixNumbers: { type: boolean, description: "Redondea stock, negativos a 0, quita costo inválido" }
                     ignoreInvalidDate: { type: boolean }
                     dropConflictingBarcode: { type: boolean }
                     skipRepeated: { type: boolean, description: SKU repetido en el archivo → se usa la primera fila }
@@ -1403,7 +1527,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
     put:
       tags: [Productos]
-      summary: Editar producto (ADMIN)
+      summary: Editar producto (products.manage)
       requestBody:
         required: true
         content:
@@ -1419,7 +1543,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Productos]
-      summary: Eliminar producto (ADMIN, soft delete)
+      summary: Eliminar producto (products.manage, soft delete)
       responses:
         '200': { description: Eliminado }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1477,7 +1601,7 @@ paths:
                       items: { type: array, items: { $ref: '#/components/schemas/Movement' } }
     post:
       tags: [Movimientos]
-      summary: Registrar entrada, salida o ajuste (ADMIN, EMPLOYE)
+      summary: Registrar entrada, salida o ajuste (stock.move)
       requestBody:
         required: true
         content:
@@ -1517,7 +1641,7 @@ paths:
                           items: { type: array, items: { $ref: '#/components/schemas/Customer' } }
     post:
       tags: [Clientes]
-      summary: Registrar cliente (ADMIN o EMPLOYE)
+      summary: Registrar cliente (customers.manage)
       requestBody:
         required: true
         content:
@@ -1545,7 +1669,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Clientes]
-      summary: Editar cliente (ADMIN o EMPLOYE)
+      summary: Editar cliente (customers.manage)
       requestBody:
         required: true
         content:
@@ -1560,7 +1684,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
     delete:
       tags: [Clientes]
-      summary: Borrar cliente (ADMIN). Soft delete; los comprobantes emitidos lo siguen referenciando
+      summary: Borrar cliente (products.manage). Soft delete; los comprobantes emitidos lo siguen referenciando
       responses:
         '204': { description: Borrado }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -1577,7 +1701,7 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/ProductGroup' } }
     post:
       tags: [Productos base]
-      summary: Crear producto base (ADMIN)
+      summary: Crear producto base (products.manage)
       requestBody:
         required: true
         content:
@@ -1595,7 +1719,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     put:
       tags: [Productos base]
-      summary: Editar producto base (ADMIN)
+      summary: Editar producto base (products.manage)
       requestBody:
         required: true
         content:
@@ -1610,7 +1734,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
     delete:
       tags: [Productos base]
-      summary: Borrar producto base (ADMIN). Sus variantes quedan como productos sueltos (conservan sus atributos)
+      summary: Borrar producto base (products.manage). Sus variantes quedan como productos sueltos (conservan sus atributos)
       responses:
         '204': { description: Borrado }
 
@@ -1639,7 +1763,7 @@ paths:
                           items: { type: array, items: { $ref: '#/components/schemas/Supplier' } }
     post:
       tags: [Proveedores]
-      summary: Crear proveedor (ADMIN)
+      summary: Crear proveedor (suppliers.manage)
       requestBody:
         required: true
         content:
@@ -1668,7 +1792,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Proveedores]
-      summary: Editar proveedor (ADMIN)
+      summary: Editar proveedor (suppliers.manage)
       requestBody:
         required: true
         content:
@@ -1684,7 +1808,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Proveedores]
-      summary: Eliminar proveedor (ADMIN)
+      summary: Eliminar proveedor (suppliers.manage)
       responses:
         '200': { description: Eliminado }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -1738,7 +1862,7 @@ paths:
   /purchase-requests/alerts:
     get:
       tags: [Solicitudes de compra]
-      summary: Alertas de solicitudes (ADMIN)
+      summary: Alertas de solicitudes (purchases.manage)
       responses:
         '200':
           description: Por vencer, aprobadas sin orden y productos por vencer
@@ -1761,7 +1885,7 @@ paths:
   /purchase-requests/{id}/status:
     patch:
       tags: [Solicitudes de compra]
-      summary: Aprobar o rechazar (ADMIN)
+      summary: Aprobar o rechazar (purchases.manage)
       description: Avisa a quien la pidió (campanita + socket) si el estado cambió.
       parameters: [{ $ref: '#/components/parameters/Id' }]
       requestBody:
@@ -1829,7 +1953,7 @@ paths:
   /purchase-orders:
     get:
       tags: [Órdenes de compra]
-      summary: Listar órdenes (paginado)
+      summary: Listar órdenes (purchases.manage, paginado)
       description: "`q` busca por nombre del proveedor o por el inicio del id (N.º de orden)."
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -1854,7 +1978,7 @@ paths:
                       items: { type: array, items: { $ref: '#/components/schemas/PurchaseOrder' } }
     post:
       tags: [Órdenes de compra]
-      summary: Crear orden (ADMIN)
+      summary: Crear orden (purchases.manage)
       requestBody:
         required: true
         content:
@@ -1872,7 +1996,7 @@ paths:
   /purchase-orders/{id}:
     get:
       tags: [Órdenes de compra]
-      summary: Ver una orden
+      summary: Ver una orden (purchases.manage)
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
         '200':
@@ -1885,7 +2009,7 @@ paths:
   /purchase-orders/{id}/receive:
     patch:
       tags: [Órdenes de compra]
-      summary: Marcar como recibida (ADMIN)
+      summary: Marcar como recibida (purchases.manage)
       description: Recepción completa (no parcial). Sube el stock con movimientos IN y avisa a quien pidió cada solicitud vinculada.
       parameters: [{ $ref: '#/components/parameters/Id' }]
       responses:
@@ -1900,7 +2024,7 @@ paths:
   /purchase-orders/{id}/send-email:
     post:
       tags: [Órdenes de compra]
-      summary: Enviar (o reenviar) la orden al email del proveedor (ADMIN)
+      summary: Enviar (o reenviar) la orden al email del proveedor (purchases.manage)
       description: |
         Usa Resend. Sin `EMAIL_FROM` configurado (sin dominio verificado) funciona en **modo prueba**:
         el correo va a `EMAIL_TEST_TO` y el asunto indica el destinatario real.
@@ -1923,7 +2047,7 @@ paths:
     parameters: [{ $ref: '#/components/parameters/Id' }]
     get:
       tags: [Comentarios]
-      summary: Hilo de comentarios de una orden (ADMIN)
+      summary: Hilo de comentarios de una orden (purchases.manage)
       responses:
         '200':
           description: Comentarios en orden cronológico
@@ -1936,7 +2060,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Comentarios]
-      summary: Comentar en una orden (ADMIN)
+      summary: Comentar en una orden (purchases.manage)
       requestBody:
         required: true
         content:
@@ -2007,7 +2131,7 @@ paths:
   /reports/dashboard:
     get:
       tags: [Reportes]
-      summary: Totales del panel calculados en el servidor
+      summary: Totales del panel calculados en el servidor (reports.view)
       description: Las solicitudes respetan el rol (el empleado cuenta solo las suyas).
       parameters:
         - name: since
@@ -2031,7 +2155,7 @@ paths:
   /reports/low-stock:
     get:
       tags: [Reportes]
-      summary: Productos con stock en o bajo el mínimo
+      summary: Productos con stock en o bajo el mínimo (reports.view)
       responses:
         '200':
           description: Productos
@@ -2044,7 +2168,7 @@ paths:
   /reports/movements:
     get:
       tags: [Reportes]
-      summary: Movimientos por rango de fechas
+      summary: Movimientos por rango de fechas (reports.view)
       parameters:
         - name: from
           in: query
@@ -2064,7 +2188,7 @@ paths:
   /reports/inventory-value:
     get:
       tags: [Reportes]
-      summary: Valor del inventario a costo
+      summary: Valor del inventario a costo (reports.view + costs.view)
       description: |
         `totalValue` = stock × costo promedio de los productos activos (lo que hay invertido).
         Los productos con stock y sin costo no suman: se cuentan en `productsWithoutCost`.
@@ -2084,7 +2208,7 @@ paths:
   /reports/inventory-value-breakdown:
     get:
       tags: [Reportes]
-      summary: Capital activo vs. inmovilizado (a costo)
+      summary: Capital activo vs. inmovilizado (a costo) (reports.view + costs.view)
       parameters:
         - name: days
           in: query
@@ -2117,7 +2241,7 @@ paths:
   /reports/stock-forecast:
     get:
       tags: [Reportes]
-      summary: Pronóstico de agotamiento según el ritmo de ventas
+      summary: Pronóstico de agotamiento según el ritmo de ventas (reports.view)
       parameters:
         - name: velocityDays
           in: query
@@ -2155,7 +2279,7 @@ paths:
   /audit-logs:
     get:
       tags: [Auditoría]
-      summary: Registro de auditoría (ADMIN, paginado)
+      summary: Registro de auditoría (audit.view, paginado)
       description: "`q` busca por nombre de usuario o por el inicio del id de la entidad."
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -2183,7 +2307,7 @@ paths:
   /audit-logs/metrics:
     get:
       tags: [Auditoría]
-      summary: Métricas de auditoría (ADMIN)
+      summary: Métricas de auditoría (audit.view)
       responses:
         '200':
           description: Métricas
@@ -2236,7 +2360,7 @@ paths:
   /assistant/chat:
     post:
       tags: [Asistente]
-      summary: Preguntar al asistente IA (solo lectura)
+      summary: Preguntar al asistente IA (solo lectura; reports.view)
       description: Usa Gemini con herramientas de consulta; nunca crea, edita ni borra datos.
       requestBody:
         required: true

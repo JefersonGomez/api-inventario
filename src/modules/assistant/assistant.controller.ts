@@ -4,7 +4,7 @@ import { chatWithAssistant } from "./assistant.service.ts";
 export async function chatHandler(req: Request, res: Response) {
   try {
     const { message } = req.body;
-    const result = await chatWithAssistant(message);
+    const result = await chatWithAssistant(message, req.user!.permissions);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });

@@ -3,16 +3,16 @@ import { CreateProductController,getProductPriceHistoryHandler,getAllProductsCon
     getExpiringSoonProductsHandler, importProductsHandler
 } from "./products.controller.ts";
 import Express from "express";
-import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
+import { Can,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts";
 import { productsSchemaCreate,productsSchemaUpdate,productsImportSchema,productListQuerySchema } from "./products.schema.ts";
 export const router = Router()
 
-router.post("/",validate(productsSchemaCreate),Authenticated, Authorize("ADMIN"),CreateProductController)
+router.post("/",validate(productsSchemaCreate),Authenticated, Can("products.manage"),CreateProductController)
 router.get("/", validateQuery(productListQuerySchema), Authenticated, getAllProductsController)
 
 // importación desde Excel: hasta 2000 filas, por eso su propio límite de tamaño (el global es 100 KB)
-router.post("/import", Express.json({ limit: "2mb" }), validate(productsImportSchema), Authenticated, Authorize("ADMIN"), importProductsHandler)
+router.post("/import", Express.json({ limit: "2mb" }), validate(productsImportSchema), Authenticated, Can("products.manage"), importProductsHandler)
 
 // rutas fijas antes de "/:id", o Express las toma como un id
 router.get("/expiring-soon", Authenticated, getExpiringSoonProductsHandler);
@@ -20,7 +20,7 @@ router.get("/barcode/:code", Authenticated, getProductByBarcodeController);
 
 
 router.get("/:id",Authenticated,getProductByIdController)
-router.put("/:id",validate(productsSchemaUpdate),Authenticated, Authorize("ADMIN"),updateProductController)
-router.delete("/:id",Authenticated, Authorize("ADMIN"),deleteProductController)
+router.put("/:id",validate(productsSchemaUpdate),Authenticated, Can("products.manage"),updateProductController)
+router.delete("/:id",Authenticated, Can("products.manage"),deleteProductController)
 
 router.get("/:id/price-history", Authenticated, getProductPriceHistoryHandler);

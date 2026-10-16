@@ -1,6 +1,6 @@
 // invitation.routes.ts
 import { Router } from "express";
-import { Authenticated, Authorize } from "../../middlewares/authenticate.middleware.ts";
+import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts";
 import { validate } from "../../middlewares/validate.middleware.ts";
 import { sensitiveLimiter } from "../../middlewares/rate-limit.middleware.ts";
 import { createInvitationSchema, acceptInvitationSchema } from "./invitation.schema.ts";
@@ -16,6 +16,6 @@ invitationRouter.get("/token/:token", sensitiveLimiter, getInvitationByTokenHand
 invitationRouter.post("/token/:token/accept", sensitiveLimiter, validate(acceptInvitationSchema), acceptInvitationHandler);
 
 // admin de la empresa activa
-invitationRouter.get("/", Authenticated, Authorize("ADMIN"), listInvitationsHandler);
-invitationRouter.post("/", validate(createInvitationSchema), Authenticated, Authorize("ADMIN"), createInvitationHandler);
-invitationRouter.delete("/:id", Authenticated, Authorize("ADMIN"), revokeInvitationHandler);
+invitationRouter.get("/", Authenticated, Can("users.manage"), listInvitationsHandler);
+invitationRouter.post("/", validate(createInvitationSchema), Authenticated, Can("users.manage"), createInvitationHandler);
+invitationRouter.delete("/:id", Authenticated, Can("users.manage"), revokeInvitationHandler);

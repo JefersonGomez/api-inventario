@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { prismaRoot } from "../config/database.ts";
 import { runWithCompany } from "../shared/tenant.ts";
 import { jwtSecret } from "../config/env.ts";
+import { effectivePermissions, type Permission } from "../config/permissions.ts";
 
 // Rutas que siguen disponibles con la empresa suspendida
 const SUSPENDED_ALLOWED = new Set([
@@ -61,6 +62,7 @@ export async function Authenticated(
       id: payload.id,
       companyId: payload.companyId,
       role: membership.role,
+      permissions: effectivePermissions(membership.role, membership.grantedPermissions, membership.revokedPermissions),
       isPlatformOwner: membership.user.isPlatformOwner,
     };
     runWithCompany(payload.companyId, next);
@@ -69,24 +71,20 @@ export async function Authenticated(
   }
 }
 
-export function Authorize (...rolesPermitidos: ("ADMIN" | "EMPLOYE")[]){
-     return (req: Request, res: Response, next: NextFunction) => {
-        if(!req.user){
-            return res.status(401).json({"message":"acceso no autorizado"})
-        }
-
-        const verification = (rolesPermitidos as string[]).includes(req.user.role)
-        if(!verification){
-            return res.status(403).json({"message":"estas auntenticado pero no tienes acceso"})
-        }
-
-        next()
-
-
-    
-
-  }
+// Exige uno o varios permisos (todos). Va después de Authenticated; los permisos ya vienen calculados.
+export function Can(...required: Permission[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return res.status(401).json({ message: "acceso no autorizado" });
+    if (!required.every((p) => req.user!.permissions.includes(p))) {
+      return res.status(403).json({ message: "No tienes permiso para hacer esto" });
+    }
+    next();
+  };
 }
+
+// ¿Tiene el permiso? (para decisiones dentro de un controller o service)
+export const can = (user: { permissions: string[] } | undefined, permission: Permission) =>
+  Boolean(user?.permissions.includes(permission));
 
 // Solo el dueño de la plataforma (va después de Authenticated)
 export function PlatformOwner(req: Request, res: Response, next: NextFunction) {

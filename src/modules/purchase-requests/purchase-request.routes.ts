@@ -1,6 +1,6 @@
 // purchase-request.router.ts
 import { Router } from "express";
-import { Authorize,Authenticated } from "../../middlewares/authenticate.middleware.ts";
+import { Can,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts";
 import { createCommentSchema } from "../comments/comment.schema.ts";
 import { getCommentsHandler, addCommentHandler } from "../comments/comment.controller.ts";
@@ -23,6 +23,7 @@ purchaseRequestRouter.post(
   "/",
   validate(createPurchaseRequestSchema),
   Authenticated,
+  Can("purchases.request"),
   createPurchaseRequestHandler
 );
 
@@ -32,14 +33,14 @@ purchaseRequestRouter.patch(
   "/:id/status",
   validate(updateStatusSchema),
   Authenticated,
-  Authorize("ADMIN"),
+  Can("purchases.manage"),
   updatePurchaseRequestStatusHandler
 );
 
 purchaseRequestRouter.get(
   "/alerts",
   Authenticated,
-  Authorize("ADMIN"),
+  Can("purchases.manage"),
   getPurchaseRequestAlertsHandler
 );
 

@@ -6,7 +6,7 @@ import type { Prisma } from "../../generated/prisma/client.ts"; // ajustá el pa
 import { z } from "zod";
 import { contains, pageArgs, pageQuery, pageResult } from "../../shared/pagination.ts";
 
-type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE"  | "ACTIVATE" | "DEACTIVATE" | "EMAIL";
+type AuditAction = "CREATE" | "UPDATE" | "DELETE" | "APPROVE" | "REJECT" | "RECEIVE"  | "ACTIVATE" | "DEACTIVATE" | "EMAIL" | "AUTHORIZE";
 
 export async function logAudit(
   userId: string,

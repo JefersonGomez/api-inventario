@@ -8,6 +8,7 @@ import { router as profileRouter } from "./modules/users/profile.routes.ts"
 import { router as usersRouter } from "./modules/userGestion/userGestion.routes.ts"
 import { router as supplierRouter  } from "./modules/suppliers/supplier.routes.ts"
 import { router as customerRouter } from "./modules/customers/customer.routes.ts"
+import { authorizationRouter } from "./modules/users/pin.routes.ts"
 import { router as productGroupRouter } from "./modules/product-groups/product-group.routes.ts"
 import {purchaseOrderRouter as purchaseOrderRouter} from "./modules/purchase-orders/purchase-order.routes.ts"
 import{purchaseRequestRouter as purchaseRequestRouter} from "./modules/purchase-requests/purchase-request.routes.ts"
@@ -25,6 +26,7 @@ import cors from "cors"
 import { corsOrigins } from "./config/cors.ts"
 import helmet from "helmet"
 import { sanitizeErrors, notFound, errorHandler } from "./middlewares/error.middleware.ts"
+import { hideCostsWithoutPermission } from "./middlewares/costs.middleware.ts"
 
 const app = Express()
 // Detrás de un proxy (Caddy/Nginx) la IP real viene en X-Forwarded-For: TRUST_PROXY = cuántos proxies
@@ -41,6 +43,7 @@ app.use(cors({
 const jsonDefault = Express.json({ limit: "100kb" })
 app.use((req, res, next) => (req.path === "/products/import" ? next() : jsonDefault(req, res, next)))
 app.use(sanitizeErrors)
+app.use(hideCostsWithoutPermission)
 
 
 app.use("/auth",authRouter)
@@ -53,6 +56,7 @@ app.use("/uploads", Express.static(path.join(process.cwd(), "uploads")))
 app.use("/users", usersRouter)
 app.use("/suppliers", supplierRouter)
 app.use("/customers", customerRouter)
+app.use("/authorizations", authorizationRouter)
 app.use("/product-groups", productGroupRouter)
 app.use("/purchase-orders",purchaseOrderRouter)
 app.use("/purchase-requests", purchaseRequestRouter)

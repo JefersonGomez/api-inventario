@@ -3,8 +3,8 @@ import { prisma } from "../../config/database.ts"
 // Panel: los números ya calculados (antes el navegador bajaba todos los productos y movimientos).
 // since = inicio del mes en la zona del navegador (el servidor puede estar en UTC).
 // Las solicitudes respetan lo que ve cada rol: el empleado cuenta solo las suyas.
-export async function getDashboardSummary(user: { id: string; role: string }, since: Date) {
-  const mine = user.role === "ADMIN" ? {} : { requestedById: user.id }
+export async function getDashboardSummary(user: { id: string; permissions: string[] }, since: Date) {
+  const mine = user.permissions.includes("purchases.manage") ? {} : { requestedById: user.id }
   const [units, dispatched, byCategory, categories, recent, requestCounts] = await Promise.all([
     prisma.product.aggregate({ where: { deletedAt: null }, _sum: { stock: true } }),
     prisma.stockMovement.aggregate({ where: { type: "OUT", createdAt: { gte: since } }, _sum: { quantity: true } }),

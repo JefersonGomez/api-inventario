@@ -5,13 +5,15 @@ import { prismaRoot } from "../config/database.ts";
 import { corsOrigins } from "../config/cors.ts";
 import { jwtSecret } from "../config/env.ts";
 import { currentCompanyIdOrNull } from "./tenant.ts";
+import { effectivePermissions } from "../config/permissions.ts";
 
 // El socket no transporta datos: solo avisa "esto cambió" y el cliente vuelve a pedirlo por la API normal.
 // Los topics son las raíces de las queryKey de react-query del frontend.
 let io: Server | null = null;
 
-export const ADMINS = "role:ADMIN";
-export const EVERYONE = ["role:ADMIN", "role:EMPLOYE"];
+// Salas por empresa: "all" (todos sus miembros) y una por permiso ("perm:purchases.manage")
+export const EVERYONE = "all";
+export const PURCHASE_MANAGERS = "perm:purchases.manage";
 export const userRoom = (id: string) => `user:${id}`;
 const companyRoom = (companyId: string, room: string) => `company:${companyId}:${room}`;
 
@@ -39,7 +41,8 @@ export function initRealtime(httpServer: HttpServer) {
         include: { user: { select: { isActive: true } } },
       });
       if (!membership?.isActive || !membership.user.isActive) return next(new Error("unauthorized"));
-      socket.data.user = { id: payload.id, role: membership.role, companyId: payload.companyId };
+      const permissions = effectivePermissions(membership.role, membership.grantedPermissions, membership.revokedPermissions);
+      socket.data.user = { id: payload.id, permissions, companyId: payload.companyId };
       next();
     } catch {
       next(new Error("unauthorized"));
@@ -47,19 +50,19 @@ export function initRealtime(httpServer: HttpServer) {
   });
 
   io.on("connection", (socket) => {
-    const { id, role, companyId } = socket.data.user;
-    socket.join([companyRoom(companyId, `role:${role}`), userRoom(id)]);
+    const { id, permissions, companyId } = socket.data.user as { id: string; permissions: string[]; companyId: string };
+    socket.join([companyRoom(companyId, EVERYONE), ...permissions.map((p) => companyRoom(companyId, `perm:${p}`)), userRoom(id)]);
   });
 }
 
 // Nunca debe romper la petición que lo llama: si el socket falla, la API sigue respondiendo.
-// Las salas por rol ("role:ADMIN") son por empresa: se traducen a la empresa activa de la
-// petición. Sin empresa activa no se avisa a ningún rol (nunca a todas las empresas).
+// Las salas "all" y "perm:..." son por empresa: se traducen a la empresa activa de la
+// petición. Sin empresa activa no se avisa a nadie de ellas (nunca a todas las empresas).
 export function emit(rooms: string | string[], topics: string[]) {
   try {
     const companyId = currentCompanyIdOrNull();
     const targets = (Array.isArray(rooms) ? rooms : [rooms]).flatMap((r) =>
-      r.startsWith("role:") ? (companyId ? [companyRoom(companyId, r)] : []) : [r]
+      r.startsWith("user:") ? [r] : companyId ? [companyRoom(companyId, r)] : []
     );
     if (targets.length > 0) io?.to(targets).emit("invalidate", topics);
   } catch (error) {

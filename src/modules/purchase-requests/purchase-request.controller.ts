@@ -2,7 +2,7 @@
 import type { Request, Response } from "express";
 import * as service from "./purchase-request.service.js";
 import * as productService from "../products/products.service.ts";
-import { emit, ADMINS, REQUEST_TOPICS, userRoom } from "../../shared/realtime.ts";
+import { emit, PURCHASE_MANAGERS, REQUEST_TOPICS, userRoom } from "../../shared/realtime.ts";
 export async function createPurchaseRequestHandler(req: Request, res: Response) {
   try {
     const { productId, quantity, reason } = req.body;
@@ -12,7 +12,7 @@ export async function createPurchaseRequestHandler(req: Request, res: Response) 
       quantity,
       reason
     );
-    emit(ADMINS, REQUEST_TOPICS);
+    emit(PURCHASE_MANAGERS, REQUEST_TOPICS);
     res.status(201).json(request);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -43,7 +43,7 @@ export async function updatePurchaseRequestStatusHandler(req: Request, res: Resp
     }
     const { status, rejectionReason } = req.body;
     const updated = await service.updatePurchaseRequestStatus(id, status, req.user!.id, rejectionReason);
-    emit([ADMINS, userRoom(updated.requestedById)], REQUEST_TOPICS);
+    emit([PURCHASE_MANAGERS, userRoom(updated.requestedById)], REQUEST_TOPICS);
     res.status(200).json(updated);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

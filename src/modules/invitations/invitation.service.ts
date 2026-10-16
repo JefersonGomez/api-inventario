@@ -10,6 +10,7 @@ import { currentCompanyId, runWithCompany } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { openSession } from "../auth/auth.service.ts";
+import type { Role } from "../../generated/prisma/enums.ts";
 import { newPasswordSchema } from "../../shared/password.ts";
 import { TERMS_VERSION, TERMS_REQUIRED_MESSAGE } from "../../config/legal.ts";
 
@@ -36,7 +37,7 @@ export async function assertUserSlot(companyId: string, extra = 1) {
 }
 
 // Crea (o renueva) la invitación de un email. El token solo se devuelve acá: después no se puede recuperar.
-export async function createInvitation(email: string, role: "ADMIN" | "EMPLOYE", invitedById: string) {
+export async function createInvitation(email: string, role: Role, invitedById: string) {
   const companyId = currentCompanyId();
   email = email.trim().toLowerCase();
 

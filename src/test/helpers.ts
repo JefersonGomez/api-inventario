@@ -3,6 +3,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prismaRoot } from "../config/database.ts";
 import { jwtSecret } from "../config/env.ts";
+import type { Role } from "../generated/prisma/enums.ts";
 
 // Vacía todas las tablas. Se niega a correr si la URL no apunta a una base "_test":
 // un .env mal cargado nunca debe poder borrar la base real.
@@ -22,7 +23,7 @@ let seq = 0;
 
 // Crea un usuario dentro de una empresa y devuelve un token como el del login.
 // Sin `companyId` crea una empresa nueva de la que el usuario es dueño.
-export async function createUser(role: "ADMIN" | "EMPLOYE", companyId?: string) {
+export async function createUser(role: Role, companyId?: string) {
   const user = await prismaRoot.user.create({
     data: { name: `${role} test ${++seq}`, email: `user${seq}-${Date.now()}@test.com`, passwordHash: await bcrypt.hash("123456", 4) },
   });

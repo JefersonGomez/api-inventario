@@ -3,7 +3,7 @@ import { newPasswordSchema } from "../../shared/password.ts";
 
 export const createInvitationSchema = z.object({
   email: z.email("Email inválido"),
-  role: z.enum(["ADMIN", "EMPLOYE"]).default("EMPLOYE"),
+  role: z.enum(["ADMIN", "MANAGER", "EMPLOYE", "CASHIER", "ACCOUNTANT"]).default("EMPLOYE"),
 });
 
 export const acceptInvitationSchema = z.object({

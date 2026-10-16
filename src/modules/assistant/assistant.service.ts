@@ -2,6 +2,10 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Content, Part } from "@google/genai";
 import { toolDeclarations, toolExecutors } from "./assistant.tools.ts";
+import { stripCosts } from "../../middlewares/costs.middleware.ts";
+
+// Herramientas que solo se ofrecen con costs.view (devuelven valores a costo)
+const COST_TOOLS = new Set(["getInventoryValueReport"]);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "API_KEY_DEFAULT" });
 const MODEL = "gemini-3.6-flash";
@@ -14,7 +18,11 @@ Nunca inventes cifras, nombres de productos, ni cantidades.
 Si una pregunta requiere datos que no podés obtener con las herramientas disponibles, decilo explícitamente en vez de inventar una respuesta.
 Respondé siempre en el mismo idioma en el que te escribe el usuario. Si te escribe en inglés, respondé en inglés; si te escribe en español, respondé en español; y así con cualquier otro idioma.
 `.trim();
-export async function chatWithAssistant(userMessage: string) {
+// El asistente respeta los permisos de quien pregunta: sin costs.view no se le ofrecen las
+// herramientas de valor a costo y a lo que devuelven las demás se le quitan los costos.
+export async function chatWithAssistant(userMessage: string, permissions: string[]) {
+  const seesCosts = permissions.includes("costs.view");
+  const declarations = toolDeclarations.filter((d) => seesCosts || !COST_TOOLS.has(d.name ?? ""));
   const contents: Content[] = [
     { role: "user", parts: [{ text: userMessage }] },
   ];
@@ -25,7 +33,7 @@ export async function chatWithAssistant(userMessage: string) {
       contents,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        tools: [{ functionDeclarations: toolDeclarations }],
+        tools: [{ functionDeclarations: declarations }],
       },
     });
 
@@ -50,7 +58,8 @@ export async function chatWithAssistant(userMessage: string) {
 
     for (const call of functionCalls) {
       const toolName = call.name;
-      const executor = toolName ? toolExecutors[toolName] : undefined;
+      const allowed = toolName && (seesCosts || !COST_TOOLS.has(toolName));
+      const executor = allowed ? toolExecutors[toolName] : undefined;
 
       let result;
 
@@ -59,6 +68,7 @@ export async function chatWithAssistant(userMessage: string) {
       } else {
         try {
           result = await executor(call.args);
+          if (!seesCosts) result = stripCosts(JSON.parse(JSON.stringify(result)));
         } catch (error) {
           result = { error: (error as Error).message };
         }

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express"
-import { getAllUsers, toggleUserActive } from "./userGestion.service.ts"
+import { getAllUsers, toggleUserActive, updateUserAccess, permissionCatalog } from "./userGestion.service.ts"
+import { emit, userRoom } from "../../shared/realtime.ts"
 
 export async function getAllUsersController(req: Request, res: Response) {
   try {
@@ -7,6 +8,19 @@ export async function getAllUsersController(req: Request, res: Response) {
     res.status(200).json(users)
   } catch (error) {
     res.status(500).json({ error: (error as Error).message })
+  }
+}
+
+export function permissionCatalogHandler(_req: Request, res: Response) {
+  res.json(permissionCatalog())
+}
+
+export async function updateUserAccessHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    res.json(await updateUserAccess(req.params.id, req.body, req.user!.id))
+    emit(userRoom(req.params.id), ["me"]) // su pantalla relee sus permisos sin cerrar sesión
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message })
   }
 }
 

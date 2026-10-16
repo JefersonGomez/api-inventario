@@ -5,6 +5,26 @@ import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { assertUserSlot } from "../invitations/invitation.service.ts";
 import { catalogResult, contains, type CatalogQuery } from "../../shared/pagination.ts";
+import { AUTHORIZING_PERMISSIONS, PERMISSIONS, ROLE_PERMISSIONS, effectivePermissions, type Permission } from "../../config/permissions.ts";
+import type { UpdateAccessInput } from "./userGestion.schema.ts";
+
+// Para la pantalla de Usuarios: qué permisos existen y cuáles trae cada rol
+export const permissionCatalog = () => ({
+  permissions: PERMISSIONS,
+  rolePermissions: ROLE_PERMISSIONS,
+  authorizing: AUTHORIZING_PERMISSIONS,
+});
+
+// Ids de los miembros activos de la empresa que tienen un permiso (para avisos dirigidos)
+export async function memberIdsWith(permission: Permission) {
+  const members = await prismaRoot.membership.findMany({
+    where: { companyId: currentCompanyId(), isActive: true, user: { isActive: true } },
+    select: { userId: true, role: true, grantedPermissions: true, revokedPermissions: true },
+  });
+  return members
+    .filter((m) => effectivePermissions(m.role, m.grantedPermissions, m.revokedPermissions).includes(permission))
+    .map((m) => m.userId);
+}
 
 // Sin page: todos los miembros. q busca por nombre o correo.
 export async function getAllUsers(f: CatalogQuery) {
@@ -13,7 +33,14 @@ export async function getAllUsers(f: CatalogQuery) {
     ...(f.q && { user: { OR: [{ name: contains(f.q) }, { email: contains(f.q) }] } }),
   };
   // misma forma que antes para el frontend: role e isActive salen de la membresía
-  const toUser = (m: { user: object; role: string; isActive: boolean }) => ({ ...m.user, role: m.role, isActive: m.isActive });
+  const toUser = (m: { user: object; role: string; isActive: boolean; grantedPermissions: string[]; revokedPermissions: string[]; pinHash: string | null }) => ({
+    ...m.user,
+    role: m.role,
+    isActive: m.isActive,
+    grantedPermissions: m.grantedPermissions,
+    revokedPermissions: m.revokedPermissions,
+    hasPin: m.pinHash !== null, // el PIN en sí nunca sale del servidor
+  });
   const result = await catalogResult(
     f,
     () => prismaRoot.membership.count({ where }),
@@ -25,6 +52,45 @@ export async function getAllUsers(f: CatalogQuery) {
     })
   );
   return Array.isArray(result) ? result.map(toUser) : { ...result, items: result.items.map(toUser) };
+}
+
+// Cambiar el rol y los ajustes de una persona. Nadie cambia su propio acceso, y el dueño de la
+// empresa siempre es Administrador (así la empresa nunca queda sin quien la administre).
+export async function updateUserAccess(targetUserId: string, input: UpdateAccessInput, requestingUserId: string) {
+  if (targetUserId === requestingUserId) throw new Error("No podés cambiar tu propio acceso");
+  const companyId = currentCompanyId();
+  const membership = await prismaRoot.membership.findUnique({
+    where: { userId_companyId: { userId: targetUserId, companyId } },
+    include: { company: { select: { ownerId: true } } },
+  });
+  if (!membership) throw new Error("Usuario no encontrado");
+  if (membership.company.ownerId === targetUserId && input.role !== "ADMIN") {
+    throw new Error("El dueño de la empresa siempre es Administrador");
+  }
+  // al Administrador no se le ajusta nada (tiene todo); en los demás, solo se guarda lo que difiere del rol
+  const base = ROLE_PERMISSIONS[input.role];
+  const granted = input.role === "ADMIN" ? [] : input.grantedPermissions.filter((p) => !base.includes(p));
+  const revoked = input.role === "ADMIN" ? [] : input.revokedPermissions.filter((p) => base.includes(p));
+  // si deja de poder autorizar en la caja, su PIN ya no sirve: se borra
+  const canAuthorize = effectivePermissions(input.role, granted, revoked).some((p) => AUTHORIZING_PERMISSIONS.includes(p));
+
+  const updated = await prismaRoot.membership.update({
+    where: { id: membership.id },
+    data: { role: input.role, grantedPermissions: granted, revokedPermissions: revoked, ...(!canAuthorize && { pinHash: null }) },
+    include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true } } },
+  });
+  await logAudit(requestingUserId, "UPDATE", "UserAccess", targetUserId, {
+    before: { role: membership.role, granted: membership.grantedPermissions, revoked: membership.revokedPermissions },
+    after: { role: input.role, granted, revoked },
+  });
+  return {
+    ...updated.user,
+    role: updated.role,
+    isActive: updated.isActive,
+    grantedPermissions: updated.grantedPermissions,
+    revokedPermissions: updated.revokedPermissions,
+    hasPin: updated.pinHash !== null,
+  };
 }
 
 export async function toggleUserActive(targetUserId: string, requestingUserId: string) {

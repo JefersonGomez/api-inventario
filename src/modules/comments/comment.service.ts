@@ -1,23 +1,26 @@
 // comment.service.ts
-// Hilo de comentarios de una solicitud (quien la pidió + admins) o de una orden (solo admins).
+// Hilo de comentarios de una solicitud (quien la pidió + quienes gestionan compras) o de una orden
+// (solo quienes gestionan compras: permiso purchases.manage).
 // Sin edición ni borrado: el hilo es un registro de la conversación.
 import { prisma, prismaRoot } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
+import { memberIdsWith } from "../userGestion/userGestion.service.ts";
 
 export type ThreadKind = "request" | "order";
-type Viewer = { id: string; role: string };
+type Viewer = { id: string; permissions: string[] };
+const managesPurchases = (u: Viewer) => u.permissions.includes("purchases.manage");
 
 const authorSelect = { select: { id: true, name: true, avatarUrl: true } };
 
-// null si no existe o si el usuario no puede verlo (el empleado solo ve sus solicitudes; las órdenes son de admins)
+// null si no existe o si el usuario no puede verlo (sin purchases.manage solo ve sus solicitudes y ninguna orden)
 async function findThread(kind: ThreadKind, id: string, user: Viewer) {
   if (kind === "request") {
     const r = await prisma.purchaseRequest.findUnique({ where: { id }, include: { product: true } });
-    if (!r || (user.role !== "ADMIN" && r.requestedById !== user.id)) return null;
+    if (!r || (!managesPurchases(user) && r.requestedById !== user.id)) return null;
     return { title: r.product.name, ownerId: r.requestedById, link: `/purchase-requests?highlight=${id}&comments=1` };
   }
-  if (user.role !== "ADMIN") return null;
+  if (!managesPurchases(user)) return null;
   const o = await prisma.purchaseOrder.findUnique({ where: { id }, include: { supplier: true } });
   if (!o) return null;
   return { title: o.supplier.name, ownerId: null, link: `/purchase-orders?highlight=${id}&comments=1` };
@@ -40,12 +43,9 @@ export async function addComment(kind: ThreadKind, id: string, user: Viewer, bod
   const thread = await findThread(kind, id, user);
   if (!thread) return null;
 
-  // avisa a todos los que pueden ver el hilo menos al autor: admins activos + quien pidió la solicitud
-  const admins = await prismaRoot.membership.findMany({
-    where: { companyId: currentCompanyId(), role: "ADMIN", isActive: true, user: { isActive: true } },
-    select: { userId: true },
-  });
-  const recipients = [...new Set([...admins.map((a) => a.userId), ...(thread.ownerId ? [thread.ownerId] : [])])]
+  // avisa a todos los que pueden ver el hilo menos al autor: quienes gestionan compras + quien pidió la solicitud
+  const managers = await memberIdsWith("purchases.manage");
+  const recipients = [...new Set([...managers, ...(thread.ownerId ? [thread.ownerId] : [])])]
     .filter((uid) => uid !== user.id);
 
   const comment = await prisma.$transaction(async (tx) => {

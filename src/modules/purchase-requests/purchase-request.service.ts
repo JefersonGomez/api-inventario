@@ -38,10 +38,11 @@ export async function createPurchaseRequest(
 
 const requestInclude = { product: true, requestedBy: { select: { id: true, name: true, email: true } } } as const;
 
-// el empleado solo ve las suyas; el ADMIN, todas
-const visibleTo = (user: { id: string; role: string }) => (user.role === "ADMIN" ? {} : { requestedById: user.id });
+// quien gestiona compras ve todas; el resto, solo las suyas
+type Viewer = { id: string; permissions: string[] };
+const visibleTo = (user: Viewer) => (user.permissions.includes("purchases.manage") ? {} : { requestedById: user.id });
 
-export async function listPurchaseRequests(user: { id: string; role: string }, f: PurchaseRequestListQuery) {
+export async function listPurchaseRequests(user: Viewer, f: PurchaseRequestListQuery) {
   const where: Prisma.PurchaseRequestWhereInput = {
     ...visibleTo(user),
     ...(f.status && { status: f.status }),
@@ -62,7 +63,7 @@ export async function listPurchaseRequests(user: { id: string; role: string }, f
 }
 
 // para los enlaces ?highlight= (el resaltado puede no estar en la página actual)
-export async function getPurchaseRequestById(user: { id: string; role: string }, id: string) {
+export async function getPurchaseRequestById(user: Viewer, id: string) {
   const request = await prisma.purchaseRequest.findFirst({ where: { id, ...visibleTo(user) }, include: requestInclude });
   if (!request) throw new Error("Solicitud no encontrada");
   return request;

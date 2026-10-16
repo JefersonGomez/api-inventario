@@ -74,9 +74,9 @@ async function getDerivedNotifications() {
   return notifications;
 }
 
-// ADMIN: avisos de estado calculados + sus eventos guardados. EMPLOYE: solo sus eventos guardados.
+// Con purchases.manage: avisos de estado calculados + sus eventos guardados. El resto: solo sus eventos guardados.
 // Los calculados no tienen estado de lectura (existen mientras el problema exista): siempre cuentan como no leídos.
-export async function getNotifications(user: { id: string; role: string }) {
+export async function getNotifications(user: { id: string; permissions: string[] }) {
   const stored = (await getUserNotifications(user.id)).map((n) => ({
     id: n.id,
     type: n.type,
@@ -88,7 +88,8 @@ export async function getNotifications(user: { id: string; role: string }) {
     read: n.readAt !== null,
   }));
   const derived =
-    user.role === "ADMIN"
+    // los avisos calculados (stock bajo, solicitudes pendientes, por vencer…) son de quien gestiona compras
+    user.permissions.includes("purchases.manage")
       ? (await getDerivedNotifications()).map((n) => ({ ...n, persisted: false as const, read: false }))
       : [];
 

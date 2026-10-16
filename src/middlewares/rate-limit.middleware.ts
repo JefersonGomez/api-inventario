@@ -17,6 +17,19 @@ export const loginLimiter = rateLimit({
   message: tooMany,
 });
 
+// PIN de autorización (4–6 dígitos): solo cuentan los fallos, por persona que pide. Va después de
+// Authenticated. 5 fallos cada 15 minutos: probar todos los PIN de 4 dígitos tomaría años.
+export const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: true,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  skip: off,
+  keyGenerator: (req) => `pin|${req.user?.id ?? ipKeyGenerator(req.ip ?? "")}`,
+  message: { error: "Demasiados intentos de PIN. Espera unos minutos." },
+});
+
 // Registro y aceptar invitaciones (probar contraseñas de cuentas existentes): por IP
 export const sensitiveLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

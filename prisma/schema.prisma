@@ -10,9 +10,13 @@ datasource db {
   provider = "postgresql"
 }
 
+// Roles fijos; los permisos de cada uno viven en src/config/permissions.ts. EMPLOYE = "Bodega".
 enum Role {
   ADMIN
-  EMPLOYE
+  MANAGER // encargado / supervisor
+  EMPLOYE // bodega
+  CASHIER
+  ACCOUNTANT
 }
 
 // Moneda en la que la empresa muestra sus montos (los valores se guardan sin conversión)
@@ -488,14 +492,19 @@ model DocumentSequence {
 
 // Usuario dentro de una empresa: su rol y si está activo ahí (un usuario puede estar en varias)
 model Membership {
-  id        String   @id @default(uuid())
-  userId    String
-  companyId String
-  role      Role     @default(EMPLOYE)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-  company   Company  @relation(fields: [companyId], references: [id])
+  id                 String   @id @default(uuid())
+  userId             String
+  companyId          String
+  role               Role     @default(EMPLOYE)
+  isActive           Boolean  @default(true)
+  // ajustes de esta persona sobre los permisos de su rol (claves de src/config/permissions.ts)
+  grantedPermissions String[] @default([])
+  revokedPermissions String[] @default([])
+  // PIN para autorizar en la caja (descuentos, anulaciones); bcrypt. Por empresa: es de esta membresía
+  pinHash            String?
+  createdAt          DateTime @default(now())
+  user               User     @relation(fields: [userId], references: [id])
+  company            Company  @relation(fields: [companyId], references: [id])
 
   @@unique([userId, companyId])
   @@index([companyId])
