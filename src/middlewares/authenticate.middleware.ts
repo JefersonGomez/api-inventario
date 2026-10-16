@@ -58,14 +58,25 @@ export async function Authenticated(
       }
     }
 
+    // Ubicaciones (Bloque 4): el admin y quien no tiene asignadas trabajan en todas. La activa llega en el
+    // encabezado X-Location-Id (selector del frontend); si no es una de las suyas se ignora. Con una sola
+    // asignada, esa es siempre la activa.
+    const allowed = membership.role === "ADMIN" || membership.locationIds.length === 0 ? null : membership.locationIds;
+    const requested = req.headers["x-location-id"];
+    const active = allowed?.length === 1
+      ? allowed[0]!
+      : typeof requested === "string" && requested && (!allowed || allowed.includes(requested)) ? requested : null;
+
     req.user = {
       id: payload.id,
       companyId: payload.companyId,
       role: membership.role,
       permissions: effectivePermissions(membership.role, membership.grantedPermissions, membership.revokedPermissions),
       isPlatformOwner: membership.user.isPlatformOwner,
+      locationIds: allowed,
+      activeLocationId: active,
     };
-    runWithCompany(payload.companyId, next);
+    runWithCompany(payload.companyId, next, { allowed, active });
   } catch {
     res.status(401).json({ message: "acceso no autorizado" });
   }

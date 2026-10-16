@@ -27,7 +27,16 @@ info:
     no sirve hasta renovarlo. La persona puede cambiarlo (`PUT /profile/me/pin`) y después queda fijo hasta que vence,
     salvo que el admin le asigne otro. Con el de quien autoriza se aprueba en la pantalla de otro (`POST /authorizations`).
 
-    **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas, usuarios y productos.
+    **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas; sucursales, cajas, usuarios y
+    productos se cuentan **por empresa** (las bodegas no tienen límite).
+
+    **Ubicaciones (sucursales y bodegas)**: el stock se lleva por ubicación; `Product.stock` es el total. Cada empresa
+    nace con su "Sucursal principal" (código 001). La persona trabaja en las ubicaciones que le asigna el admin
+    (`PATCH /users/{id}/access` → `locationIds`; vacío = todas; el ADMIN, todas) y elige en cuál está con el
+    encabezado **`X-Location-Id`** (si no es una de las suyas se ignora; con una sola asignada, esa es siempre la activa).
+    Con ubicación activa (o si solo trabaja en algunas), productos, movimientos y reportes muestran solo lo de ahí;
+    sin ella, los totales. Movimientos, stock inicial, importación y órdenes de compra aceptan `locationId`
+    (sin indicarlo: la ubicación activa).
 
     **Seguridad**: contraseñas nuevas de 8 a 72 caracteres, sin las más comunes (el login no aplica esta regla,
     para que las cuentas antiguas puedan entrar). El login permite 10 intentos fallidos por IP y correo cada
@@ -232,8 +241,28 @@ components:
           type: object
           properties:
             maxCompanies: { type: integer }
+            maxBranches: { type: integer, nullable: true }
+            maxRegistersPerBranch: { type: integer, nullable: true, description: Cajas (Bloque 7) }
             maxUsersPerCompany: { type: integer, nullable: true }
             maxProducts: { type: integer, nullable: true, description: null = sin límite }
+
+    Location:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string, enum: [BRANCH, WAREHOUSE], description: "Sucursal (vende) o bodega (solo almacena)" }
+        code: { type: string, nullable: true, description: "Sucursales: 3 dígitos para los comprobantes" }
+        address: { type: string, nullable: true }
+        isActive: { type: boolean }
+
+    LocationInput:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        type: { type: string, enum: [BRANCH, WAREHOUSE] }
+        address: { type: string, nullable: true, maxLength: 250 }
 
     Category:
       type: object
@@ -372,6 +401,7 @@ components:
       type: object
       required: [sku, name, price, stock, minStock, categoryId]
       properties:
+        locationId: { type: string, format: uuid, description: "Dónde entra el stock inicial (sin indicar, la ubicación activa)" }
         sku: { type: string, minLength: 1 }
         barcode: { type: string }
         name: { type: string, minLength: 1 }
@@ -485,6 +515,8 @@ components:
         reason: { type: string, nullable: true }
         source: { $ref: '#/components/schemas/MovementSource' }
         sourceId: { type: string, nullable: true }
+        locationId: { type: string, format: uuid }
+        location: { type: object, properties: { id: { type: string }, name: { type: string }, type: { type: string } } }
         createdAt: { type: string, format: date-time }
         product: { $ref: '#/components/schemas/Product' }
 
@@ -494,8 +526,9 @@ components:
       properties:
         productId: { type: string, format: uuid }
         type: { $ref: '#/components/schemas/MovementType' }
-        quantity: { type: number, exclusiveMinimum: true, minimum: 0 }
+        quantity: { type: number, exclusiveMinimum: true, minimum: 0, description: "En ADJUSTMENT: la cantidad contada en ESA ubicación" }
         reason: { type: string }
+        locationId: { type: string, format: uuid, description: "Sin indicar: la ubicación activa. OUT falla si no alcanza en esa ubicación" }
 
     PurchaseRequestStatus:
       type: string
@@ -557,6 +590,8 @@ components:
         createdAt: { type: string, format: date-time }
         receivedAt: { type: string, format: date-time, nullable: true }
         emailedAt: { type: string, format: date-time, nullable: true, description: Último envío al proveedor }
+        locationId: { type: string, format: uuid, description: A dónde entra la mercadería al recibirla }
+        location: { type: object, properties: { id: { type: string }, name: { type: string } } }
         items:
           type: array
           items:
@@ -573,6 +608,7 @@ components:
       required: [supplierId, items]
       properties:
         supplierId: { type: string, format: uuid }
+        locationId: { type: string, format: uuid, description: "A dónde entra al recibirla (sin indicar, la ubicación activa)" }
         items:
           type: array
           minItems: 1
@@ -802,6 +838,8 @@ paths:
                       pinExpiresAt: { type: string, format: date-time, nullable: true }
                       pinExpired: { type: boolean, description: Vencido = no sirve hasta renovarlo }
                       pinExpiringSoon: { type: boolean, description: Vence en los próximos 5 días }
+                      locationIds: { type: array, nullable: true, items: { type: string }, description: Dónde trabaja (null = todas) }
+                      activeLocationId: { type: string, nullable: true, description: La ubicación activa (X-Location-Id válido) }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ---------------------------------------------------------------- Perfil
@@ -1065,6 +1103,7 @@ paths:
                 role: { $ref: '#/components/schemas/Role' }
                 grantedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, default: [] }
                 revokedPermissions: { type: array, items: { $ref: '#/components/schemas/Permission' }, default: [], description: No puede repetir uno de grantedPermissions }
+                locationIds: { type: array, items: { type: string, format: uuid }, default: [], description: "Dónde trabaja (vacío = todas; al ADMIN no se le limita)" }
       responses:
         '200':
           description: Usuario con su nuevo acceso
@@ -1677,6 +1716,63 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
 
   # ---------------------------------------------------------------- Proveedores
+  /locations:
+    get:
+      tags: [Ubicaciones]
+      summary: Sucursales y bodegas que ve la persona (las suyas; el admin, todas)
+      parameters:
+        - { name: inactive, in: query, schema: { type: string, enum: ["1"] }, description: "Incluye las desactivadas (company.manage)" }
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Location' } }
+    post:
+      tags: [Ubicaciones]
+      summary: Crear sucursal o bodega (company.manage)
+      description: Las sucursales cuentan para el límite del plan y reciben el siguiente código (001, 002…). Las bodegas no tienen límite ni código.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LocationInput' }
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Location' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /locations/{id}:
+    patch:
+      tags: [Ubicaciones]
+      summary: Editar, activar o desactivar una ubicación (company.manage)
+      description: |
+        No se borran: se desactivan, y solo si ya no tienen stock, transferencias en tránsito ni órdenes por recibir.
+        La empresa siempre conserva al menos una activa.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                type: { type: string, enum: [BRANCH, WAREHOUSE] }
+                address: { type: string, nullable: true }
+                isActive: { type: boolean }
+      responses:
+        '200':
+          description: Actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Location' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
   /customers:
     get:
       tags: [Clientes]

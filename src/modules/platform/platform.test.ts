@@ -32,7 +32,7 @@ describe("Panel de plataforma", () => {
     const row = res.body.find((c: { id: string }) => c.id === client.companyId)
     expect(row).toMatchObject({ plan: "BASIC", users: 2, products: 3, suspendedAt: null })
     expect(row.owner.email).toBe(client.user.email)
-    expect(row.limits.maxProducts).toBe(200)
+    expect(row.limits.maxProducts).toBe(500)
     expect(JSON.stringify(res.body)).not.toContain("Producto privado")
     expect(JSON.stringify(res.body)).not.toContain("passwordHash")
   })
@@ -57,7 +57,7 @@ describe("Panel de plataforma", () => {
 
     const company = await request(app).get("/company").set(client.auth)
     expect(company.body.plan).toBe("PRO")
-    expect(company.body.limits.maxProducts).toBe(5000)
+    expect(company.body.limits.maxProducts).toBe(10_000)
 
     const audit = await prisma.auditLog.findFirst({ where: { companyId: client.companyId, entityType: "Company" } })
     expect(audit?.changes).toMatchObject({ plan: "PRO", by: "platform" })

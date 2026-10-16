@@ -34,13 +34,14 @@ export async function getAllUsers(f: CatalogQuery) {
     ...(f.q && { user: { OR: [{ name: contains(f.q) }, { email: contains(f.q) }] } }),
   };
   // misma forma que antes para el frontend: role e isActive salen de la membresía
-  const toUser = (m: { user: object; role: Role; isActive: boolean; grantedPermissions: string[]; revokedPermissions: string[]; pinHash: string | null }) => ({
+  const toUser = (m: { user: object; role: Role; isActive: boolean; grantedPermissions: string[]; revokedPermissions: string[]; pinHash: string | null; locationIds: string[] }) => ({
     ...m.user,
     role: m.role,
     isActive: m.isActive,
     grantedPermissions: m.grantedPermissions,
     revokedPermissions: m.revokedPermissions,
     hasPin: m.pinHash !== null, // el PIN en sí nunca sale del servidor
+    locationIds: m.locationIds,
     needsPin: needsPin(effectivePermissions(m.role, m.grantedPermissions, m.revokedPermissions)),
   });
   const result = await catalogResult(
@@ -75,15 +76,21 @@ export async function updateUserAccess(targetUserId: string, input: UpdateAccess
   const revoked = input.role === "ADMIN" ? [] : input.revokedPermissions.filter((p) => base.includes(p));
   // si ya no abre caja ni autoriza, su código no sirve: se borra
   const keepsPin = needsPin(effectivePermissions(input.role, granted, revoked));
+  // ubicaciones: solo de esta empresa y activas; el administrador trabaja en todas
+  const locationIds = input.role === "ADMIN" ? [] : [...new Set(input.locationIds)];
+  if (locationIds.length) {
+    const found = await prismaRoot.location.count({ where: { companyId, id: { in: locationIds }, isActive: true } });
+    if (found !== locationIds.length) throw new Error("Alguna ubicación no existe o está desactivada");
+  }
 
   const updated = await prismaRoot.membership.update({
     where: { id: membership.id },
-    data: { role: input.role, grantedPermissions: granted, revokedPermissions: revoked, ...(!keepsPin && { pinHash: null, pinSetAt: null, pinSetBySelf: false }) },
+    data: { role: input.role, grantedPermissions: granted, revokedPermissions: revoked, locationIds, ...(!keepsPin && { pinHash: null, pinSetAt: null, pinSetBySelf: false }) },
     include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, createdAt: true } } },
   });
   await logAudit(requestingUserId, "UPDATE", "UserAccess", targetUserId, {
-    before: { role: membership.role, granted: membership.grantedPermissions, revoked: membership.revokedPermissions },
-    after: { role: input.role, granted, revoked },
+    before: { role: membership.role, granted: membership.grantedPermissions, revoked: membership.revokedPermissions, locationIds: membership.locationIds },
+    after: { role: input.role, granted, revoked, locationIds },
   });
   return {
     ...updated.user,
@@ -93,6 +100,7 @@ export async function updateUserAccess(targetUserId: string, input: UpdateAccess
     revokedPermissions: updated.revokedPermissions,
     hasPin: updated.pinHash !== null,
     needsPin: keepsPin,
+    locationIds: updated.locationIds,
   };
 }
 

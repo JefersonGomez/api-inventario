@@ -1,6 +1,7 @@
 // company.service.ts — empresa activa y empresas del usuario (datos de plataforma: prismaRoot)
 import { prismaRoot } from "../../config/database.ts";
 import { PLANS } from "../../config/plans.ts";
+import { MAIN_LOCATION } from "../locations/location.service.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { listUserCompanies } from "../auth/auth.service.ts";
@@ -43,6 +44,7 @@ export async function createCompany(userId: string, name: string, currency?: "CR
   }
   return prismaRoot.$transaction(async (tx) => {
     const company = await tx.company.create({ data: { name, ownerId: userId, ...(currency && { currency }) } });
+    await tx.location.create({ data: MAIN_LOCATION(company.id) });
     await tx.membership.create({ data: { userId, companyId: company.id, role: "ADMIN" } });
     return { id: company.id, name: company.name, role: "ADMIN" as const, isOwner: true };
   });

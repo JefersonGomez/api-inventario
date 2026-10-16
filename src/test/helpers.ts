@@ -27,7 +27,11 @@ export async function createUser(role: Role, companyId?: string) {
   const user = await prismaRoot.user.create({
     data: { name: `${role} test ${++seq}`, email: `user${seq}-${Date.now()}@test.com`, passwordHash: await bcrypt.hash("123456", 4) },
   });
-  const cid = companyId ?? (await prismaRoot.company.create({ data: { name: `Empresa ${seq}`, ownerId: user.id } })).id;
+  let cid = companyId;
+  if (!cid) {
+    cid = (await prismaRoot.company.create({ data: { name: `Empresa ${seq}`, ownerId: user.id } })).id;
+    await prismaRoot.location.create({ data: { companyId: cid, name: "Sucursal principal", type: "BRANCH", code: "001" } });
+  }
   await prismaRoot.membership.create({ data: { userId: user.id, companyId: cid, role } });
   const token = jwt.sign(
     { id: user.id, companyId: cid },
@@ -35,4 +39,9 @@ export async function createUser(role: Role, companyId?: string) {
     { expiresIn: "15m" }
   );
   return { user, companyId: cid, token, auth: { Authorization: `Bearer ${token}` } };
+}
+
+// Ubicación principal de una empresa (la crea createUser al crear la empresa)
+export async function mainLocationId(companyId: string) {
+  return (await prismaRoot.location.findFirstOrThrow({ where: { companyId }, orderBy: { createdAt: "asc" } })).id;
 }

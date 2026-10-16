@@ -1,6 +1,6 @@
 import request from "supertest"
 import app from "../../app.ts"
-import { resetDb, createUser } from "../../test/helpers.ts"
+import { resetDb, createUser, mainLocationId } from "../../test/helpers.ts"
 import { prismaRoot as prisma } from "../../config/database.ts"
 
 describe("POST /movements", () => {
@@ -30,6 +30,10 @@ describe("POST /movements", () => {
       }
     })
     productId = product.id
+    // el stock vive en una ubicación: los 20 están en la principal
+    await prisma.productStock.create({
+      data: { companyId: admin.companyId, productId, locationId: await mainLocationId(admin.companyId), quantity: 20 },
+    })
   })
 
   afterAll(async () => {

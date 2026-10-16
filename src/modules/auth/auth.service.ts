@@ -6,6 +6,7 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import crypto from "crypto";
 import { jwtSecret } from "../../config/env.ts";
 import { TERMS_VERSION } from "../../config/legal.ts";
+import { MAIN_LOCATION } from "../locations/location.service.ts";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
@@ -42,6 +43,7 @@ export async function Register(
       select: userPublic,
     });
     const company = await tx.company.create({ data: { name: companyName, ownerId: user.id } });
+    await tx.location.create({ data: MAIN_LOCATION(company.id) });
     await tx.membership.create({ data: { userId: user.id, companyId: company.id, role: "ADMIN" } });
     await tx.user.update({ where: { id: user.id }, data: { lastCompanyId: company.id } });
     return { ...user, role: "ADMIN" as const, companyId: company.id };

@@ -3,6 +3,7 @@ import { prisma } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
+import { resolveLocation } from "../locations/location.service.ts";
 import { createNotifications } from "../notifications/notifications.persist.ts";
 import { sendEmail, escapeHtml } from "../../shared/email.ts";
 import { formatMoney } from "../../shared/money.ts";
@@ -16,8 +17,10 @@ export async function createPurchaseOrder(
   supplierId: string,
   createdById: string,
   items: { productId: string; quantity: number; unitCost: number }[],
-  fulfilledRequestIds?: string[]
+  fulfilledRequestIds?: string[],
+  locationId?: string // a dónde entra la mercadería (sin indicar: la ubicación activa)
 ) {
+  const location = await resolveLocation(locationId);
   const supplier = await prisma.supplier.findUnique({ where: { id: supplierId } });
   if (!supplier) {
     throw new Error("El proveedor indicado no existe");
@@ -70,6 +73,7 @@ export async function createPurchaseOrder(
       companyId: currentCompanyId(),
       supplierId,
       createdById,
+      locationId: location.id,
       items: {
         create: items.map((i) => ({
           productId: i.productId,
@@ -95,6 +99,7 @@ export async function createPurchaseOrder(
     where: { id },
     include: {
       supplier: true,
+      location: { select: { id: true, name: true } },
       items: { include: { product: true } },
       fulfilledRequests: true,
     },
@@ -111,7 +116,7 @@ export async function listPurchaseOrders(f: PurchaseOrderListQuery) {
     prisma.purchaseOrder.count({ where }),
     prisma.purchaseOrder.findMany({
       where,
-      include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+      include: { supplier: true, location: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
       orderBy: { createdAt: "desc" },
       ...pageArgs(f),
     }),
@@ -122,7 +127,7 @@ export async function listPurchaseOrders(f: PurchaseOrderListQuery) {
 export async function getPurchaseOrderById(id: string) {
   return prisma.purchaseOrder.findUnique({
     where: { id },
-    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+    include: { supplier: true, location: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
   });
 }
 
@@ -166,7 +171,7 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         Number(item.quantity),
         `Recepción de orden de compra ${order.id}`,
         tx,
-        { source: "PURCHASE_RECEIPT", sourceId: order.id }
+        { source: "PURCHASE_RECEIPT", sourceId: order.id, locationId: order.locationId }
       );
     }
 
@@ -197,7 +202,7 @@ export async function receivePurchaseOrder(id: string, userId: string) {
   // fuera de la transacción por lo mismo que en createPurchaseOrder (include de varias relaciones)
   return prisma.purchaseOrder.findUniqueOrThrow({
     where: { id },
-    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+    include: { supplier: true, location: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
   });
 }
 const orderNumber = (id: string) => id.slice(0, 8).toUpperCase();
@@ -244,7 +249,7 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
   const updated = await prisma.purchaseOrder.update({
     where: { id },
     data: { emailedAt: new Date() },
-    include: { supplier: true, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
+    include: { supplier: true, location: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
   });
   await logAudit(userId, "EMAIL", "PurchaseOrder", id, { to: order.supplier.email, testMode });
   return { order: updated, testMode };

@@ -163,11 +163,11 @@ describe("Importar productos", () => {
   it("respeta el límite de productos del plan (las actualizaciones no cuentan)", async () => {
     const category = await prisma.category.create({ data: { companyId: admin.companyId, name: "C" } })
     await prisma.product.createMany({
-      data: Array.from({ length: 198 }, (_, i) => ({ companyId: admin.companyId, sku: `E-${i}`, name: `E${i}`, price: 1, categoryId: category.id })),
+      data: Array.from({ length: 498 }, (_, i) => ({ companyId: admin.companyId, sku: `E-${i}`, name: `E${i}`, price: 1, categoryId: category.id })),
     })
     const res = await send([row(2), row(3), row(4)], false)
     expect(res.body.created).toBe(2)
-    expect(find(res.body, 4).errors[0]).toContain("200")
+    expect(find(res.body, 4).errors[0]).toContain("500")
   })
 
   it("cada empresa importa en la suya", async () => {

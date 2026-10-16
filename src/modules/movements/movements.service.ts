@@ -4,11 +4,17 @@ import type { MovementSource, MovementType } from "../../generated/prisma/enums.
 import { Prisma } from "../../generated/prisma/client.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
+import { resolveLocation } from "../locations/location.service.ts";
+import { locationScope } from "../../shared/tenant.ts";
 import type { MovementListQuery } from "./movements.schema.ts";
 
-// Origen del movimiento: a mano por defecto; las recepciones, ventas, conteos... pasan el suyo
-export type MovementOrigin = { source: MovementSource; sourceId?: string | null };
+// Origen del movimiento: a mano por defecto; las recepciones, ventas, conteos... pasan el suyo.
+// locationId: dónde ocurre (sin indicar, la ubicación activa de quien lo registra).
+export type MovementOrigin = { source: MovementSource; sourceId?: string | null; locationId?: string | null };
 
+// Mueve el stock de un producto en una ubicación (ProductStock) y el total del producto (Product.stock)
+// en la misma transacción. Entradas y salidas suman con increment (atómico): dos ventas a la vez no
+// pueden dejar el stock en negativo, la segunda falla.
 export async function createMovement(
   productId: string,
   userId: string,
@@ -18,70 +24,53 @@ export async function createMovement(
   client: Db = prisma,
   origin: MovementOrigin = { source: "MANUAL" }
 ) {
-  const existProduct = await client.product.findFirst({
-    where: { id: productId, deletedAt: null } // ← nuevo
-  })
+  const location = await resolveLocation(origin.locationId)
+  const product = await client.product.findFirst({ where: { id: productId, deletedAt: null } })
+  if (!product) throw new Error("No se encontró el producto")
+  assertQuantityForUnit(quantity, product.unit);
 
-  if (!existProduct) {
-    throw new Error("No se encontró el producto")
-  }
-
-  assertQuantityForUnit(quantity, existProduct.unit);
-
-  // aritmética con Decimal (stock con hasta 3 decimales): nada de errores de punto flotante
-  let nuevoStock: Prisma.Decimal;
-
-  switch (type) {
-    case "IN":
-      nuevoStock = existProduct.stock.plus(quantity);
-      break;
-
-    case "OUT":
-      nuevoStock = existProduct.stock.minus(quantity);
-      if (nuevoStock.isNegative()) {
-        throw new Error("Stock insuficiente");
-      }
-      break;
-
-    case "ADJUSTMENT":
-      nuevoStock = new Prisma.Decimal(quantity);
-      break;
-
-    default:
+  const run = async (tx: Db) => {
+    const key = { productId_locationId: { productId, locationId: location.id } };
+    let delta: Prisma.Decimal;
+    if (type === "ADJUSTMENT") {
+      // ajuste = la cantidad contada en ESA ubicación; el total cambia por la diferencia
+      const current = await tx.productStock.findUnique({ where: key, select: { quantity: true } });
+      delta = new Prisma.Decimal(quantity).minus(current?.quantity ?? 0);
+      await tx.productStock.upsert({
+        where: key,
+        create: { companyId: currentCompanyId(), productId, locationId: location.id, quantity },
+        update: { quantity },
+      });
+    } else if (type === "IN" || type === "OUT") {
+      delta = new Prisma.Decimal(type === "IN" ? quantity : -quantity);
+      const row = await tx.productStock.upsert({
+        where: key,
+        create: { companyId: currentCompanyId(), productId, locationId: location.id, quantity: delta },
+        update: { quantity: { increment: delta } },
+      });
+      if (row.quantity.isNegative()) throw new Error(`Stock insuficiente en ${location.name}`);
+    } else {
       throw new Error("Tipo de movimiento inválido");
-  }
+    }
+    const movement = await tx.stockMovement.create({
+      data: {
+        companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null,
+        source: origin.source, sourceId: origin.sourceId ?? null, locationId: location.id,
+      },
+    });
+    await tx.product.update({ where: { id: productId }, data: { stock: { increment: delta } } });
+    return movement;
+  };
 
-  // ya no uses prisma.$transaction([...]) acá — cuando client === prisma
-  // (uso normal, fuera de una orden de compra) seguimos queriendo atomicidad,
-  // así que envolvemos con $transaction SOLO si client es el prisma global
-  if (client === prisma) {
-    const result = await prisma.$transaction([
-      prisma.stockMovement.create({
-        data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null, source: origin.source, sourceId: origin.sourceId ?? null }
-      }),
-      prisma.product.update({
-        where: { id: productId },
-        data: { stock: nuevoStock }
-      })
-    ]);
-    return result[0];
-  }
-
-  // cuando viene un `tx` de afuera, ya estamos DENTRO de una transacción
-  // más grande — no envolvemos de nuevo, solo ejecutamos secuencial
-  const movement = await client.stockMovement.create({
-    data: { companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null, source: origin.source, sourceId: origin.sourceId ?? null }
-  });
-  await client.product.update({
-    where: { id: productId },
-    data: { stock: nuevoStock }
-  });
-
-  return movement;
+  // con un tx de afuera ya estamos dentro de una transacción más grande (recepción de orden, venta…)
+  return client === prisma ? prisma.$transaction(run) : run(client);
 }
 
 export async function listMovements(f: MovementListQuery) {
+  const scope = locationScope();
   const where: Prisma.StockMovementWhereInput = {
+    ...(scope && { locationId: { in: scope } }),
+    ...(f.locationId && { AND: [{ locationId: f.locationId }] }),
     ...(f.productId && { productId: f.productId }),
     ...(f.type && { type: f.type }),
     ...(f.source && { source: f.source }),
@@ -97,6 +86,7 @@ export async function listMovements(f: MovementListQuery) {
       include: {
         product: { select: { id: true, name: true, sku: true, unit: true } },
         user: { select: { id: true, name: true, email: true } },
+        location: { select: { id: true, name: true, type: true } },
       },
       orderBy: { createdAt: "desc" },
       ...pageArgs(f),

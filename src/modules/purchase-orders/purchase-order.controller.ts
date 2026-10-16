@@ -5,12 +5,13 @@ import { emit, PURCHASE_MANAGERS, EVERYONE, REQUEST_TOPICS, STOCK_TOPICS } from 
 
 export async function createPurchaseOrderHandler(req: Request, res: Response) {
   try {
-    const { supplierId, items, fulfilledRequestIds } = req.body;
+    const { supplierId, items, fulfilledRequestIds, locationId } = req.body;
     const order = await service.createPurchaseOrder(
       supplierId,
       req.user!.id,
       items,
-      fulfilledRequestIds
+      fulfilledRequestIds,
+      locationId
     );
     emit(PURCHASE_MANAGERS, ["purchase-orders", ...REQUEST_TOPICS]);
     res.status(201).json(order);

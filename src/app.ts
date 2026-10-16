@@ -8,6 +8,7 @@ import { router as profileRouter } from "./modules/users/profile.routes.ts"
 import { router as usersRouter } from "./modules/userGestion/userGestion.routes.ts"
 import { router as supplierRouter  } from "./modules/suppliers/supplier.routes.ts"
 import { router as customerRouter } from "./modules/customers/customer.routes.ts"
+import { router as locationRouter } from "./modules/locations/location.routes.ts"
 import { authorizationRouter } from "./modules/users/pin.routes.ts"
 import { router as productGroupRouter } from "./modules/product-groups/product-group.routes.ts"
 import {purchaseOrderRouter as purchaseOrderRouter} from "./modules/purchase-orders/purchase-order.routes.ts"
@@ -56,6 +57,7 @@ app.use("/uploads", Express.static(path.join(process.cwd(), "uploads")))
 app.use("/users", usersRouter)
 app.use("/suppliers", supplierRouter)
 app.use("/customers", customerRouter)
+app.use("/locations", locationRouter)
 app.use("/authorizations", authorizationRouter)
 app.use("/product-groups", productGroupRouter)
 app.use("/purchase-orders",purchaseOrderRouter)

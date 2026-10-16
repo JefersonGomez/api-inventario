@@ -23,4 +23,5 @@ export const createPurchaseOrderSchema = z.object({
     )
     .nonempty(),
     fulfilledRequestIds: z.array(z.string().uuid()).optional(),
+    locationId: z.uuid().optional(), // a dónde entra la mercadería al recibirla
 });

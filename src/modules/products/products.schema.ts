@@ -27,6 +27,7 @@ export const productsSchemaCreate = z.object({
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
+  locationId: z.uuid().optional(), // dónde entra el stock inicial (sin indicar: la ubicación activa)
 });
 
 export const productsSchemaUpdate = z.object({
@@ -81,6 +82,7 @@ export const productsImportSchema = z.object({
   rows: z.array(importRow).min(1, "El archivo no tiene filas").max(2000, "Máximo 2000 filas por importación"),
   dryRun: z.boolean(),
   options: importOptions.optional(),
+  locationId: z.uuid().optional(), // dónde entra el stock inicial (sin indicar: la ubicación activa)
 });
 
 // GET /products: flat = productos (selector, variantes de un grupo); grouped = productos base con su

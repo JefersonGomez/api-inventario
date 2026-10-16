@@ -10,6 +10,7 @@ export const movementListQuerySchema = z.object({
     source: z.enum(["MANUAL", "INITIAL", "PURCHASE_RECEIPT", "SALE", "RETURN", "COUNT", "TRANSFER"]).optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
+    locationId: z.uuid().optional(), // dentro de las que ve la persona
 })
 export type MovementListQuery = z.infer<typeof movementListQuerySchema>
 
@@ -17,5 +18,6 @@ export const CreateMovementsSchema = z.object({
     productId:z.uuid(),
     type: z.enum(["IN", "OUT", "ADJUSTMENT"]),
     quantity: quantitySchema,
-    reason:z.string().optional()
+    reason:z.string().optional(),
+    locationId: z.uuid().optional(), // sin indicar: la ubicación activa
 })

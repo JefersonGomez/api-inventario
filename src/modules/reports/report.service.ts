@@ -1,16 +1,29 @@
 import { prisma } from "../../config/database.ts"
+import { locationScope } from "../../shared/tenant.ts"
+import { lowStockProductIds, scopedStock, withScopedStock } from "../locations/stock-scope.ts"
+
+// Ubicaciones (Bloque 4): con "todas" se usa el stock total del producto; con una ubicación elegida
+// (o si la persona solo trabaja en algunas) cuentan solo el stock y los movimientos de ahí.
+const movementScope = () => {
+  const scope = locationScope()
+  return scope ? { locationId: { in: scope } } : {}
+}
 
 // Panel: los números ya calculados (antes el navegador bajaba todos los productos y movimientos).
 // since = inicio del mes en la zona del navegador (el servidor puede estar en UTC).
 // Las solicitudes respetan lo que ve cada rol: el empleado cuenta solo las suyas.
 export async function getDashboardSummary(user: { id: string; permissions: string[] }, since: Date) {
   const mine = user.permissions.includes("purchases.manage") ? {} : { requestedById: user.id }
+  const scope = locationScope()
   const [units, dispatched, byCategory, categories, recent, requestCounts] = await Promise.all([
-    prisma.product.aggregate({ where: { deletedAt: null }, _sum: { stock: true } }),
-    prisma.stockMovement.aggregate({ where: { type: "OUT", createdAt: { gte: since } }, _sum: { quantity: true } }),
-    prisma.product.groupBy({ by: ["categoryId"], where: { deletedAt: null }, _sum: { stock: true } }),
+    scope
+      ? prisma.productStock.aggregate({ where: { locationId: { in: scope }, product: { deletedAt: null } }, _sum: { quantity: true } }).then((r) => ({ _sum: { stock: r._sum.quantity } }))
+      : prisma.product.aggregate({ where: { deletedAt: null }, _sum: { stock: true } }),
+    prisma.stockMovement.aggregate({ where: { type: "OUT", createdAt: { gte: since }, ...movementScope() }, _sum: { quantity: true } }),
+    scope ? stockByCategoryIn(scope) : prisma.product.groupBy({ by: ["categoryId"], where: { deletedAt: null }, _sum: { stock: true } }),
     prisma.category.findMany({ select: { id: true, name: true } }),
     prisma.stockMovement.findMany({
+      where: movementScope(),
       orderBy: { createdAt: "desc" },
       take: 4,
       include: { product: { select: { id: true, name: true, sku: true, unit: true } } },
@@ -30,7 +43,22 @@ export async function getDashboardSummary(user: { id: string; permissions: strin
   }
 }
 
+// Stock por categoría dentro de unas ubicaciones (misma forma que el groupBy de Product)
+async function stockByCategoryIn(scope: string[]) {
+  const products = await prisma.product.findMany({ where: { deletedAt: null }, select: { id: true, categoryId: true } })
+  const stock = await scopedStock(products.map((p) => p.id), scope)
+  const sums = new Map<string, number>()
+  for (const p of products) sums.set(p.categoryId, (sums.get(p.categoryId) ?? 0) + (stock.get(p.id) ?? 0))
+  return [...sums].map(([categoryId, stock]) => ({ categoryId, _sum: { stock } }))
+}
+
 export async function getLowStockReport() {
+  const scope = locationScope()
+  if (scope) {
+    const ids = await lowStockProductIds(scope)
+    const products = await prisma.product.findMany({ where: { id: { in: ids }, deletedAt: null }, include: { category: true } })
+    return withScopedStock(products, scope)
+  }
   const allProducts = await prisma.product.findMany({
     where: { deletedAt: null },
     include: { category: true }
@@ -54,9 +82,10 @@ export async function getMovementsReport(from?: string, to?: string) {
   }
 
   const movements = await prisma.stockMovement.findMany({
-    where: whereClause,
+    where: { ...whereClause, ...movementScope() },
     include: {
       product: true,
+      location: { select: { id: true, name: true } },
       user: {
         select: { id: true, name: true, email: true }
       }
@@ -72,10 +101,10 @@ export async function getMovementsReport(from?: string, to?: string) {
 // para avisarlo en pantalla, en vez de inventarles un valor.
 // `retailValue` (stock × precio de venta) queda como referencia de lo que valdría vendido.
 export async function getInventoryValueReport() {
-  const products = await prisma.product.findMany({
+  const products = await withScopedStock(await prisma.product.findMany({
     where: { deletedAt: null },
-    select: { stock: true, price: true, cost: true },
-  });
+    select: { id: true, stock: true, price: true, cost: true },
+  }), locationScope());
 
   let totalValue = 0;
   let retailValue = 0;
@@ -99,15 +128,15 @@ export async function getInventoryValueReport() {
 export async function getInventoryValueBreakdown(daysThreshold = 60) {
   const cutoffDate = new Date(Date.now() - daysThreshold * 24 * 60 * 60 * 1000);
 
-  const allProducts = await prisma.product.findMany({
+  const allProducts = await withScopedStock(await prisma.product.findMany({
     where: { deletedAt: null },
     select: { id: true, name: true, sku: true, stock: true, cost: true },
-  });
+  }), locationScope());
 
   // Traemos, en una sola consulta, los productos que SÍ tuvieron
   // movimiento reciente (evita un findMany por producto, un problema N+1)
   const recentMovements = await prisma.stockMovement.findMany({
-    where: { createdAt: { gte: cutoffDate } },
+    where: { createdAt: { gte: cutoffDate }, ...movementScope() },
     select: { productId: true },
     distinct: ["productId"],
   });
@@ -152,10 +181,10 @@ export async function getInventoryValueBreakdown(daysThreshold = 60) {
 export async function getStockForecast(velocityWindowDays = 30, alertThresholdDays = 14) {
   const cutoffDate = new Date(Date.now() - velocityWindowDays * 24 * 60 * 60 * 1000);
 
-  const products = await prisma.product.findMany({
+  const products = await withScopedStock(await prisma.product.findMany({
     where: { deletedAt: null },
     select: { id: true, name: true, sku: true, stock: true },
-  });
+  }), locationScope());
 
   // Suma de unidades vendidas (OUT) por producto, en una sola consulta
   const salesByProduct = await prisma.stockMovement.groupBy({
@@ -163,6 +192,7 @@ export async function getStockForecast(velocityWindowDays = 30, alertThresholdDa
     where: {
       type: "OUT",
       createdAt: { gte: cutoffDate },
+      ...movementScope(),
     },
     _sum: { quantity: true },
   });

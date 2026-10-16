@@ -4,10 +4,10 @@ import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
 
 export async function createMovementController(req: Request, res: Response) {
   try {
-    const { productId, type, quantity, reason } = req.body;
+    const { productId, type, quantity, reason, locationId } = req.body;
     const userId = req.user!.id;
 
-    const movement = await createMovement(productId, userId, type, quantity, reason);
+    const movement = await createMovement(productId, userId, type, quantity, reason, undefined, { source: "MANUAL", locationId });
     emit(EVERYONE, STOCK_TOPICS);
     res.status(201).json(movement);
   } catch (error) {

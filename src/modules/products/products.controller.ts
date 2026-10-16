@@ -126,7 +126,7 @@ export async function getExpiringSoonProductsHandler(req: Request, res: Response
 }
 export async function importProductsHandler(req: Request, res: Response) {
   try {
-    const result = await importProducts(req.body.rows, req.body.dryRun, req.user!.id, req.body.options ?? {});
+    const result = await importProducts(req.body.rows, req.body.dryRun, req.user!.id, req.body.options ?? {}, req.body.locationId);
     if (!result.dryRun && result.created + result.updated > 0) emit(EVERYONE, PRODUCT_TOPICS);
     res.status(result.dryRun ? 200 : 201).json(result);
   } catch (error) {

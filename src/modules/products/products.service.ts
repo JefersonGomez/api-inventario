@@ -6,6 +6,9 @@ import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { getCompany } from "../company/company.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
+import { resolveLocation } from "../locations/location.service.ts";
+import { lowStockProductIds, scopedStock, withScopedStock } from "../locations/stock-scope.ts";
+import { locationScope } from "../../shared/tenant.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import type { z } from "zod";
 import type { productsSchemaCreate, productsSchemaUpdate } from "./products.schema.ts";
@@ -53,6 +56,7 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
     throw new Error("La categoría es inválida");
   }
 
+  const location = await resolveLocation(input.locationId);
   // el producto nace con stock 0 y el inicial entra como movimiento (origen INITIAL): así
   // toda unidad en stock tiene un movimiento que la explica
   const { id } = await prisma.$transaction(async (tx) => {
@@ -79,7 +83,9 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
       select: { id: true },
     });
     if (stock > 0) {
-      await createMovement(created.id, userId, "IN", stock, undefined, tx, { source: "INITIAL" });
+      await createMovement(created.id, userId, "IN", stock, undefined, tx, { source: "INITIAL", locationId: location.id });
+    } else {
+      await tx.productStock.create({ data: { companyId: currentCompanyId(), productId: created.id, locationId: location.id } });
     }
     return created;
   });
@@ -87,15 +93,16 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
   return prisma.product.findUniqueOrThrow({ where: { id }, include: withSupplier });
 }
 
-// Filtros de producto compartidos por las dos vistas. lowStock compara dos columnas (stock <= minStock).
-function productWhere(f: ProductListQuery): Prisma.ProductWhereInput {
+// Filtros de producto compartidos por las dos vistas. lowStock compara dos columnas (stock <= minStock);
+// con una ubicación elegida, lowIds = los que están bajo su mínimo ahí.
+function productWhere(f: ProductListQuery, lowIds: string[] | null = null): Prisma.ProductWhereInput {
   return {
     deletedAt: null,
     ...(f.categoryId && { categoryId: f.categoryId }),
     ...(f.supplierId && { supplierId: f.supplierId }),
     ...(f.groupId && { groupId: f.groupId }),
     ...(f.pending !== undefined && { pendingReview: f.pending }),
-    ...(f.lowStock && { stock: { lte: prismaRoot.product.fields.minStock } }),
+    ...(f.lowStock && (lowIds ? { id: { in: lowIds } } : { stock: { lte: prismaRoot.product.fields.minStock } })),
     ...(f.q && {
       OR: [
         { name: contains(f.q) },
@@ -111,31 +118,34 @@ function productWhere(f: ProductListQuery): Prisma.ProductWhereInput {
 const hasFilters = (f: ProductListQuery) =>
   Boolean(f.q || f.categoryId || f.supplierId || f.pending !== undefined || f.lowStock);
 
+// Con una ubicación elegida (o si la persona solo trabaja en algunas), el stock que se ve es el de ahí
 export async function listProducts(f: ProductListQuery) {
-  if (f.view === "grouped" && !f.groupId) return listProductsGrouped(f);
-  const where = productWhere(f);
+  const scope = locationScope();
+  const lowIds = f.lowStock && scope ? await lowStockProductIds(scope) : null;
+  if (f.view === "grouped" && !f.groupId) return listProductsGrouped(f, scope, lowIds);
+  const where = productWhere(f, lowIds);
   const [total, items] = await Promise.all([
     prisma.product.count({ where }),
     prisma.product.findMany({ where, include: withSupplier, orderBy: [{ name: "asc" }, { sku: "asc" }], ...pageArgs(f) }),
   ]);
-  return pageResult(items, total, f);
+  return pageResult(await withScopedStock(items, scope), total, f);
 }
 
 // Vista de la tabla: productos base (con el resumen de sus variantes) y después productos sueltos,
 // paginados como una sola lista. Las variantes de cada grupo se piden aparte al desplegarlo.
-async function listProductsGrouped(f: ProductListQuery) {
+async function listProductsGrouped(f: ProductListQuery, scope: string[] | null, lowIds: string[] | null) {
   const filtered = hasFilters(f);
   const groupWhere: Prisma.ProductGroupWhereInput = {
     deletedAt: null,
     // con filtros, un producto base entra si alguna variante cumple (o si la búsqueda coincide con su nombre)
     ...(filtered && {
       OR: [
-        { products: { some: productWhere(f) } },
+        { products: { some: productWhere(f, lowIds) } },
         ...(f.q && !(f.categoryId || f.supplierId || f.pending !== undefined || f.lowStock) ? [{ name: contains(f.q) }] : []),
       ],
     }),
   };
-  const looseWhere: Prisma.ProductWhereInput = { ...productWhere(f), groupId: null };
+  const looseWhere: Prisma.ProductWhereInput = { ...productWhere(f, lowIds), groupId: null };
 
   const [groupTotal, looseTotal, pendingCount] = await Promise.all([
     prisma.productGroup.count({ where: groupWhere }),
@@ -157,17 +167,17 @@ async function listProductsGrouped(f: ProductListQuery) {
       })
     : [];
 
-  const summaries = await summarizeGroups(groups.map((g) => g.id));
+  const summaries = await summarizeGroups(groups.map((g) => g.id), scope);
   const items = [
     ...groups.map((g) => ({ kind: "group" as const, ...g, ...summaries.get(g.id) })),
-    ...loose.map((p) => ({ kind: "product" as const, ...p })),
+    ...(await withScopedStock(loose, scope)).map((p) => ({ kind: "product" as const, ...p })),
   ];
   return { ...pageResult(items, groupTotal + looseTotal, f), pendingCount };
 }
 
 // Resumen de las variantes de cada producto base: cuántas, rango de precios (sin las "Por
 // completar"), stock total (si todas usan la misma unidad) y cuántas están bajo el mínimo
-async function summarizeGroups(ids: string[]) {
+async function summarizeGroups(ids: string[], scope: string[] | null = null) {
   const empty = { variantCount: 0, minPrice: null as number | null, maxPrice: null as number | null, totalStock: null as number | null, unit: null as string | null, lowCount: 0 };
   const out = new Map(ids.map((id) => [id, { ...empty }]));
   if (!ids.length) return out;
@@ -183,6 +193,18 @@ async function summarizeGroups(ids: string[]) {
   for (const r of low) out.get(r.groupId!)!.lowCount = r._count._all;
   const unitsBy = new Map<string, string[]>();
   for (const r of units) unitsBy.set(r.groupId!, [...(unitsBy.get(r.groupId!) ?? []), r.unit]);
+  // con ubicación elegida: stock y "bajo mínimo" de las variantes en esa ubicación
+  if (scope) {
+    const variants = await prisma.product.findMany({ where: base, select: { id: true, groupId: true, minStock: true } });
+    const stock = await scopedStock(variants.map((v) => v.id), scope);
+    for (const s of out.values()) Object.assign(s, { totalStock: 0, lowCount: 0 });
+    for (const v of variants) {
+      const s = out.get(v.groupId!)!;
+      const qty = stock.get(v.id) ?? 0;
+      s.totalStock! += qty;
+      if (qty <= Number(v.minStock)) s.lowCount++;
+    }
+  }
   for (const [id, list] of unitsBy) {
     const s = out.get(id)!;
     if (list.length === 1) s.unit = list[0]!;
@@ -200,7 +222,15 @@ export async function getProductById(idProduct: string) {
   if (!existProduct) {
     throw new Error("No se encontró el producto");
   }
-  return existProduct;
+  // desglose por ubicación (solo las que ve la persona); leído aparte: nada de include múltiple en una consulta
+  const scope = locationScope();
+  const stocks = await prisma.productStock.findMany({
+    where: { productId: idProduct, ...(scope && { locationId: { in: scope } }) },
+    select: { quantity: true, location: { select: { id: true, name: true, type: true } } },
+    orderBy: { location: { name: "asc" } },
+  });
+  const [scoped] = await withScopedStock([existProduct], scope);
+  return { ...scoped!, stocks };
 }
 
 export async function getProductByBarcode(code: string) {
@@ -208,7 +238,7 @@ export async function getProductByBarcode(code: string) {
     where: { barcode: code, deletedAt: null }, // ← nuevo, y findUnique → findFirst
     include: withSupplier
   });
-  return product;
+  return product && (await withScopedStock([product], locationScope()))[0]!;
 }
 
 export async function updateProduct(id: string, input: ProductUpdateInput, userId: string) {

@@ -9,6 +9,8 @@ export const updateAccessSchema = z
     role: z.enum(["ADMIN", "MANAGER", "EMPLOYE", "CASHIER", "ACCOUNTANT"]),
     grantedPermissions: z.array(permission).max(PERMISSIONS.length).default([]),
     revokedPermissions: z.array(permission).max(PERMISSIONS.length).default([]),
+    // dónde trabaja (vacío = en todas); al administrador no se le limita
+    locationIds: z.array(z.uuid()).max(200).default([]),
   })
   .refine((d) => !d.grantedPermissions.some((p) => d.revokedPermissions.includes(p)), {
     message: "Un permiso no puede estar dado y quitado a la vez",

@@ -14,6 +14,7 @@
 // El stock inicial de los productos nuevos entra como movimiento (origen INITIAL).
 // Lo que no tiene arreglo (sin nombre, textos demasiado largos, límite del plan) queda como error.
 // Sin opciones (llamada directa a la API) todo se trata como error: el modo estricto.
+import { resolveLocation } from "../locations/location.service.ts";
 import { prisma } from "../../config/database.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
@@ -98,7 +99,7 @@ const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const isQty = (v: number | undefined, unit: UnitOfMeasure) =>
   v === undefined || (Number.isFinite(v) && v >= 0 && (unit === "UNIT" ? Number.isInteger(v) : roundQty(v) === v));
 
-export async function importProducts(rows: ImportRow[], dryRun: boolean, userId: string, opts: Partial<ImportOptions> = {}) {
+export async function importProducts(rows: ImportRow[], dryRun: boolean, userId: string, opts: Partial<ImportOptions> = {}, locationId?: string) {
   const options = { ...STRICT_OPTIONS, ...opts };
   const defaultCategory = options.defaultCategory.trim();
 
@@ -337,6 +338,7 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
   if (dryRun || toSave.length === 0) return { dryRun, created: 0, updated: 0, summary, rows: results };
 
   const companyId = currentCompanyId();
+  const location = await resolveLocation(locationId);
   await prisma.$transaction(async (tx) => {
     for (const [k, name] of newCategories) {
       const c = await tx.category.create({ data: { companyId, name } });
@@ -370,13 +372,17 @@ export async function importProducts(rows: ImportRow[], dryRun: boolean, userId:
           cabys: data.cabys,
         })),
       });
-      // el stock inicial queda explicado por un movimiento, igual que al crear un producto a mano
+      // nacen manejados en la ubicación elegida (con su stock, aunque sea 0) y el stock inicial queda
+      // explicado por un movimiento, igual que al crear un producto a mano
+      await tx.productStock.createMany({
+        data: created.map((p) => ({ companyId, productId: p.id, locationId: location.id, quantity: p.stock })),
+      });
       const initial = created.filter((p) => Number(p.stock) > 0);
       if (initial.length) {
         await tx.stockMovement.createMany({
           data: initial.map((p) => ({
             companyId, productId: p.id, userId, type: "IN" as const, quantity: p.stock,
-            reason: "Stock inicial (importación)", source: "INITIAL" as const,
+            reason: "Stock inicial (importación)", source: "INITIAL" as const, locationId: location.id,
           })),
         });
       }

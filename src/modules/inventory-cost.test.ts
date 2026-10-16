@@ -2,7 +2,7 @@
 import request from "supertest"
 import app from "../app.ts"
 import { prismaRoot as prisma } from "../config/database.ts"
-import { resetDb, createUser } from "../test/helpers.ts"
+import { resetDb, createUser, mainLocationId } from "../test/helpers.ts"
 
 describe("Valor del inventario a costo", () => {
   let admin: Awaited<ReturnType<typeof createUser>>
@@ -76,12 +76,13 @@ describe("Valor del inventario a costo", () => {
     const idle = await makeProduct({ sku: "J", stock: 3, cost: 20 }) // 60
     const idleNoCost = await makeProduct({ sku: "K", stock: 2, cost: null })
     await prisma.stockMovement.create({
-      data: { companyId: admin.companyId, productId: withMove.id, userId: admin.user.id, type: "IN", quantity: 1 },
+      data: { companyId: admin.companyId, productId: withMove.id, userId: admin.user.id, type: "IN", quantity: 1, locationId: await mainLocationId(admin.companyId) },
     })
     // movimientos viejos de los otros dos: ya no cuentan como actividad reciente
+    const loc = await mainLocationId(admin.companyId)
     await prisma.stockMovement.createMany({
       data: [idle.id, idleNoCost.id].map((productId) => ({
-        companyId: admin.companyId, productId, userId: admin.user.id, type: "IN" as const, quantity: 1,
+        companyId: admin.companyId, productId, userId: admin.user.id, type: "IN" as const, quantity: 1, locationId: loc,
         createdAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
       })),
     })

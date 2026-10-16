@@ -190,13 +190,13 @@ describe("Sesión, cambio de empresa y planes", () => {
     const admin = await createUser("ADMIN")
     const category = await prisma.category.create({ data: { companyId: admin.companyId, name: "C" } })
     await prisma.product.createMany({
-      data: Array.from({ length: 200 }, (_, i) => ({
+      data: Array.from({ length: 500 }, (_, i) => ({
         companyId: admin.companyId, sku: `P-${i}`, name: `P${i}`, price: 1, stock: 0, minStock: 0, categoryId: category.id,
       })),
     })
     const over = await request(app).post("/products").set(admin.auth)
-      .send({ sku: "P-200", name: "Uno más", price: 1, stock: 0, minStock: 0, categoryId: category.id })
+      .send({ sku: "P-500", name: "Uno más", price: 1, stock: 0, minStock: 0, categoryId: category.id })
     expect(over.status).toBe(400)
-    expect(over.body.error).toContain("200")
+    expect(over.body.error).toContain("500")
   })
 })
