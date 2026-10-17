@@ -2,6 +2,7 @@ import * as purchaseRequestService from "../purchase-requests/purchase-request.s
 import * as productService from "../products/products.service.ts";
 import * as reportsService from "../reports/report.service.ts";
 import { getUserNotifications } from "./notifications.persist.ts";
+import { getExpiringLots } from "../lots/lot.service.ts";
 import { pinStatus } from "../users/pin.service.ts";
 import { needsPin } from "../../config/permissions.ts";
 
@@ -9,12 +10,13 @@ import { needsPin } from "../../config/permissions.ts";
 // `message` se conserva como texto plano para quien no use los campos nuevos.
 async function getDerivedNotifications() {
 
-    const [expiringSoonRequests, pendingRequests, approvedUnfulfilled, expiringSoonProducts, lowStockProducts] = await Promise.all([
+    const [expiringSoonRequests, pendingRequests, approvedUnfulfilled, expiringSoonProducts, lowStockProducts, expiringLots] = await Promise.all([
         purchaseRequestService.getExpiringSoonRequests(3),
         purchaseRequestService.getPendingRequests(),
         purchaseRequestService.getApprovedUnfulfilledRequests(),
         productService.getExpiringSoonProducts(7),
         reportsService.getLowStockReport(),
+        getExpiringLots(7), // productos con lotes: avisa por lote
     ])
 
     // lo más agotado primero (stock/mínimo más bajo)
@@ -61,6 +63,15 @@ async function getDerivedNotifications() {
       message: `"${p.name}" está por vencer`,
       link: `/products?highlight=${p.id}`,
       createdAt: p.expirationDate,
+    })),
+    ...expiringLots.map((l) => ({
+      id: `lot-expiring-${l.id}`,
+      type: "productExpiring" as const,
+      title: `${l.product.name} · ${l.code}`,
+      meta: { expirationDate: l.expiresAt, lot: l.code, location: l.location.name },
+      message: `Lote ${l.code} de "${l.product.name}" está por vencer`,
+      link: `/products?highlight=${l.product.id}`,
+      createdAt: l.expiresAt,
     })),
     ...worstFirst.map((p) => ({
       id: `product-lowstock-${p.id}`,

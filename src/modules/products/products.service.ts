@@ -9,6 +9,7 @@ import { createMovement } from "../movements/movements.service.ts";
 import { resolveLocation } from "../locations/location.service.ts";
 import { lowStockProductIds, scopedStock, withScopedStock } from "../locations/stock-scope.ts";
 import { inTransitByProduct } from "../transfers/transfer.service.ts";
+import { lotsOf, setTracksLots } from "../lots/lot.service.ts";
 import { locationScope } from "../../shared/tenant.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import type { z } from "zod";
@@ -80,11 +81,12 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
         expirationDate: expirationDate ?? null,
         supplierId: supplierId ?? null,
         cost: cost ?? null,
+        tracksLots: input.tracksLots ?? false,
       },
       select: { id: true },
     });
     if (stock > 0) {
-      await createMovement(created.id, userId, "IN", stock, undefined, tx, { source: "INITIAL", locationId: location.id });
+      await createMovement(created.id, userId, "IN", stock, undefined, tx, { source: "INITIAL", locationId: location.id, lot: input.lot });
     } else {
       await tx.productStock.create({ data: { companyId: currentCompanyId(), productId: created.id, locationId: location.id } });
     }
@@ -232,7 +234,8 @@ export async function getProductById(idProduct: string) {
   });
   const [scoped] = await withScopedStock([existProduct], scope);
   const inTransit = (await inTransitByProduct([idProduct])).get(idProduct) ?? 0; // enviado y sin recibir
-  return { ...scoped!, stocks, inTransit };
+  const lots = existProduct.tracksLots ? await lotsOf(idProduct) : [];
+  return { ...scoped!, stocks, inTransit, lots };
 }
 
 export async function getProductByBarcode(code: string) {
@@ -256,16 +259,20 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
     throw new Error("Categoría ingresada inválida");
   }
 
-  const current = await prisma.product.findFirst({ where: { id, deletedAt: null }, select: { stock: true, unit: true } });
+  const current = await prisma.product.findFirst({ where: { id, deletedAt: null }, select: { stock: true, unit: true, tracksLots: true } });
   if (!current) throw new Error("No se encontró el producto");
   const finalUnit = unit ?? current.unit;
   // pasar a "por unidad" con stock fraccionado (p. ej. 2,5 kg) dejaría un stock imposible
   assertQuantityForUnit(Number(current.stock), finalUnit, "El stock actual");
   assertQuantityForUnit(minStock, finalUnit, "El stock mínimo");
 
+  // empezar o dejar de manejar lotes: el stock que ya hay pasa a un lote INICIAL (o se borran los lotes)
+  const lotsChange = input.tracksLots !== undefined && input.tracksLots !== current.tracksLots;
+
   // sin include: un update con varias relaciones incluidas corre como transacción interna y adapter-pg
   // las carga en paralelo sobre la misma conexión (aviso de pg). Se lee completo al final.
-  await prisma.product.update({
+  await prisma.$transaction(async (tx) => {
+  await tx.product.update({
     where: { id: id },
     data: {
       name: name,
@@ -282,11 +289,15 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
       ...(taxRate !== undefined && { taxRate }),
       ...(cabys !== undefined && { cabys: cabys || null }),
       ...(variant && { groupId: variant.groupId, attributes: variant.attributes ?? Prisma.DbNull }),
+      ...(lotsChange && { tracksLots: input.tracksLots! }),
     },
+  });
+  if (lotsChange) await setTracksLots(tx, id, input.tracksLots!, expirationDate ?? null);
   });
 
   await logAudit(userId, "UPDATE", "Product", id, {
     name, barcode, description, price, minStock, categoryId, expirationDate, supplierId, cost, unit, taxRate, cabys,
+    ...(lotsChange && { tracksLots: input.tracksLots }),
     ...(variant && { groupId: variant.groupId, attributes: variant.attributes }),
   });
 
@@ -354,6 +365,7 @@ export async function getExpiringSoonProducts(daysAhead = 7) {
   return prisma.product.findMany({
     where: {
       deletedAt: null,
+      tracksLots: false, // los que manejan lotes avisan por lote (getExpiringLots)
       expirationDate: { not: null, gte: now, lte: limit },
     },
     orderBy: { expirationDate: "asc" },

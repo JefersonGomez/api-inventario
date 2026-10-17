@@ -11,7 +11,7 @@ import { getCompany } from "../company/company.service.ts";
 import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
-import type { PurchaseOrderListQuery } from "./purchase-order.schema.ts";
+import type { PurchaseOrderListQuery, ReceiveLine } from "./purchase-order.schema.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -141,7 +141,7 @@ const ORDER_INCLUDE = {
 // Recepción (en partes, decisión del usuario del 16-oct-2026): cada recepción anota lo que llegó por
 // línea (sin items = todo lo pendiente). La orden queda PARTIAL hasta completarse (RECEIVED). Cada parte
 // entra a la ubicación de la orden con su movimiento y recalcula el costo promedio con lo que llegó.
-export async function receivePurchaseOrder(id: string, userId: string, lines?: { itemId: string; quantity: number }[]) {
+export async function receivePurchaseOrder(id: string, userId: string, lines?: ReceiveLine[]) {
   await prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
@@ -158,6 +158,7 @@ export async function receivePurchaseOrder(id: string, userId: string, lines?: {
 
     const pendingOf = (item: (typeof order.items)[number]) => Number(new Prisma.Decimal(item.quantity).minus(item.receivedQuantity));
     const given = lines ? new Map(lines.map((l) => [l.itemId, l.quantity])) : null;
+    const lotOf = new Map((lines ?? []).map((l) => [l.itemId, l.lot])); // productos con lotes
     if (given) {
       for (const itemId of given.keys()) {
         if (!order.items.some((i) => i.id === itemId)) throw new Error("Alguna línea no es de esta orden");
@@ -196,7 +197,7 @@ export async function receivePurchaseOrder(id: string, userId: string, lines?: {
         qty,
         `Recepción de orden de compra ${order.id}`,
         tx,
-        { source: "PURCHASE_RECEIPT", sourceId: order.id, locationId: order.locationId }
+        { source: "PURCHASE_RECEIPT", sourceId: order.id, locationId: order.locationId, lot: lotOf.get(item.id) }
       );
       await tx.purchaseOrderItem.update({ where: { id: item.id }, data: { receivedQuantity: { increment: qty } } });
     }

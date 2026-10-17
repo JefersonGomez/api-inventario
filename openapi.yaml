@@ -30,6 +30,11 @@ info:
     **Planes**: el plan del dueño (`BASIC`, `PRO`, `BUSINESS`) limita empresas; sucursales, cajas, usuarios y
     productos se cuentan **por empresa** (las bodegas no tienen límite).
 
+    **Lotes**: los productos con `tracksLots` llevan su stock por lote (código + vencimiento) en cada ubicación. Toda
+    entrada pide `lot` (movimiento, stock inicial, recepción de orden); las salidas toman primero el que vence antes
+    (FEFO) y el movimiento guarda en `lots` de cuáles salió. En una transferencia los lotes viajan; el sobrante de un
+    conteo entra a "SIN-LOTE". Al activar `tracksLots` el stock que ya había pasa a un lote "INICIAL". Avisos por lote.
+
     **Ubicaciones (sucursales y bodegas)**: el stock se lleva por ubicación; `Product.stock` es el total. Cada empresa
     nace con su "Sucursal principal" (código 001). La persona trabaja en las ubicaciones que le asigna el admin
     (`PATCH /users/{id}/access` → `locationIds`; vacío = todas; el ADMIN, todas) y elige en cuál está con el
@@ -256,6 +261,21 @@ components:
         address: { type: string, nullable: true }
         isActive: { type: boolean }
 
+    LotInput:
+      type: object
+      description: Productos con lotes (tracksLots). En las salidas no hace falta (se toma primero el que vence antes).
+      required: [code]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 40 }
+        expiresAt: { type: string, format: date-time, nullable: true, description: "null = sin vencimiento conocido (sale de último)" }
+
+    LotMove:
+      type: object
+      properties:
+        code: { type: string }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        quantity: { type: number }
+
     StockCount:
       type: object
       properties:
@@ -449,6 +469,8 @@ components:
       required: [sku, name, price, stock, minStock, categoryId]
       properties:
         locationId: { type: string, format: uuid, description: "Dónde entra el stock inicial (sin indicar, la ubicación activa)" }
+        tracksLots: { type: boolean, description: "Maneja lotes con vencimiento (alimentos, medicinas...)" }
+        lot: { $ref: '#/components/schemas/LotInput' }
         sku: { type: string, minLength: 1 }
         barcode: { type: string }
         name: { type: string, minLength: 1 }
@@ -564,6 +586,7 @@ components:
         sourceId: { type: string, nullable: true }
         locationId: { type: string, format: uuid }
         location: { type: object, properties: { id: { type: string }, name: { type: string }, type: { type: string } } }
+        lots: { type: array, nullable: true, items: { $ref: '#/components/schemas/LotMove' }, description: Productos con lotes; una salida puede tocar varios }
         createdAt: { type: string, format: date-time }
         product: { $ref: '#/components/schemas/Product' }
 
@@ -576,6 +599,7 @@ components:
         quantity: { type: number, exclusiveMinimum: true, minimum: 0, description: "En ADJUSTMENT: la cantidad contada en ESA ubicación" }
         reason: { type: string }
         locationId: { type: string, format: uuid, description: "Sin indicar: la ubicación activa. OUT falla si no alcanza en esa ubicación" }
+        lot: { $ref: '#/components/schemas/LotInput' }
 
     PurchaseRequestStatus:
       type: string
@@ -2458,6 +2482,7 @@ paths:
                     properties:
                       itemId: { type: string, format: uuid }
                       quantity: { type: number, minimum: 0, description: No más de lo que falta }
+                      lot: { $ref: '#/components/schemas/LotInput' }
       responses:
         '200':
           description: Orden con lo recibido

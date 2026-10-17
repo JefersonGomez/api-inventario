@@ -207,6 +207,9 @@ model Product {
   stocks             ProductStock[]
   transferItems      StockTransferItem[]
   countItems         StockCountItem[]
+  // alimentos, medicinas...: el stock se lleva por lote con su vencimiento y las salidas toman el que vence antes
+  tracksLots         Boolean             @default(false)
+  lots               ProductLot[]
   categoryId         String
   supplierId         String?
   deletedAt          DateTime?
@@ -234,6 +237,7 @@ model StockMovement {
   source     MovementSource @default(MANUAL)
   sourceId   String?
   locationId String // dónde ocurrió
+  lots       Json? // productos con lotes: [{ code, expiresAt, quantity }] (una salida puede tocar varios)
   location   Location       @relation(fields: [locationId], references: [id])
   createdAt  DateTime       @default(now())
   product    Product        @relation(fields: [productId], references: [id])
@@ -400,6 +404,7 @@ model Company {
   productStocks    ProductStock[]
   transfers        StockTransfer[]
   stockCounts      StockCount[]
+  productLots      ProductLot[]
 
   @@index([ownerId])
 }
@@ -581,6 +586,7 @@ model Location {
   transfersOut   StockTransfer[] @relation("TransferFrom")
   transfersIn    StockTransfer[] @relation("TransferTo")
   counts         StockCount[]
+  lots           ProductLot[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -639,6 +645,7 @@ model StockTransferItem {
   product          Product       @relation(fields: [productId], references: [id])
   quantity         Decimal       @db.Decimal(14, 3) // enviado
   receivedQuantity Decimal?      @db.Decimal(14, 3) // lo que llegó; la diferencia es faltante (sale del inventario)
+  lots             Json? // productos con lotes: los que salieron del origen (en orden de vencimiento)
 }
 
 enum StockCountStatus {
@@ -682,4 +689,23 @@ model StockCountItem {
   countedAt       DateTime?
 
   @@unique([countId, productId])
+}
+
+// Lote de un producto en una ubicación (solo productos con tracksLots). La suma de sus lotes es el
+// ProductStock de esa ubicación. Las salidas consumen primero el que vence antes (FEFO).
+model ProductLot {
+  id         String    @id @default(uuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id])
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id])
+  locationId String
+  location   Location  @relation(fields: [locationId], references: [id])
+  code       String // código del lote del proveedor (o "SIN-LOTE" en ajustes sin dato)
+  expiresAt  DateTime? // null = sin vencimiento conocido (sale de último)
+  quantity   Decimal   @default(0) @db.Decimal(14, 3)
+  createdAt  DateTime  @default(now())
+
+  @@unique([productId, locationId, code])
+  @@index([companyId, expiresAt])
 }

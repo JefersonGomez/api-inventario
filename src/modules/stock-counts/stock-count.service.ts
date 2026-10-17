@@ -12,6 +12,7 @@ import { assertQuantityForUnit } from "../../shared/units.ts"
 import { resolveLocation } from "../locations/location.service.ts"
 import { createMovement } from "../movements/movements.service.ts"
 import { logAudit } from "../audit/audit.service.ts"
+import { NO_LOT } from "../lots/lot.service.ts"
 
 export const createCountSchema = z.object({
   locationId: z.uuid().optional(), // sin indicar: la ubicación activa
@@ -170,7 +171,8 @@ export async function closeCount(id: string, actor: Actor) {
       await createMovement(
         item.productId, actor.id, delta > 0 ? "IN" : "OUT", Math.abs(delta),
         `Conteo físico: ${delta > 0 ? "sobrante" : "faltante"}`, tx,
-        { source: "COUNT", sourceId: id, locationId: count.locationId }
+        // productos con lotes: el faltante sale de los que vencen antes; el sobrante entra a "SIN-LOTE"
+        { source: "COUNT", sourceId: id, locationId: count.locationId, lotDefault: NO_LOT }
       )
     }
     await logAudit(actor.id, "UPDATE", "StockCount", id, {

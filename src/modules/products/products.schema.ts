@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { stockSchema } from "../../shared/units.ts";
 import { pageQuery, queryFlag } from "../../shared/pagination.ts";
+import { lotSchema } from "../lots/lot.service.ts";
 
 const unit = z.enum(["UNIT", "KG", "G", "L", "ML", "M", "CM", "M2"]);
 const taxRate = z.enum(["EXEMPT", "RATE_1", "RATE_2", "RATE_4", "RATE_13"]);
@@ -28,6 +29,8 @@ export const productsSchemaCreate = z.object({
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
   locationId: z.uuid().optional(), // dónde entra el stock inicial (sin indicar: la ubicación activa)
+  tracksLots: z.boolean().optional(), // maneja lotes con vencimiento
+  lot: lotSchema.optional(), // con lotes y stock inicial: a qué lote entra
 });
 
 export const productsSchemaUpdate = z.object({
@@ -45,6 +48,7 @@ export const productsSchemaUpdate = z.object({
   categoryId: z.string().uuid("El ID de categoría debe ser un UUID válido"),
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
+  tracksLots: z.boolean().optional(), // omitido = no tocar
 });
 // Importación desde Excel: el frontend manda las filas ya leídas; las reglas de negocio las valida el service
 const importRow = z.object({

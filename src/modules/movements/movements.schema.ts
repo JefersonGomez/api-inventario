@@ -1,6 +1,7 @@
 import { quantitySchema } from "../../shared/units.ts"
 import { pageQuery } from "../../shared/pagination.ts"
 import {z} from "zod"
+import { lotSchema } from "../lots/lot.service.ts"
 
 // GET /movements: más recientes primero. q busca en el nombre/SKU del producto y en el motivo.
 export const movementListQuerySchema = z.object({
@@ -20,4 +21,5 @@ export const CreateMovementsSchema = z.object({
     quantity: quantitySchema,
     reason:z.string().optional(),
     locationId: z.uuid().optional(), // sin indicar: la ubicación activa
+    lot: lotSchema.optional(), // productos con lotes: a qué lote entra (en salidas no hace falta)
 })

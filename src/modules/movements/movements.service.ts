@@ -5,12 +5,20 @@ import { Prisma } from "../../generated/prisma/client.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
 import { resolveLocation } from "../locations/location.service.ts";
+import { applyLots, type LotInput, type LotMove } from "../lots/lot.service.ts";
 import { locationScope } from "../../shared/tenant.ts";
 import type { MovementListQuery } from "./movements.schema.ts";
 
 // Origen del movimiento: a mano por defecto; las recepciones, ventas, conteos... pasan el suyo.
 // locationId: dónde ocurre (sin indicar, la ubicación activa de quien lo registra).
-export type MovementOrigin = { source: MovementSource; sourceId?: string | null; locationId?: string | null };
+// lot: productos con lotes (entradas: a qué lote); lotDefault: lote a usar si no viene (p. ej. sobrante de un conteo)
+export type MovementOrigin = {
+  source: MovementSource;
+  sourceId?: string | null;
+  locationId?: string | null;
+  lot?: LotInput | null | undefined;
+  lotDefault?: string | undefined;
+};
 
 // Mueve el stock de un producto en una ubicación (ProductStock) y el total del producto (Product.stock)
 // en la misma transacción. Entradas y salidas suman con increment (atómico): dos ventas a la vez no
@@ -52,10 +60,16 @@ export async function createMovement(
     } else {
       throw new Error("Tipo de movimiento inválido");
     }
+    // productos con lotes: la entrada va a un lote; la salida toma los que vencen antes
+    let lots: LotMove[] | null = null;
+    if (product.tracksLots && !delta.isZero()) {
+      lots = await applyLots(tx, { productId, locationId: location.id, delta: Number(delta), lot: origin.lot, defaultCode: origin.lotDefault });
+    }
     const movement = await tx.stockMovement.create({
       data: {
         companyId: currentCompanyId(), productId, userId, type, quantity, reason: reason ?? null,
         source: origin.source, sourceId: origin.sourceId ?? null, locationId: location.id,
+        ...(lots && { lots: lots as unknown as Prisma.InputJsonValue }),
       },
     });
     await tx.product.update({ where: { id: productId }, data: { stock: { increment: delta } } });

@@ -15,6 +15,7 @@ import { resolveLocation } from "../locations/location.service.ts"
 import { logAudit } from "../audit/audit.service.ts"
 import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
+import { applyLots, restoreLots, takeFromLots, type LotMove } from "../lots/lot.service.ts"
 
 export const createTransferSchema = z.object({
   fromLocationId: z.uuid().optional(), // sin indicar: la ubicación activa
@@ -41,27 +42,41 @@ const detail = {
   toLocation: { select: { id: true, name: true, type: true } },
   sentBy: { select: { id: true, name: true } },
   receivedBy: { select: { id: true, name: true } },
-  items: { include: { product: { select: { id: true, name: true, sku: true, unit: true } } } },
+  items: { include: { product: { select: { id: true, name: true, sku: true, unit: true, tracksLots: true } } } },
 } satisfies Prisma.StockTransferInclude
 
 // Mueve el stock de una ubicación (increment atómico; falla si queda negativo) y deja el movimiento.
 // El total del producto no se toca: en tránsito sigue siendo de la empresa.
+// Productos con lotes: al salir se toman los que vencen antes; al entrar, los lotes que viajaron (lots).
 async function moveAt(
   tx: Db,
-  m: { productId: string; locationId: string; locationName: string; delta: number; userId: string; transferId: string; reason: string }
-) {
+  m: {
+    productId: string; locationId: string; locationName: string; delta: number; userId: string; transferId: string; reason: string
+    tracksLots?: boolean; lots?: LotMove[]
+  }
+): Promise<LotMove[] | null> {
   const row = await tx.productStock.upsert({
     where: { productId_locationId: { productId: m.productId, locationId: m.locationId } },
     create: { companyId: currentCompanyId(), productId: m.productId, locationId: m.locationId, quantity: m.delta },
     update: { quantity: { increment: m.delta } },
   })
   if (row.quantity.isNegative()) throw new Error(`Stock insuficiente en ${m.locationName}`)
+  let lots: LotMove[] | null = null
+  if (m.tracksLots) {
+    if (m.delta < 0) lots = await applyLots(tx, { productId: m.productId, locationId: m.locationId, delta: m.delta })
+    else {
+      lots = m.lots ?? []
+      await restoreLots(tx, m.productId, m.locationId, lots)
+    }
+  }
   await tx.stockMovement.create({
     data: {
       companyId: currentCompanyId(), productId: m.productId, userId: m.userId, locationId: m.locationId,
       type: m.delta > 0 ? "IN" : "OUT", quantity: Math.abs(m.delta), reason: m.reason, source: "TRANSFER", sourceId: m.transferId,
+      ...(lots && { lots: lots as unknown as Prisma.InputJsonValue }),
     },
   })
+  return lots
 }
 
 // Las que ve la persona: donde sale o llega alguna de sus ubicaciones (la activa, o todas las suyas)
@@ -96,7 +111,7 @@ export async function createTransfer(input: z.infer<typeof createTransferSchema>
 
   const ids = input.items.map((i) => i.productId)
   if (new Set(ids).size !== ids.length) throw new Error("Hay productos repetidos en la transferencia")
-  const products = await prisma.product.findMany({ where: { id: { in: ids }, deletedAt: null }, select: { id: true, name: true, unit: true } })
+  const products = await prisma.product.findMany({ where: { id: { in: ids }, deletedAt: null }, select: { id: true, name: true, unit: true, tracksLots: true } })
   if (products.length !== ids.length) throw new Error("Algún producto no existe")
   for (const p of products) {
     assertQuantityForUnit(input.items.find((i) => i.productId === p.id)!.quantity, p.unit, `La cantidad de "${p.name}"`)
@@ -114,11 +129,18 @@ export async function createTransfer(input: z.infer<typeof createTransferSchema>
       },
       select: { id: true },
     })
+    const created = await tx.stockTransferItem.findMany({ where: { transferId: transfer.id }, select: { id: true, productId: true } })
     for (const item of input.items) {
-      await moveAt(tx, {
+      const tracksLots = products.find((p) => p.id === item.productId)!.tracksLots
+      const lots = await moveAt(tx, {
         productId: item.productId, locationId: from.id, locationName: from.name, delta: -item.quantity,
-        userId: actor.id, transferId: transfer.id, reason: `Transferencia a ${to.name}`,
+        userId: actor.id, transferId: transfer.id, reason: `Transferencia a ${to.name}`, tracksLots,
       })
+      // los lotes que salieron viajan con la transferencia (para entrar igual al destino)
+      if (lots) {
+        const itemId = created.find((c) => c.productId === item.productId)!.id
+        await tx.stockTransferItem.update({ where: { id: itemId }, data: { lots: lots as unknown as Prisma.InputJsonValue } })
+      }
     }
     await logAudit(actor.id, "CREATE", "StockTransfer", transfer.id, { from: from.id, to: to.id, items: input.items }, tx)
     // avisa a quienes reciben en el destino (no a quien la envía)
@@ -167,6 +189,9 @@ export async function receiveTransfer(id: string, input: z.infer<typeof receiveT
         await moveAt(tx, {
           productId: l.item.productId, locationId: transfer.toLocationId, locationName: transfer.toLocation.name, delta: l.received,
           userId: actor.id, transferId: id, reason: `Transferencia desde ${transfer.fromLocation.name}`,
+          tracksLots: l.item.product.tracksLots,
+          // llega lo que vence antes; lo que falta se descuenta de los últimos lotes
+          lots: takeFromLots((l.item.lots ?? []) as unknown as LotMove[], l.received),
         })
       }
       // lo que no llegó deja de existir: sale del total de la empresa
@@ -201,6 +226,7 @@ export async function cancelTransfer(id: string, actor: Actor) {
       await moveAt(tx, {
         productId: item.productId, locationId: transfer.fromLocationId, locationName: transfer.fromLocation.name,
         delta: Number(item.quantity), userId: actor.id, transferId: id, reason: "Transferencia cancelada",
+        tracksLots: item.product.tracksLots, lots: (item.lots ?? []) as unknown as LotMove[],
       })
     }
     await logAudit(actor.id, "UPDATE", "StockTransfer", id, { status: "CANCELLED" }, tx)

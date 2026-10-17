@@ -10,6 +10,8 @@ export const purchaseOrderListQuerySchema = z.object({
 });
 export type PurchaseOrderListQuery = z.infer<typeof purchaseOrderListQuerySchema>;
 import { quantitySchema } from "../../shared/units.ts";
+import { lotSchema, type LotInput } from "../lots/lot.service.ts";
+export type ReceiveLine = { itemId: string; quantity: number; lot?: LotInput | undefined };
 
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.string().uuid(),
@@ -28,7 +30,7 @@ export const createPurchaseOrderSchema = z.object({
 
 // Recepción en partes: lo que llegó de cada línea. Sin cuerpo = todo lo pendiente.
 export const receivePurchaseOrderSchema = z
-  .object({ items: z.array(z.object({ itemId: z.uuid(), quantity: z.number().min(0) })).min(1) })
+  .object({ items: z.array(z.object({ itemId: z.uuid(), quantity: z.number().min(0), lot: lotSchema.optional() })).min(1) })
   .optional();
 export const cancelPurchaseOrderSchema = z.object({ reason: z.string().trim().min(1, "Indica el motivo").max(300) });
 export const closePurchaseOrderSchema = z.object({ reason: z.string().trim().max(300).optional() }).optional();
