@@ -8,6 +8,7 @@ import { getCompany } from "../company/company.service.ts";
 import { createMovement } from "../movements/movements.service.ts";
 import { resolveLocation } from "../locations/location.service.ts";
 import { lowStockProductIds, scopedStock, withScopedStock } from "../locations/stock-scope.ts";
+import { inTransitByProduct } from "../transfers/transfer.service.ts";
 import { locationScope } from "../../shared/tenant.ts";
 import { assertQuantityForUnit } from "../../shared/units.ts";
 import type { z } from "zod";
@@ -230,7 +231,8 @@ export async function getProductById(idProduct: string) {
     orderBy: { location: { name: "asc" } },
   });
   const [scoped] = await withScopedStock([existProduct], scope);
-  return { ...scoped!, stocks };
+  const inTransit = (await inTransitByProduct([idProduct])).get(idProduct) ?? 0; // enviado y sin recibir
+  return { ...scoped!, stocks, inTransit };
 }
 
 export async function getProductByBarcode(code: string) {

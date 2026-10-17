@@ -622,10 +622,11 @@ model StockTransfer {
 }
 
 model StockTransferItem {
-  id         String        @id @default(uuid())
-  transferId String
-  transfer   StockTransfer @relation(fields: [transferId], references: [id])
-  productId  String
-  product    Product       @relation(fields: [productId], references: [id])
-  quantity   Decimal       @db.Decimal(14, 3)
+  id               String        @id @default(uuid())
+  transferId       String
+  transfer         StockTransfer @relation(fields: [transferId], references: [id])
+  productId        String
+  product          Product       @relation(fields: [productId], references: [id])
+  quantity         Decimal       @db.Decimal(14, 3) // enviado
+  receivedQuantity Decimal?      @db.Decimal(14, 3) // lo que llegó; la diferencia es faltante (sale del inventario)
 }

@@ -256,6 +256,29 @@ components:
         address: { type: string, nullable: true }
         isActive: { type: boolean }
 
+    StockTransfer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [IN_TRANSIT, RECEIVED, CANCELLED] }
+        fromLocation: { $ref: '#/components/schemas/Location' }
+        toLocation: { $ref: '#/components/schemas/Location' }
+        notes: { type: string, nullable: true }
+        sentBy: { $ref: '#/components/schemas/UserSummary' }
+        receivedBy: { allOf: [{ $ref: '#/components/schemas/UserSummary' }], nullable: true, type: object }
+        sentAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true, description: Recibida o cancelada }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              productId: { type: string, format: uuid }
+              quantity: { type: number, description: Enviado }
+              receivedQuantity: { type: number, nullable: true, description: "Lo que llegó; la diferencia es faltante" }
+              product: { type: object, properties: { id: { type: string }, name: { type: string }, sku: { type: string }, unit: { type: string } } }
+
     LocationInput:
       type: object
       required: [name, type]
@@ -656,7 +679,8 @@ components:
           description: >
             Calculadas (solo con purchases.manage): requestExpiring, pending, approved, productExpiring, lowStock.
             Calculadas para quien tiene código de caja: cashCodeExpiring (últimos 5 días), cashCodeExpired.
-            Guardadas: requestApproved, requestRejected, orderReceived, requestComment, orderComment, cashCodeAssigned.
+            Guardadas: requestApproved, requestRejected, orderReceived, requestComment, orderComment, cashCodeAssigned,
+            transferIncoming (a quienes reciben en el destino), transferReceived (a quien envió; meta.shortages).
         title: { type: string }
         meta: { type: object, additionalProperties: true }
         link: { type: string, description: Ruta del frontend a la que lleva el aviso }
@@ -1772,6 +1796,119 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Location' }
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  /transfers:
+    get:
+      tags: [Ubicaciones]
+      summary: Transferencias de mis ubicaciones (stock.move, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, schema: { type: string, enum: [IN_TRANSIT, RECEIVED, CANCELLED] } }
+      responses:
+        '200':
+          description: Página
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageMeta'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/StockTransfer' } }
+    post:
+      tags: [Ubicaciones]
+      summary: Enviar una transferencia (stock.move, trabajando en el origen)
+      description: |
+        El stock sale del origen (movimiento OUT, origen TRANSFER) y queda en tránsito: sigue contando en el total del
+        producto. Avisa a quienes reciben en el destino. Falla si no alcanza el stock en el origen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toLocationId, items]
+              properties:
+                fromLocationId: { type: string, format: uuid, description: "Sin indicar: la ubicación activa" }
+                toLocationId: { type: string, format: uuid }
+                notes: { type: string, maxLength: 500 }
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      quantity: { type: number }
+      responses:
+        '201':
+          description: Enviada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTransfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /transfers/{id}:
+    get:
+      tags: [Ubicaciones]
+      summary: Ver una transferencia (stock.move)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Transferencia
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTransfer' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /transfers/{id}/receive:
+    post:
+      tags: [Ubicaciones]
+      summary: Recibir una transferencia (stock.move, trabajando en el destino)
+      description: |
+        Entra al destino lo que llegó (movimiento IN). Lo que falte (enviado − recibido) es faltante: sale del total del
+        producto y queda en auditoría; a quien la envió le llega un aviso. Sin cuerpo = llegó todo.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [itemId, receivedQuantity]
+                    properties:
+                      itemId: { type: string, format: uuid }
+                      receivedQuantity: { type: number, minimum: 0, description: No más de lo enviado }
+      responses:
+        '200':
+          description: Recibida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTransfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /transfers/{id}/cancel:
+    post:
+      tags: [Ubicaciones]
+      summary: Cancelar una transferencia en tránsito (quien la envió, o purchases.manage)
+      description: Devuelve todo al origen (movimiento IN, origen TRANSFER).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Cancelada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTransfer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /customers:
     get:

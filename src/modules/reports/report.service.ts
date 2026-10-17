@@ -19,7 +19,8 @@ export async function getDashboardSummary(user: { id: string; permissions: strin
     scope
       ? prisma.productStock.aggregate({ where: { locationId: { in: scope }, product: { deletedAt: null } }, _sum: { quantity: true } }).then((r) => ({ _sum: { stock: r._sum.quantity } }))
       : prisma.product.aggregate({ where: { deletedAt: null }, _sum: { stock: true } }),
-    prisma.stockMovement.aggregate({ where: { type: "OUT", createdAt: { gte: since }, ...movementScope() }, _sum: { quantity: true } }),
+    // una transferencia no es una venta: no cuenta como despacho
+    prisma.stockMovement.aggregate({ where: { type: "OUT", source: { not: "TRANSFER" }, createdAt: { gte: since }, ...movementScope() }, _sum: { quantity: true } }),
     scope ? stockByCategoryIn(scope) : prisma.product.groupBy({ by: ["categoryId"], where: { deletedAt: null }, _sum: { stock: true } }),
     prisma.category.findMany({ select: { id: true, name: true } }),
     prisma.stockMovement.findMany({
@@ -191,6 +192,7 @@ export async function getStockForecast(velocityWindowDays = 30, alertThresholdDa
     by: ["productId"],
     where: {
       type: "OUT",
+      source: { not: "TRANSFER" }, // las transferencias no son consumo
       createdAt: { gte: cutoffDate },
       ...movementScope(),
     },

@@ -16,14 +16,16 @@ export const permissionCatalog = () => ({
   authorizing: AUTHORIZING_PERMISSIONS,
 });
 
-// Ids de los miembros activos de la empresa que tienen un permiso (para avisos dirigidos)
-export async function memberIdsWith(permission: Permission) {
+// Ids de los miembros activos de la empresa que tienen un permiso (para avisos dirigidos).
+// Con locationId: solo quienes trabajan ahí (el admin y quien no tiene asignadas, en todas).
+export async function memberIdsWith(permission: Permission, locationId?: string) {
   const members = await prismaRoot.membership.findMany({
     where: { companyId: currentCompanyId(), isActive: true, user: { isActive: true } },
-    select: { userId: true, role: true, grantedPermissions: true, revokedPermissions: true },
+    select: { userId: true, role: true, grantedPermissions: true, revokedPermissions: true, locationIds: true },
   });
   return members
     .filter((m) => effectivePermissions(m.role, m.grantedPermissions, m.revokedPermissions).includes(permission))
+    .filter((m) => !locationId || m.role === "ADMIN" || m.locationIds.length === 0 || m.locationIds.includes(locationId))
     .map((m) => m.userId);
 }
 
