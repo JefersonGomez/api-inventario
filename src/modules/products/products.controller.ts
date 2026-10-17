@@ -11,6 +11,17 @@ import {
 } from "./products.service.ts";
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
 import { importProducts } from "./products-import.service.ts";
+import { generateBarcodes } from "./barcodes.service.ts";
+
+export async function generateBarcodesHandler(req: Request, res: Response) {
+  try {
+    const result = await generateBarcodes(req.body, req.user!.id);
+    if (result.generated > 0) emit(EVERYONE, PRODUCT_TOPICS);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
 
 const PRODUCT_TOPICS = [...STOCK_TOPICS, "product-price-history"];
 

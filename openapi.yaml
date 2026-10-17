@@ -1585,6 +1585,33 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /products/barcodes:
+    post:
+      tags: [Productos]
+      summary: Generar códigos de barras internos (products.manage)
+      description: |
+        Para los productos sin código (los indicados, o todos): EAN-13 interno con prefijo 20 (GS1 lo reserva para uso
+        dentro de la tienda) y la siguiente secuencia libre de la empresa. No reutiliza códigos de productos eliminados.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productIds: { type: array, items: { type: string, format: uuid }, maxItems: 2000 }
+      responses:
+        "200":
+          description: Códigos asignados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated: { type: integer }
+                  products: { type: array, items: { type: object, properties: { id: { type: string }, barcode: { type: string } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /products/import:
     post:
       tags: [Productos]
