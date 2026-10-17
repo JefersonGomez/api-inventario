@@ -144,6 +144,8 @@ model User {
   purchaseRequests  PurchaseRequest[]
   purchaseOrders    PurchaseOrder[]
   transfersSent     StockTransfer[]   @relation("TransferSentBy")
+  countsCreated     StockCount[]      @relation("CountCreatedBy")
+  countsClosed      StockCount[]      @relation("CountClosedBy")
   transfersReceived StockTransfer[]   @relation("TransferReceivedBy")
   auditLogs         AuditLog[]
   refreshTokens     RefreshToken[]
@@ -153,13 +155,14 @@ model User {
 }
 
 model Category {
-  id          String    @id @default(uuid())
+  id          String       @id @default(uuid())
   companyId   String
-  company     Company   @relation(fields: [companyId], references: [id])
+  company     Company      @relation(fields: [companyId], references: [id])
   name        String
   description String?
   deletedAt   DateTime?
   products    Product[]
+  counts      StockCount[]
 
   @@index([companyId])
 }
@@ -203,6 +206,7 @@ model Product {
   minStock           Decimal             @default(0) @db.Decimal(14, 3) // mínimo en CADA ubicación donde se maneja
   stocks             ProductStock[]
   transferItems      StockTransferItem[]
+  countItems         StockCountItem[]
   categoryId         String
   supplierId         String?
   deletedAt          DateTime?
@@ -395,6 +399,7 @@ model Company {
   locations        Location[]
   productStocks    ProductStock[]
   transfers        StockTransfer[]
+  stockCounts      StockCount[]
 
   @@index([ownerId])
 }
@@ -575,6 +580,7 @@ model Location {
   purchaseOrders PurchaseOrder[]
   transfersOut   StockTransfer[] @relation("TransferFrom")
   transfersIn    StockTransfer[] @relation("TransferTo")
+  counts         StockCount[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -633,4 +639,47 @@ model StockTransferItem {
   product          Product       @relation(fields: [productId], references: [id])
   quantity         Decimal       @db.Decimal(14, 3) // enviado
   receivedQuantity Decimal?      @db.Decimal(14, 3) // lo que llegó; la diferencia es faltante (sale del inventario)
+}
+
+enum StockCountStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+// Conteo físico de una ubicación (todos los productos o una categoría). Se puede seguir vendiendo
+// mientras dura: cada línea guarda lo que decía el sistema al momento de contarla, y al cerrar se
+// aplica solo la diferencia (contado − sistema de ese momento) con movimientos de origen COUNT.
+model StockCount {
+  id          String           @id @default(uuid())
+  companyId   String
+  company     Company          @relation(fields: [companyId], references: [id])
+  locationId  String
+  location    Location         @relation(fields: [locationId], references: [id])
+  categoryId  String? // null = todos los productos
+  category    Category?        @relation(fields: [categoryId], references: [id])
+  status      StockCountStatus @default(OPEN)
+  notes       String?
+  createdById String
+  createdBy   User             @relation("CountCreatedBy", fields: [createdById], references: [id])
+  closedById  String?
+  closedBy    User?            @relation("CountClosedBy", fields: [closedById], references: [id])
+  createdAt   DateTime         @default(now())
+  closedAt    DateTime?
+  items       StockCountItem[]
+
+  @@index([companyId, status])
+}
+
+model StockCountItem {
+  id              String     @id @default(uuid())
+  countId         String
+  count           StockCount @relation(fields: [countId], references: [id])
+  productId       String
+  product         Product    @relation(fields: [productId], references: [id])
+  countedQuantity Decimal?   @db.Decimal(14, 3) // null = todavía sin contar (al cerrar no se ajusta)
+  systemQuantity  Decimal?   @db.Decimal(14, 3) // lo que decía el sistema al contarlo
+  countedAt       DateTime?
+
+  @@unique([countId, productId])
 }

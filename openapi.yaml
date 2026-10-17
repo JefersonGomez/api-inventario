@@ -256,6 +256,30 @@ components:
         address: { type: string, nullable: true }
         isActive: { type: boolean }
 
+    StockCount:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [OPEN, CLOSED, CANCELLED] }
+        location: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        category: { type: object, nullable: true, properties: { id: { type: string }, name: { type: string } } }
+        notes: { type: string, nullable: true }
+        createdBy: { $ref: '#/components/schemas/UserSummary' }
+        closedBy: { allOf: [{ $ref: '#/components/schemas/UserSummary' }], nullable: true, type: object }
+        createdAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time, nullable: true }
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              productId: { type: string, format: uuid }
+              product: { type: object, properties: { id: { type: string }, name: { type: string }, sku: { type: string }, barcode: { type: string, nullable: true }, unit: { type: string }, cost: { type: number, nullable: true } } }
+              countedQuantity: { type: number, nullable: true, description: null = sin contar }
+              systemQuantity: { type: number, nullable: true, description: Lo que decía el sistema al contarlo }
+              currentQuantity: { type: number, description: Lo que dice el sistema ahora en esa ubicación }
+              countedAt: { type: string, format: date-time, nullable: true }
+
     StockTransfer:
       type: object
       properties:
@@ -1912,6 +1936,112 @@ paths:
               schema: { $ref: '#/components/schemas/StockTransfer' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /stock-counts:
+    get:
+      tags: [Ubicaciones]
+      summary: Conteos físicos de mis ubicaciones (stock.move, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, CLOSED, CANCELLED] } }
+      responses:
+        '200': { description: Página de conteos (cada uno con _count.items) }
+    post:
+      tags: [Ubicaciones]
+      summary: Abrir un conteo (stock.move, trabajando en esa ubicación)
+      description: Con todos los productos o los de una categoría. Uno abierto por ubicación a la vez.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                locationId: { type: string, format: uuid, description: "Sin indicar: la ubicación activa" }
+                categoryId: { type: string, format: uuid, description: "Sin indicar: todos los productos" }
+                notes: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Conteo abierto
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockCount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /stock-counts/{id}:
+    get:
+      tags: [Ubicaciones]
+      summary: Ver un conteo con sus líneas (stock.move)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Conteo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockCount' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /stock-counts/{id}/items:
+    put:
+      tags: [Ubicaciones]
+      summary: Guardar lo contado (se puede ir guardando de a poco)
+      description: |
+        Al contar una línea se guarda lo que dice el sistema en ese momento (`systemQuantity`). Un producto que no estaba
+        en la lista se agrega. `countedQuantity: null` borra lo contado.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, countedQuantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      countedQuantity: { type: number, nullable: true, minimum: 0 }
+      responses:
+        '200':
+          description: Conteo actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockCount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /stock-counts/{id}/close:
+    post:
+      tags: [Ubicaciones]
+      summary: Cerrar el conteo y ajustar el stock
+      description: |
+        Por cada línea contada se aplica la diferencia (contado − lo que decía el sistema al contarla) con un movimiento
+        IN u OUT de origen COUNT en la ubicación del conteo. Lo no contado no se toca. Queda en auditoría.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Cerrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockCount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /stock-counts/{id}/cancel:
+    post:
+      tags: [Ubicaciones]
+      summary: Cancelar el conteo (el stock no cambia)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Cancelado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockCount' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /customers:
     get:
