@@ -10,7 +10,7 @@ import { formatMoney } from "../../shared/money.ts";
 import { getCompany } from "../company/company.service.ts";
 import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
-import type { Prisma } from "../../generated/prisma/client.ts";
+import { Prisma } from "../../generated/prisma/client.ts";
 import type { PurchaseOrderListQuery } from "./purchase-order.schema.ts";
 
 export async function createPurchaseOrder(
@@ -131,23 +131,49 @@ export async function getPurchaseOrderById(id: string) {
   });
 }
 
-export async function receivePurchaseOrder(id: string, userId: string) {
+const ORDER_INCLUDE = {
+  supplier: true,
+  location: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
+  items: { include: { product: true } },
+} as const;
+
+// Recepción (en partes, decisión del usuario del 16-oct-2026): cada recepción anota lo que llegó por
+// línea (sin items = todo lo pendiente). La orden queda PARTIAL hasta completarse (RECEIVED). Cada parte
+// entra a la ubicación de la orden con su movimiento y recalcula el costo promedio con lo que llegó.
+export async function receivePurchaseOrder(id: string, userId: string, lines?: { itemId: string; quantity: number }[]) {
   await prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
-      include: { items: true },
+      include: { items: { include: { product: { select: { name: true, unit: true } } } } },
     });
 
     if (!order) {
       throw new Error("Orden de compra no encontrada");
     }
 
-    if (order.status !== "PENDING") {
-      throw new Error("La orden ya fue recibida o cancelada");
+    if (order.status !== "PENDING" && order.status !== "PARTIAL") {
+      throw new Error("La orden ya fue recibida, cerrada o cancelada");
     }
 
-    for (const item of order.items) {
-      // Costo promedio ponderado: se calcula con el stock ANTES de que entre esta compra.
+    const pendingOf = (item: (typeof order.items)[number]) => Number(new Prisma.Decimal(item.quantity).minus(item.receivedQuantity));
+    const given = lines ? new Map(lines.map((l) => [l.itemId, l.quantity])) : null;
+    if (given) {
+      for (const itemId of given.keys()) {
+        if (!order.items.some((i) => i.id === itemId)) throw new Error("Alguna línea no es de esta orden");
+      }
+    }
+    const arriving = order.items
+      .map((item) => ({ item, qty: given ? (given.get(item.id) ?? 0) : pendingOf(item) }))
+      .filter((a) => a.qty > 0);
+    if (arriving.length === 0) throw new Error("Indica qué llegó");
+    for (const { item, qty } of arriving) {
+      if (qty > pendingOf(item)) throw new Error(`De "${item.product.name}" solo faltan ${pendingOf(item)}`);
+      assertQuantityForUnit(qty, item.product.unit, `Lo recibido de "${item.product.name}"`);
+    }
+
+    for (const { item, qty } of arriving) {
+      // Costo promedio ponderado: se calcula con el stock ANTES de que entre esta parte.
       // Sin stock o sin costo previo no hay nada que ponderar: el costo pasa a ser el de la compra.
       const before = await tx.product.findFirst({
         where: { id: item.productId, deletedAt: null },
@@ -155,7 +181,6 @@ export async function receivePurchaseOrder(id: string, userId: string) {
       });
       if (before) {
         const unitCost = Number(item.unitCost);
-        const qty = Number(item.quantity);
         const stockBefore = Number(before.stock);
         const hasBase = before.cost !== null && stockBefore > 0;
         const newCost = hasBase
@@ -168,21 +193,24 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         item.productId,
         userId,
         "IN",
-        Number(item.quantity),
+        qty,
         `Recepción de orden de compra ${order.id}`,
         tx,
         { source: "PURCHASE_RECEIPT", sourceId: order.id, locationId: order.locationId }
       );
+      await tx.purchaseOrderItem.update({ where: { id: item.id }, data: { receivedQuantity: { increment: qty } } });
     }
 
+    const complete = order.items.every((item) => pendingOf(item) - (arriving.find((a) => a.item.id === item.id)?.qty ?? 0) <= 0);
     await tx.purchaseOrder.update({
       where: { id },
-      data: { status: "RECEIVED", receivedAt: new Date() },
+      data: complete ? { status: "RECEIVED", receivedAt: new Date() } : { status: "PARTIAL" },
     });
 
-    // quien pidió el producto se entera de que ya llegó (el admin que recibe no se avisa a sí mismo)
+    // quien pidió el producto se entera de que llegó (algo o todo); el que recibe no se avisa a sí mismo
+    const arrivedProducts = arriving.map((a) => a.item.productId);
     const fulfilled = await tx.purchaseRequest.findMany({
-      where: { purchaseOrderId: id, requestedById: { not: userId } },
+      where: { purchaseOrderId: id, requestedById: { not: userId }, productId: { in: arrivedProducts } },
       include: { product: true },
     });
     await createNotifications(
@@ -190,21 +218,44 @@ export async function receivePurchaseOrder(id: string, userId: string) {
         userId: r.requestedById,
         type: "orderReceived",
         title: r.product.name,
-        meta: { quantity: r.quantity, unit: r.product.unit },
+        meta: { quantity: arriving.find((a) => a.item.productId === r.productId)!.qty, unit: r.product.unit, partial: !complete },
         link: `/purchase-requests?highlight=${r.id}`,
       })),
       tx
     );
 
-    await logAudit(userId, "RECEIVE", "PurchaseOrder", id, undefined, tx);
+    await logAudit(userId, "RECEIVE", "PurchaseOrder", id, { lines: arriving.map((a) => ({ itemId: a.item.id, quantity: a.qty })), complete }, tx);
   });
 
   // fuera de la transacción por lo mismo que en createPurchaseOrder (include de varias relaciones)
-  return prisma.purchaseOrder.findUniqueOrThrow({
-    where: { id },
-    include: { supplier: true, location: { select: { id: true, name: true } }, createdBy: { select: { id: true, name: true } }, items: { include: { product: true } } },
-  });
+  return prisma.purchaseOrder.findUniqueOrThrow({ where: { id }, include: ORDER_INCLUDE });
 }
+
+// Cancelar: solo si no llegó nada. Las solicitudes vinculadas vuelven a "aprobadas sin orden".
+export async function cancelPurchaseOrder(id: string, userId: string, reason: string) {
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.purchaseOrder.updateMany({
+      where: { id, status: "PENDING" },
+      data: { status: "CANCELLED", cancelReason: reason },
+    });
+    if (count !== 1) throw new Error("Solo se cancela una orden pendiente; si ya llegó algo, ciérrala");
+    await tx.purchaseRequest.updateMany({ where: { purchaseOrderId: id }, data: { purchaseOrderId: null } });
+    await logAudit(userId, "UPDATE", "PurchaseOrder", id, { status: "CANCELLED", reason }, tx);
+  });
+  return prisma.purchaseOrder.findUniqueOrThrow({ where: { id }, include: ORDER_INCLUDE });
+}
+
+// Cerrar: el proveedor ya no trae el resto. Lo pendiente se cancela; lo recibido queda.
+export async function closePurchaseOrder(id: string, userId: string, reason?: string) {
+  const { count } = await prisma.purchaseOrder.updateMany({
+    where: { id, status: "PARTIAL" },
+    data: { status: "CLOSED", receivedAt: new Date(), cancelReason: reason || null },
+  });
+  if (count !== 1) throw new Error("Solo se cierra una orden recibida en parte");
+  await logAudit(userId, "UPDATE", "PurchaseOrder", id, { status: "CLOSED", ...(reason && { reason }) });
+  return prisma.purchaseOrder.findUniqueOrThrow({ where: { id }, include: ORDER_INCLUDE });
+}
+
 const orderNumber = (id: string) => id.slice(0, 8).toUpperCase();
 
 // Manda la orden al email del proveedor. Se puede reenviar: emailedAt guarda el último envío.

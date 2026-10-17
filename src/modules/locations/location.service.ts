@@ -80,7 +80,7 @@ export async function updateLocation(id: string, input: LocationUpdate, userId: 
       where: { status: "IN_TRANSIT", OR: [{ fromLocationId: id }, { toLocationId: id }] },
     })
     if (open > 0) throw new Error("Tiene transferencias en tránsito: recíbelas o cancélalas antes")
-    if ((await prisma.purchaseOrder.count({ where: { locationId: id, status: "PENDING" } })) > 0) {
+    if ((await prisma.purchaseOrder.count({ where: { locationId: id, status: { in: ["PENDING", "PARTIAL"] } } })) > 0) {
       throw new Error("Tiene órdenes de compra por recibir: recíbelas o cancélalas antes")
     }
     if ((await prisma.location.count({ where: { isActive: true } })) <= 1) {

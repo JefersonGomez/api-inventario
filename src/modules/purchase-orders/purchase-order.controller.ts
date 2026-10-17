@@ -58,8 +58,28 @@ export async function receivePurchaseOrderHandler(
       res.status(400).json({ error: "id inválido" });
       return;
     }
-    const order = await service.receivePurchaseOrder(id, req.user!.id);
+    const order = await service.receivePurchaseOrder(id, req.user!.id, req.body?.items);
     emit(EVERYONE, ["purchase-orders", ...STOCK_TOPICS]);
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
+
+export async function cancelPurchaseOrderHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    const order = await service.cancelPurchaseOrder(req.params.id, req.user!.id, req.body.reason);
+    emit(PURCHASE_MANAGERS, ["purchase-orders", ...REQUEST_TOPICS]);
+    res.json(order);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
+
+export async function closePurchaseOrderHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    const order = await service.closePurchaseOrder(req.params.id, req.user!.id, req.body?.reason);
+    emit(PURCHASE_MANAGERS, ["purchase-orders"]);
     res.json(order);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

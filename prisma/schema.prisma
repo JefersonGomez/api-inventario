@@ -116,8 +116,10 @@ enum PurchaseRequestStatus {
 
 enum PurchaseOrderStatus {
   PENDING
+  PARTIAL // llegó una parte; se sigue recibiendo o se cierra
   RECEIVED
-  CANCELLED
+  CLOSED // cerrada con lo pendiente cancelado (el proveedor ya no trae el resto)
+  CANCELLED // cancelada sin haber recibido nada
 }
 
 model User {
@@ -269,6 +271,7 @@ model PurchaseOrder {
   createdAt         DateTime            @default(now())
   receivedAt        DateTime?
   emailedAt         DateTime? // último envío al proveedor
+  cancelReason      String? // motivo al cancelar o cerrar
   locationId        String // a dónde entra la mercadería al recibirla
   location          Location            @relation(fields: [locationId], references: [id])
   supplier          Supplier            @relation(fields: [supplierId], references: [id])
@@ -281,13 +284,14 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id              String        @id @default(uuid())
-  purchaseOrderId String
-  productId       String
-  quantity        Decimal       @db.Decimal(14, 3)
-  unitCost        Decimal       @db.Decimal(10, 2)
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
-  product         Product       @relation(fields: [productId], references: [id])
+  id               String        @id @default(uuid())
+  purchaseOrderId  String
+  productId        String
+  quantity         Decimal       @db.Decimal(14, 3)
+  receivedQuantity Decimal       @default(0) @db.Decimal(14, 3) // suma de lo recibido en todas las recepciones
+  unitCost         Decimal       @db.Decimal(10, 2)
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  product          Product       @relation(fields: [productId], references: [id])
 }
 
 model AuditLog {

@@ -595,7 +595,8 @@ components:
 
     PurchaseOrderStatus:
       type: string
-      enum: [PENDING, RECEIVED, CANCELLED]
+      enum: [PENDING, PARTIAL, RECEIVED, CLOSED, CANCELLED]
+      description: "PARTIAL = llegó una parte; CLOSED = cerrada con lo pendiente cancelado; CANCELLED = cancelada sin recibir nada"
 
     PurchaseOrder:
       type: object
@@ -614,6 +615,7 @@ components:
         receivedAt: { type: string, format: date-time, nullable: true }
         emailedAt: { type: string, format: date-time, nullable: true, description: Último envío al proveedor }
         locationId: { type: string, format: uuid, description: A dónde entra la mercadería al recibirla }
+        cancelReason: { type: string, nullable: true, description: Motivo al cancelar o cerrar }
         location: { type: object, properties: { id: { type: string }, name: { type: string } } }
         items:
           type: array
@@ -623,7 +625,8 @@ components:
               id: { type: string, format: uuid }
               productId: { type: string, format: uuid }
               product: { $ref: '#/components/schemas/Product' }
-              quantity: { type: integer }
+              quantity: { type: number, description: Pedido }
+              receivedQuantity: { type: number, description: Suma de lo recibido en todas las recepciones }
               unitCost: { type: string, example: "980.00" }
 
     PurchaseOrderInput:
@@ -2303,17 +2306,81 @@ paths:
   /purchase-orders/{id}/receive:
     patch:
       tags: [Órdenes de compra]
-      summary: Marcar como recibida (purchases.manage)
-      description: Recepción completa (no parcial). Sube el stock con movimientos IN y avisa a quien pidió cada solicitud vinculada.
+      summary: Recibir todo o una parte (purchases.manage)
+      description: |
+        Recepción en partes: `items` = lo que llegó de cada línea (sin cuerpo, todo lo pendiente). Cada parte entra a la
+        ubicación de la orden con movimientos IN, recalcula el costo promedio y avisa a quien pidió esos productos.
+        La orden queda PARTIAL hasta completarse (RECEIVED). Solo con la orden PENDING o PARTIAL.
       parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [itemId, quantity]
+                    properties:
+                      itemId: { type: string, format: uuid }
+                      quantity: { type: number, minimum: 0, description: No más de lo que falta }
       responses:
         '200':
-          description: Orden recibida
+          description: Orden con lo recibido
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseOrder' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-orders/{id}/cancel:
+    post:
+      tags: [Órdenes de compra]
+      summary: Cancelar una orden sin nada recibido (purchases.manage)
+      description: Las solicitudes vinculadas vuelven a quedar aprobadas sin orden. Si ya llegó algo, se cierra.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 300 }
+      responses:
+        '200':
+          description: Cancelada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /purchase-orders/{id}/close:
+    post:
+      tags: [Órdenes de compra]
+      summary: Cerrar una orden recibida en parte (purchases.manage)
+      description: El proveedor ya no trae el resto; lo recibido queda y lo pendiente se cancela.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Cerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseOrder' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /purchase-orders/{id}/send-email:
     post:
