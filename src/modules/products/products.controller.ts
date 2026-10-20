@@ -12,6 +12,26 @@ import {
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
 import { importProducts } from "./products-import.service.ts";
 import { generateBarcodes } from "./barcodes.service.ts";
+import { aiImportQuota, aiMapColumns, AiQuotaError } from "./ai-import.service.ts";
+import { AiPausedError } from "../ai/ai.service.ts";
+
+export async function aiMapHandler(req: Request, res: Response) {
+  try {
+    res.json(await aiMapColumns(req.body, req.user!.id));
+  } catch (error) {
+    // tope del plan: 429; IA pausada por el presupuesto de la plataforma: 503
+    const status = error instanceof AiQuotaError ? 429 : error instanceof AiPausedError ? 503 : 400;
+    res.status(status).json({ error: (error as Error).message });
+  }
+}
+
+export async function aiQuotaHandler(_req: Request, res: Response) {
+  try {
+    res.json(await aiImportQuota());
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
 
 export async function generateBarcodesHandler(req: Request, res: Response) {
   try {

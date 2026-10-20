@@ -730,6 +730,7 @@ components:
           description: >
             Calculadas (solo con purchases.manage): requestExpiring, pending, approved, productExpiring, lowStock.
             Calculadas para quien tiene código de caja: cashCodeExpiring (últimos 5 días), cashCodeExpired.
+            Para el dueño de la plataforma: aiBudgetAlert (guardada).
             Guardadas: requestApproved, requestRejected, orderReceived, requestComment, orderComment, cashCodeAssigned,
             transferIncoming (a quienes reciben en el destino), transferReceived (a quien envió; meta.shortages).
         title: { type: string }
@@ -1585,6 +1586,36 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /products/import/ai-map:
+    post:
+      tags: [Productos]
+      summary: Ayuda de la IA para reconocer columnas al importar (products.manage)
+      description: |
+        Se manda solo una muestra (máx. 25 filas, celdas recortadas a 80 caracteres), nunca el archivo. La IA devuelve la fila
+        de encabezados (headerRow, desde 0) y qué columna es cada dato (mapping: campo → índice); se valida todo. La respuesta
+        se guarda por formato: el mismo formato otra vez no consulta ni cuenta (cached: true). Tope por plan y mes:
+        Básico 5, Pro 30, Empresa 100 (429 al llegar). 503 si la IA de la plataforma está en pausa por presupuesto.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                rows: { type: array, maxItems: 25, items: { type: array, items: {} } }
+      responses:
+        "200": { description: "{ headerRow, mapping, cached, used, limit, remaining }" }
+        "429": { description: Se usaron las importaciones con IA del mes }
+        "503": { description: IA en pausa (presupuesto de la plataforma) }
+
+  /products/import/ai-quota:
+    get:
+      tags: [Productos]
+      summary: Importaciones con IA usadas y disponibles este mes (products.manage)
+      responses:
+        "200": { description: "{ used, limit, remaining }" }
+
   /products/barcodes:
     post:
       tags: [Productos]
@@ -2093,6 +2124,114 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/StockCount' }
         '400': { $ref: '#/components/responses/BadRequest' }
+
+  /reports/daily-summary:
+    get:
+      tags: [Reportes]
+      summary: Resumen del día guardado (reports.view; no genera ni gasta)
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, example: "2026-10-16" } }
+        - { name: since, in: query, required: true, schema: { type: string, format: date-time }, description: Inicio del día en la zona del navegador }
+      responses:
+        "200": { description: "{ date, data, text, generatedAt } o null si todavía no se generó" }
+    post:
+      tags: [Reportes]
+      summary: Generar el resumen del día con IA (reports.view; uno por día por empresa)
+      description: |
+        Los números (movimientos, stock bajo, por vencer, solicitudes, órdenes, transferencias, conteos) los calcula el
+        servidor, sin costos; la IA solo los redacta. Cada resumen se guarda (historial); si ya hay uno ese día se
+        devuelve, salvo con force=1 (genera otro; el anterior queda). Si la IA está en pausa o falla, devuelve los números
+        con text null (y no guarda).
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string } }
+        - { name: since, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: force, in: query, schema: { type: string, enum: ["1"] }, description: Volver a generar }
+      responses:
+        "200": { description: "{ id, date, data, text, generatedAt }" }
+
+  /reports/daily-summaries:
+    get:
+      tags: [Reportes]
+      summary: Historial de resúmenes del día (reports.view)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - { name: from, in: query, schema: { type: string, example: "2026-10-01" } }
+        - { name: to, in: query, schema: { type: string, example: "2026-10-31" } }
+        - { name: all, in: query, schema: { type: string, enum: ["1"] }, description: Todo el rango sin paginar (para descargar) }
+      responses:
+        "200": { description: "Página (o lista con all=1) de { id, date, data, text, generatedAt }" }
+
+  /company/onboarding:
+    get:
+      tags: [Empresa]
+      summary: Guía de primeros pasos (company.manage)
+      description: |
+        Pasos calculados con los datos reales: fiscal (datos para facturar), branch (dirección de la sucursal principal),
+        categories, products, taxes (CABYS en todos y ninguno "por completar"; meta con lo que falta), team (otro miembro o una
+        invitación), cashCodes (alguien con código de caja). Respuesta { steps: [{ key, link, done, meta? }], completed, total, dismissed }.
+      responses:
+        "200": { description: Estado de la guía }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [Empresa]
+      summary: Ocultar (o volver a mostrar) la guía (company.manage)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, properties: { dismissed: { type: boolean, default: true } } }
+      responses:
+        "200": { description: Estado de la guía }
+
+  /platform/overview:
+    get:
+      tags: [Plataforma]
+      summary: Actividad por empresa y empresas nuevas por semana (solo el dueño de la plataforma)
+      description: "activity: lastSeenAt (último inicio o renovación de sesión), movementsWeek, lastMovementAt. signups: 12 semanas."
+      responses:
+        "200": { description: Resumen }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /platform/ai-usage:
+    get:
+      tags: [Plataforma]
+      summary: Medidor de consumo de IA del mes (solo el dueño)
+      description: Gasto estimado (USD) por empresa y por función (CHAT, IMPORT, DAILY_SUMMARY), total, presupuesto y si la IA está en pausa.
+      parameters:
+        - { name: month, in: query, schema: { type: string, example: "2026-10" } }
+      responses:
+        "200": { description: Medidor }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /platform/ai-budget:
+    put:
+      tags: [Plataforma]
+      summary: Presupuesto mensual de IA (solo el dueño)
+      description: |
+        Al llegar a alertPercent del presupuesto se avisa una vez al mes (notificación aiBudgetAlert); al pasarlo, toda
+        consulta a Gemini responde 503 hasta el mes siguiente. 0 = IA apagada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [monthlyUsd, alertPercent]
+              properties:
+                monthlyUsd: { type: number, minimum: 0 }
+                alertPercent: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: Presupuesto guardado }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /platform/actions:
+    get:
+      tags: [Plataforma]
+      summary: Registro de acciones del dueño desde el panel (planes, suspensiones, presupuesto de IA)
+      responses:
+        "200": { description: Últimas 100 acciones }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /customers:
     get:

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast, getDashboardSummary } from "./report.service.ts";
+import { getDailySummary, peekDailySummary, summaryHistory } from "./daily-summary.service.ts";
 
 export async function getDashboardController(req: Request, res: Response) {
   try {
@@ -76,6 +77,31 @@ export async function getStockForecastHandler(req: Request, res: Response) {
 
     const forecast = await getStockForecast(velocityWindowDays, alertThresholdDays);
     res.json(forecast);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+// Resumen del día con IA (Bloque 6D): GET = lo guardado de hoy (sin gastar); POST = generarlo si falta
+export async function peekDailySummaryHandler(_req: Request, res: Response) {
+  try {
+    res.json(await peekDailySummary(res.locals.query));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+export async function dailySummaryHandler(req: Request, res: Response) {
+  try {
+    // ?force=1: volver a generar (queda también el anterior en el historial)
+    res.json(await getDailySummary(res.locals.query, req.user!.id, req.query.force === "1"));
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+export async function summaryHistoryHandler(_req: Request, res: Response) {
+  try {
+    res.json(await summaryHistory(res.locals.query));
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

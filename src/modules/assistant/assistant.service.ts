@@ -1,14 +1,13 @@
 // src/modules/assistant/assistant.service.ts
-import { GoogleGenAI } from "@google/genai";
 import type { Content, Part } from "@google/genai";
 import { toolDeclarations, toolExecutors } from "./assistant.tools.ts";
 import { stripCosts } from "../../middlewares/costs.middleware.ts";
+import { generateMetered, MODELS } from "../ai/ai.service.ts";
 
 // Herramientas que solo se ofrecen con costs.view (devuelven valores a costo)
 const COST_TOOLS = new Set(["getInventoryValueReport"]);
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "API_KEY_DEFAULT" });
-const MODEL = "gemini-3.6-flash";
+const MODEL = MODELS.chat;
 const MAX_TOOL_ROUNDS = 5;
 
 const SYSTEM_INSTRUCTION = `
@@ -20,7 +19,7 @@ Respondé siempre en el mismo idioma en el que te escribe el usuario. Si te escr
 `.trim();
 // El asistente respeta los permisos de quien pregunta: sin costs.view no se le ofrecen las
 // herramientas de valor a costo y a lo que devuelven las demás se le quitan los costos.
-export async function chatWithAssistant(userMessage: string, permissions: string[]) {
+export async function chatWithAssistant(userMessage: string, permissions: string[], userId?: string) {
   const seesCosts = permissions.includes("costs.view");
   const declarations = toolDeclarations.filter((d) => seesCosts || !COST_TOOLS.has(d.name ?? ""));
   const contents: Content[] = [
@@ -28,14 +27,15 @@ export async function chatWithAssistant(userMessage: string, permissions: string
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await ai.models.generateContent({
+    // cada vuelta con herramientas es una consulta: todas pasan por el medidor y el presupuesto
+    const response = await generateMetered("CHAT", {
       model: MODEL,
       contents,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         tools: [{ functionDeclarations: declarations }],
       },
-    });
+    }, userId);
 
     const functionCalls = response.functionCalls;
 

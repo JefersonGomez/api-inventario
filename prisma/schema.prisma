@@ -365,46 +365,49 @@ model Comment {
 // Empresa (tenant). Todo dato de negocio pertenece a una; los usuarios entran por Membership.
 // El plan del dueño (owner.plan) define cuántas empresas puede tener y sus límites.
 model Company {
-  id               String             @id @default(uuid())
-  name             String // nombre comercial (el que se ve en la app)
-  currency         CurrencyCode       @default(CRC)
-  cashCodeDays     Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
+  id                    String             @id @default(uuid())
+  name                  String // nombre comercial (el que se ve en la app)
+  currency              CurrencyCode       @default(CRC)
+  cashCodeDays          Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
+  onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
-  legalName        String? // razón social o nombre de la persona física
-  idType           IdType?
-  idNumber         String?
-  economicActivity String? // código de actividad económica ante Hacienda
-  invoiceEmail     String? // correo que aparece en los comprobantes
-  phone            String?
-  province         String? // código Hacienda: 1 San José … 7 Limón
-  canton           String? // código de 2 dígitos
-  district         String? // código de 2 dígitos
-  addressDetail    String? // otras señas
-  suspendedAt      DateTime? // suspendida por el dueño de la plataforma (p. ej. falta de pago)
-  suspensionReason String?
-  ownerId          String
-  owner            User               @relation("CompanyOwner", fields: [ownerId], references: [id])
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  memberships      Membership[]
-  invitations      Invitation[]
-  categories       Category[]
-  suppliers        Supplier[]
-  products         Product[]
-  movements        StockMovement[]
-  purchaseRequests PurchaseRequest[]
-  purchaseOrders   PurchaseOrder[]
-  auditLogs        AuditLog[]
-  notifications    Notification[]
-  productGroups    ProductGroup[]
-  customers        Customer[]
-  documents        Document[]
-  documentSeqs     DocumentSequence[]
-  locations        Location[]
-  productStocks    ProductStock[]
-  transfers        StockTransfer[]
-  stockCounts      StockCount[]
-  productLots      ProductLot[]
+  legalName             String? // razón social o nombre de la persona física
+  idType                IdType?
+  idNumber              String?
+  economicActivity      String? // código de actividad económica ante Hacienda
+  invoiceEmail          String? // correo que aparece en los comprobantes
+  phone                 String?
+  province              String? // código Hacienda: 1 San José … 7 Limón
+  canton                String? // código de 2 dígitos
+  district              String? // código de 2 dígitos
+  addressDetail         String? // otras señas
+  suspendedAt           DateTime? // suspendida por el dueño de la plataforma (p. ej. falta de pago)
+  suspensionReason      String?
+  ownerId               String
+  owner                 User               @relation("CompanyOwner", fields: [ownerId], references: [id])
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  memberships           Membership[]
+  invitations           Invitation[]
+  categories            Category[]
+  suppliers             Supplier[]
+  products              Product[]
+  movements             StockMovement[]
+  purchaseRequests      PurchaseRequest[]
+  purchaseOrders        PurchaseOrder[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  productGroups         ProductGroup[]
+  customers             Customer[]
+  documents             Document[]
+  documentSeqs          DocumentSequence[]
+  locations             Location[]
+  productStocks         ProductStock[]
+  transfers             StockTransfer[]
+  stockCounts           StockCount[]
+  productLots           ProductLot[]
+  aiUsages              AiUsage[]
+  dailySummaries        DailySummary[]
 
   @@index([ownerId])
 }
@@ -708,4 +711,50 @@ model ProductLot {
 
   @@unique([productId, locationId, code])
   @@index([companyId, expiresAt])
+}
+
+enum AiFeature {
+  CHAT // asistente IA
+  IMPORT // ayuda para importar productos
+  DAILY_SUMMARY // resumen del día
+}
+
+// Medidor de consumo de IA (Bloque 6A): cada consulta a Gemini con sus tokens y su costo estimado.
+// Solo lo ve el dueño de la plataforma; sirve para el presupuesto mensual (PlatformSetting "aiBudget").
+model AiUsage {
+  id           String    @id @default(uuid())
+  companyId    String?
+  company      Company?  @relation(fields: [companyId], references: [id])
+  userId       String?
+  feature      AiFeature
+  model        String
+  inputTokens  Int
+  outputTokens Int // incluye los tokens de "pensamiento"
+  costUsd      Decimal   @db.Decimal(12, 6)
+  createdAt    DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([companyId, createdAt])
+}
+
+// Ajustes de la plataforma (del dueño), por clave: p. ej. "aiBudget" = { monthlyUsd, alertPercent, alertedMonth }
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// Resumen del día con IA (Bloque 6D): se guarda cada uno (también los que se vuelven a generar) para
+// llevar un historial y descargarlo. date = día del navegador (AAAA-MM-DD).
+model DailySummary {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  date        String
+  text        String
+  data        Json // los números del día que se le pasaron a la IA
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, date])
 }
