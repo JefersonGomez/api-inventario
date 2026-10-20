@@ -64,6 +64,7 @@ tags:
   - name: Movimientos
   - name: Proveedores
   - name: Clientes
+  - name: Punto de venta
   - name: Productos base
   - name: Solicitudes de compra
   - name: Órdenes de compra
@@ -2018,6 +2019,197 @@ paths:
               schema: { $ref: '#/components/schemas/StockTransfer' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/registers:
+    get:
+      tags: [Punto de venta]
+      summary: Cajas de mis sucursales con su turno abierto (cash.manage)
+      responses:
+        '200':
+          description: Cajas
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+    post:
+      tags: [Punto de venta]
+      summary: Crear una caja en una sucursal (company.manage)
+      description: "Terminal de 5 dígitos correlativo por sucursal. Límite del plan: maxRegistersPerBranch."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [locationId, name]
+              properties:
+                locationId: { type: string, format: uuid }
+                name: { type: string, maxLength: 60 }
+                ticketWidth: { type: integer, enum: [80, 58], default: 80 }
+      responses:
+        '201': { description: Caja creada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/registers/{id}:
+    patch:
+      tags: [Punto de venta]
+      summary: Editar o desactivar una caja (company.manage; no con un turno abierto)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              properties:
+                name: { type: string, maxLength: 60 }
+                ticketWidth: { type: integer, enum: [80, 58] }
+                isActive: { type: boolean }
+      responses:
+        '200': { description: Caja }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /pos/session:
+    get:
+      tags: [Punto de venta]
+      summary: Mi turno abierto con su resumen (o null)
+      responses:
+        '200': { description: "Turno con summary { openingAmount, salesCount, salesTotal, payments, cashIn, cashOut, expectedCash }" }
+    post:
+      tags: [Punto de venta]
+      summary: Abrir caja con mi código de caja vigente y el monto inicial
+      description: "423 PIN_EXPIRED si el código venció (caja bloqueada hasta renovarlo). 409 si la caja ya está abierta o ya tengo otra abierta."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [registerId, pin, openingAmount]
+              properties:
+                registerId: { type: string, format: uuid }
+                pin: { type: string, pattern: '^\d{4,6}$' }
+                openingAmount: { type: number, minimum: 0 }
+      responses:
+        '201': { description: Turno abierto }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Caja ya abierta }
+        '423': { description: Código vencido (code PIN_EXPIRED) }
+
+  /pos/session/renew-code:
+    post:
+      tags: [Punto de venta]
+      summary: Renovar mi código vencido con el código de un encargado o del admin
+      description: Devuelve el código nuevo una sola vez.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [managerPin]
+              properties:
+                managerPin: { type: string, pattern: '^\d{4,6}$' }
+      responses:
+        '200': { description: "{ pin }" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/session/movements:
+    get:
+      tags: [Punto de venta]
+      summary: Entradas y retiros de efectivo de mi turno
+      responses:
+        '200': { description: Movimientos }
+    post:
+      tags: [Punto de venta]
+      summary: Registrar una entrada o un retiro de efectivo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [type, amount, reason]
+              properties:
+                type: { type: string, enum: [IN, OUT] }
+                amount: { type: number, minimum: 0.01 }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Movimiento }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/sessions/{id}/close:
+    post:
+      tags: [Punto de venta]
+      summary: Cerrar un turno con arqueo por denominación (quien lo abrió o users.manage)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [denominations]
+              properties:
+                denominations: { type: object, additionalProperties: { type: integer, minimum: 0 }, description: "valor → cantidad" }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: "Resumen con countedCash y difference (negativo = faltante)" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /pos/sales:
+    post:
+      tags: [Punto de venta]
+      summary: Vender (sales.sell, con caja abierta)
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. 409 NO_STOCK sin stock suficiente; 409 NO_SESSION sin caja abierta. Devuelve los datos del tiquete."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: 
+              type: object
+              required: [lines, payments]
+              properties:
+                customerId: { type: string, format: uuid }
+                notes: { type: string, maxLength: 500 }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      quantity: { type: number }
+                payments:
+                  type: array
+                  items:
+                    type: object
+                    required: [method, amount]
+                    properties:
+                      method: { type: string, enum: [CASH, CARD, SINPE] }
+                      amount: { type: number }
+                      reference: { type: string, description: "Autorización del datáfono o comprobante SINPE" }
+                      tendered: { type: number, description: "Efectivo recibido (vuelto = tendered - amount)" }
+      responses:
+        '201': { description: "{ document, company, register, location, cashier }" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Sin stock o sin caja abierta }
+
+  /pos/tickets/{id}:
+    get:
+      tags: [Punto de venta]
+      summary: Datos para reimprimir el tiquete de un comprobante (sales.sell)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: "{ document, company, register, location, cashier }" }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /stock-counts:
     get:

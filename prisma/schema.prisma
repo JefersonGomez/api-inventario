@@ -123,35 +123,38 @@ enum PurchaseOrderStatus {
 }
 
 model User {
-  id                String            @id @default(uuid())
-  name              String
-  email             String            @unique
-  passwordHash      String
-  createdAt         DateTime          @default(now()) // Corregido: createAt -> createdAt
-  termsAcceptedAt   DateTime? // cuándo aceptó los términos y la política de privacidad
-  termsVersion      String? // versión que aceptó (src/config/legal.ts)
-  isPlatformOwner   Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
-  avatarUrl         String?
-  phone             String?
-  company           String?
-  isActive          Boolean           @default(true) // cuenta suspendida a nivel plataforma
-  plan              PlanCode          @default(BASIC)
-  lastCompanyId     String? // empresa que se abre al iniciar sesión
-  memberships       Membership[]
-  invitationsSent   Invitation[]
-  ownedCompanies    Company[]         @relation("CompanyOwner")
-  movements         StockMovement[]
-  purchaseRequests  PurchaseRequest[]
-  purchaseOrders    PurchaseOrder[]
-  transfersSent     StockTransfer[]   @relation("TransferSentBy")
-  countsCreated     StockCount[]      @relation("CountCreatedBy")
-  countsClosed      StockCount[]      @relation("CountClosedBy")
-  transfersReceived StockTransfer[]   @relation("TransferReceivedBy")
-  auditLogs         AuditLog[]
-  refreshTokens     RefreshToken[]
-  notifications     Notification[]
-  comments          Comment[]
-  documents         Document[]
+  id                 String            @id @default(uuid())
+  name               String
+  email              String            @unique
+  passwordHash       String
+  createdAt          DateTime          @default(now()) // Corregido: createAt -> createdAt
+  termsAcceptedAt    DateTime? // cuándo aceptó los términos y la política de privacidad
+  termsVersion       String? // versión que aceptó (src/config/legal.ts)
+  isPlatformOwner    Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
+  avatarUrl          String?
+  phone              String?
+  company            String?
+  isActive           Boolean           @default(true) // cuenta suspendida a nivel plataforma
+  plan               PlanCode          @default(BASIC)
+  lastCompanyId      String? // empresa que se abre al iniciar sesión
+  memberships        Membership[]
+  invitationsSent    Invitation[]
+  ownedCompanies     Company[]         @relation("CompanyOwner")
+  movements          StockMovement[]
+  purchaseRequests   PurchaseRequest[]
+  purchaseOrders     PurchaseOrder[]
+  transfersSent      StockTransfer[]   @relation("TransferSentBy")
+  countsCreated      StockCount[]      @relation("CountCreatedBy")
+  countsClosed       StockCount[]      @relation("CountClosedBy")
+  transfersReceived  StockTransfer[]   @relation("TransferReceivedBy")
+  auditLogs          AuditLog[]
+  refreshTokens      RefreshToken[]
+  notifications      Notification[]
+  comments           Comment[]
+  documents          Document[]
+  cashSessionsOpened CashSession[]     @relation("SessionOpenedBy")
+  cashSessionsClosed CashSession[]     @relation("SessionClosedBy")
+  cashMovements      CashMovement[]
 }
 
 model Category {
@@ -408,6 +411,9 @@ model Company {
   productLots           ProductLot[]
   aiUsages              AiUsage[]
   dailySummaries        DailySummary[]
+  cashRegisters         CashRegister[]
+  cashSessions          CashSession[]
+  cashMovements         CashMovement[]
 
   @@index([ownerId])
 }
@@ -478,6 +484,8 @@ model Document {
   createdById         String
   createdBy           User              @relation(fields: [createdById], references: [id])
   issuedAt            DateTime          @default(now())
+  cashSessionId       String? // turno de caja donde se vendió (POS)
+  cashSession         CashSession?      @relation(fields: [cashSessionId], references: [id])
   lines               DocumentLine[]
   payments            DocumentPayment[]
 
@@ -512,6 +520,8 @@ model DocumentPayment {
   document   Document      @relation(fields: [documentId], references: [id])
   method     PaymentMethod
   amount     Decimal       @db.Decimal(18, 5)
+  reference  String? // n.º de autorización del datáfono o comprobante SINPE
+  tendered   Decimal?      @db.Decimal(18, 2) // efectivo: lo que entregó el cliente (vuelto = tendered − amount)
 }
 
 // Último número usado por empresa + tipo + sucursal + terminal (se incrementa en la misma transacción)
@@ -590,6 +600,7 @@ model Location {
   transfersIn    StockTransfer[] @relation("TransferTo")
   counts         StockCount[]
   lots           ProductLot[]
+  cashRegisters  CashRegister[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -757,4 +768,76 @@ model DailySummary {
   createdAt   DateTime @default(now())
 
   @@index([companyId, date])
+}
+
+// Caja (terminal) de una sucursal (Bloque 7). El terminalCode (5 dígitos) va en el consecutivo de sus tiquetes.
+model CashRegister {
+  id           String        @id @default(uuid())
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id])
+  locationId   String
+  location     Location      @relation(fields: [locationId], references: [id])
+  name         String
+  terminalCode String // "00001", único por sucursal
+  ticketWidth  Int           @default(80) // tiquete térmico: 80 o 58 mm
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     CashSession[]
+
+  @@unique([locationId, terminalCode])
+  @@index([companyId])
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+// Turno de caja: se abre con el código del cajero y un monto inicial y se cierra con arqueo.
+// Una abierta por caja y una por persona a la vez (índices únicos parciales en la migración).
+model CashSession {
+  id            String            @id @default(uuid())
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id])
+  registerId    String
+  register      CashRegister      @relation(fields: [registerId], references: [id])
+  openedById    String
+  openedBy      User              @relation("SessionOpenedBy", fields: [openedById], references: [id])
+  openingAmount Decimal           @db.Decimal(18, 2)
+  status        CashSessionStatus @default(OPEN)
+  openedAt      DateTime          @default(now())
+  closedById    String?
+  closedBy      User?             @relation("SessionClosedBy", fields: [closedById], references: [id])
+  closedAt      DateTime?
+  expectedCash  Decimal?          @db.Decimal(18, 2) // al cerrar: inicial + ventas en efectivo + entradas − retiros − devoluciones
+  countedCash   Decimal?          @db.Decimal(18, 2)
+  difference    Decimal?          @db.Decimal(18, 2) // contado − esperado (negativo = faltante)
+  denominations Json? // conteo por denominación { "20000": 3, ... }
+  closingNote   String?
+  documents     Document[]
+  movements     CashMovement[]
+
+  @@index([companyId, status])
+}
+
+enum CashMovementType {
+  IN // entrada de efectivo (p. ej. más cambio)
+  OUT // retiro (p. ej. pago a un proveedor, depósito)
+}
+
+model CashMovement {
+  id        String           @id @default(uuid())
+  companyId String
+  company   Company          @relation(fields: [companyId], references: [id])
+  sessionId String
+  session   CashSession      @relation(fields: [sessionId], references: [id])
+  type      CashMovementType
+  amount    Decimal          @db.Decimal(18, 2)
+  reason    String
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  createdAt DateTime         @default(now())
+
+  @@index([sessionId])
 }

@@ -37,12 +37,14 @@ export type IssueDocumentInput = {
   customerId?: string | null
   saleCondition?: SaleCondition
   lines: DocumentLineInput[]
-  payments?: { method: PaymentMethod; amount: number }[]
+  // reference: autorización del datáfono / comprobante SINPE; tendered: efectivo entregado (para el vuelto)
+  payments?: { method: PaymentMethod; amount: number; reference?: string | null | undefined; tendered?: number | null | undefined }[]
   referenceDocumentId?: string | null // obligatorio en notas
   referenceReason?: string | null
   notes?: string | null
   branchCode?: string
   terminalCode?: string
+  cashSessionId?: string // turno de caja del POS
 }
 
 type Computed = {
@@ -202,7 +204,14 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         notes: input.notes?.trim() || null,
         createdById: userId,
         lines: { createMany: { data: lines } },
-        ...(payments.length && { payments: { createMany: { data: payments } } }),
+        ...(input.cashSessionId && { cashSessionId: input.cashSessionId }),
+        ...(payments.length && {
+          payments: {
+            createMany: {
+              data: payments.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference || null, tendered: p.tendered ?? null })),
+            },
+          },
+        }),
       },
       select: { id: true, type: true, number: true, consecutive: true, total: true },
     })

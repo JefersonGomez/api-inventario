@@ -158,3 +158,36 @@ export async function authorizeWithPin(requesterId: string, pin: string, permiss
   }
   return null
 }
+
+export class CodeExpiredError extends Error {}
+
+// Abrir caja (Bloque 7): el código tiene que ser el de la persona, vigente. Vencido = caja bloqueada
+// hasta renovarlo (ella misma desde su perfil o con el código del encargado, renewWithManagerPin).
+export async function verifyOwnPin(userId: string, pin: string) {
+  const m = await membershipOf(userId)
+  if (!m.pinHash) throw new Error("Todavía no tienes código de caja: pídeselo al administrador")
+  const info = codeInfo(m, await codeDays())
+  if (info.pinExpired) throw new CodeExpiredError("Tu código de caja venció: no puedes abrir caja hasta renovarlo")
+  if (!(await bcrypt.compare(pin, m.pinHash))) throw new Error("El código no es correcto")
+  return info
+}
+
+// El encargado (o el admin) renueva en la misma pantalla el código vencido de un cajero con SU código:
+// se genera uno nuevo al azar para el cajero (se muestra una vez). null = el código no sirve para esto.
+export async function renewWithManagerPin(cashierId: string, managerPin: string) {
+  const [candidates, days] = await Promise.all([
+    prismaRoot.membership.findMany({
+      where: { companyId: currentCompanyId(), isActive: true, pinHash: { not: null }, user: { isActive: true } },
+      select: { userId: true, role: true, grantedPermissions: true, revokedPermissions: true, pinHash: true, pinSetAt: true, pinSetBySelf: true },
+    }),
+    codeDays(),
+  ])
+  const target = await membershipOf(cashierId)
+  for (const m of candidates) {
+    if (m.userId === cashierId || codeInfo(m, days).pinExpired) continue
+    const permissions = effectivePermissions(m.role, m.grantedPermissions, m.revokedPermissions)
+    if (!canManageCodeOf({ id: m.userId, permissions }, { userId: cashierId, perms: target.perms })) continue
+    if (await bcrypt.compare(managerPin, m.pinHash!)) return assignPinTo(cashierId, { id: m.userId, permissions })
+  }
+  return null
+}
