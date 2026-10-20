@@ -1,13 +1,15 @@
 import { Router } from "express"
 import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts"
-import { validate } from "../../middlewares/validate.middleware.ts"
+import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import { pinLimiter } from "../../middlewares/rate-limit.middleware.ts"
 import {
-  cashMovementSchema, closeSessionSchema, createRegisterSchema, openSessionSchema, renewCodeSchema, saleSchema, updateRegisterSchema,
+  cashMovementSchema, closeSessionSchema, createRegisterSchema, openSessionSchema, reconcileSchema, renewCodeSchema, saleSchema,
+  sessionListQuerySchema, updateRegisterSchema,
 } from "./pos.service.ts"
 import {
   addCashMovementHandler, closeSessionHandler, createRegisterHandler, currentSessionHandler, listCashMovementsHandler,
-  listRegistersHandler, openSessionHandler, renewCodeHandler, sellHandler, ticketHandler, updateRegisterHandler,
+  listRegistersHandler, listSessionsHandler, openSessionHandler, reconcileHandler, renewCodeHandler, sellHandler, sessionReportHandler,
+  ticketHandler, updateRegisterHandler,
 } from "./pos.controller.ts"
 
 export const router = Router()
@@ -24,7 +26,12 @@ router.post("/session/renew-code", validate(renewCodeSchema), Authenticated, Can
 router.get("/session/movements", Authenticated, Can("cash.manage"), listCashMovementsHandler)
 router.post("/session/movements", validate(cashMovementSchema), Authenticated, Can("cash.manage"), addCashMovementHandler)
 router.post("/sessions/:id/close", validate(closeSessionSchema), Authenticated, Can("cash.manage"), closeSessionHandler)
+// Arqueos (jefa de caja): cierres pendientes, reporte del turno y el arqueo
+router.get("/sessions", validateQuery(sessionListQuerySchema), Authenticated, Can("cash.reconcile"), listSessionsHandler)
+router.get("/sessions/:id/report", Authenticated, sessionReportHandler) // el cajero ve el suyo (sin el esperado)
+router.post("/sessions/:id/reconcile", validate(reconcileSchema), Authenticated, Can("cash.reconcile"), reconcileHandler)
 
 // Venta y tiquete
-router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), sellHandler)
+// con código de encargado (negativas) cuenta para el límite de intentos de PIN
+router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (req, res, next) => (req.body.negativePin ? pinLimiter(req, res, next) : next()), sellHandler)
 router.get("/tickets/:id", Authenticated, Can("sales.sell"), ticketHandler)

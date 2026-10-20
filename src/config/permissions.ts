@@ -17,14 +17,16 @@ export const PERMISSIONS = [
   "company.manage", // datos de la empresa, moneda y datos fiscales
   "sales.sell", // vender en la caja (Bloque 7)
   "cash.manage", // abrir y cerrar su caja (Bloque 7)
+  "cash.reconcile", // jefa de caja: hacer el arqueo de los cierres y ver el efectivo esperado
   "sales.discount", // descuentos sobre el tope del cajero; autoriza con su PIN
   "sales.void", // anular ventas y hacer devoluciones; autoriza con su PIN
+  "sales.negative", // autorizar negativas: vender lo que el sistema tiene sin stock (descuadre); con su PIN
   "accounting.view", // contabilidad (Bloques 10 y 11)
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
 
 // Permisos que una persona puede usar para autorizar en la caja con su PIN
-export const AUTHORIZING_PERMISSIONS: Permission[] = ["sales.discount", "sales.void"]
+export const AUTHORIZING_PERMISSIONS: Permission[] = ["sales.discount", "sales.void", "sales.negative"]
 
 // Quién necesita código de caja: quien abre caja o autoriza con PIN
 export const needsPin = (perms: readonly string[]) =>
@@ -37,7 +39,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MANAGER: [
     "products.manage", "costs.view", "stock.move", "purchases.request", "purchases.manage", "suppliers.manage",
     "customers.manage", "customers.delete", "reports.view", "audit.view", "sales.sell", "cash.manage",
-    "sales.discount", "sales.void", "accounting.view",
+    "cash.reconcile", "sales.discount", "sales.void", "sales.negative", "accounting.view",
   ],
   EMPLOYE: ["costs.view", "stock.move", "purchases.request", "customers.manage", "reports.view"],
   CASHIER: ["purchases.request", "customers.manage", "sales.sell", "cash.manage"],

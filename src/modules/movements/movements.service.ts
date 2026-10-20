@@ -18,6 +18,7 @@ export type MovementOrigin = {
   locationId?: string | null;
   lot?: LotInput | null | undefined;
   lotDefault?: string | undefined;
+  allowNegative?: boolean; // negativa autorizada en la caja: la salida puede dejar el stock en negativo
 };
 
 // Mueve el stock de un producto en una ubicación (ProductStock) y el total del producto (Product.stock)
@@ -56,7 +57,7 @@ export async function createMovement(
         create: { companyId: currentCompanyId(), productId, locationId: location.id, quantity: delta },
         update: { quantity: { increment: delta } },
       });
-      if (row.quantity.isNegative()) throw new Error(`Stock insuficiente en ${location.name}`);
+      if (row.quantity.isNegative() && !origin.allowNegative) throw new Error(`Stock insuficiente en ${location.name}`);
     } else {
       throw new Error("Tipo de movimiento inválido");
     }

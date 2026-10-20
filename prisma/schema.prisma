@@ -154,7 +154,11 @@ model User {
   documents          Document[]
   cashSessionsOpened CashSession[]     @relation("SessionOpenedBy")
   cashSessionsClosed CashSession[]     @relation("SessionClosedBy")
+  cashSessionsReconciled CashSession[] @relation("SessionReconciledBy")
   cashMovements      CashMovement[]
+  negativesReported  StockNegative[] @relation("NegativeReportedBy")
+  negativesAuthorized StockNegative[] @relation("NegativeAuthorizedBy")
+  negativesResolved  StockNegative[] @relation("NegativeResolvedBy")
 }
 
 model Category {
@@ -208,6 +212,7 @@ model Product {
   stock              Decimal             @default(0) @db.Decimal(14, 3) // total de todas las ubicaciones (suma de ProductStock)
   minStock           Decimal             @default(0) @db.Decimal(14, 3) // mínimo en CADA ubicación donde se maneja
   stocks             ProductStock[]
+  negatives          StockNegative[]
   transferItems      StockTransferItem[]
   countItems         StockCountItem[]
   // alimentos, medicinas...: el stock se lleva por lote con su vencimiento y las salidas toman el que vence antes
@@ -372,6 +377,7 @@ model Company {
   name                  String // nombre comercial (el que se ve en la app)
   currency              CurrencyCode       @default(CRC)
   cashCodeDays          Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
+  posShowStock          Boolean            @default(true) // el POS muestra la cantidad en stock (si no: disponible/agotado)
   onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
   legalName             String? // razón social o nombre de la persona física
@@ -414,6 +420,7 @@ model Company {
   cashRegisters         CashRegister[]
   cashSessions          CashSession[]
   cashMovements         CashMovement[]
+  stockNegatives        StockNegative[]
 
   @@index([ownerId])
 }
@@ -487,6 +494,7 @@ model Document {
   cashSessionId       String? // turno de caja donde se vendió (POS)
   cashSession         CashSession?      @relation(fields: [cashSessionId], references: [id])
   lines               DocumentLine[]
+  negatives           StockNegative[]
   payments            DocumentPayment[]
 
   @@unique([companyId, type, branchCode, terminalCode, number])
@@ -601,6 +609,7 @@ model Location {
   counts         StockCount[]
   lots           ProductLot[]
   cashRegisters  CashRegister[]
+  negatives      StockNegative[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -780,6 +789,7 @@ model CashRegister {
   name         String
   terminalCode String // "00001", único por sucursal
   ticketWidth  Int           @default(80) // tiquete térmico: 80 o 58 mm
+  customerDisplay Boolean      @default(false) // segunda pantalla mirando al cliente
   isActive     Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -815,6 +825,12 @@ model CashSession {
   difference    Decimal?          @db.Decimal(18, 2) // contado − esperado (negativo = faltante)
   denominations Json? // conteo por denominación { "20000": 3, ... }
   closingNote   String?
+  // arqueo (segundo paso, la jefa de caja con el cajero): cierre ciego, el cajero no ve el esperado
+  reconciledById String?
+  reconciledBy   User?             @relation("SessionReconciledBy", fields: [reconciledById], references: [id])
+  reconciledAt   DateTime?
+  cardDeclared   Decimal?          @db.Decimal(18, 2) // total del cierre en papel del datáfono (opcional, para comparar)
+  reconcileNote  String?
   documents     Document[]
   movements     CashMovement[]
 
@@ -840,4 +856,38 @@ model CashMovement {
   createdAt DateTime         @default(now())
 
   @@index([sessionId])
+}
+
+enum NegativeStatus {
+  OPEN
+  RESOLVED
+}
+
+// Negativa: venta de un producto que el sistema tenía sin stock suficiente (descuadre de inventario).
+// La autoriza un encargado con su código en la caja; inventario la revisa y la resuelve (conteo/ajuste).
+model StockNegative {
+  id               String         @id @default(uuid())
+  companyId        String
+  company          Company        @relation(fields: [companyId], references: [id])
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id])
+  locationId       String
+  location         Location       @relation(fields: [locationId], references: [id])
+  documentId       String
+  document         Document       @relation(fields: [documentId], references: [id])
+  quantity         Decimal        @db.Decimal(14, 3) // lo vendido de más (lo que quedó en negativo)
+  stockBefore      Decimal        @db.Decimal(14, 3) // lo que decía el sistema antes de la venta
+  reportedById     String // el cajero
+  reportedBy       User           @relation("NegativeReportedBy", fields: [reportedById], references: [id])
+  authorizedById   String // el encargado que dio su código
+  authorizedBy     User           @relation("NegativeAuthorizedBy", fields: [authorizedById], references: [id])
+  status           NegativeStatus @default(OPEN)
+  resolvedById     String?
+  resolvedBy       User?          @relation("NegativeResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt       DateTime?
+  resolution       String? // qué se encontró / qué se hizo
+  countedQuantity  Decimal?       @db.Decimal(14, 3) // si al resolver se contó: cantidad real en la sucursal
+  createdAt        DateTime       @default(now())
+
+  @@index([companyId, status])
 }

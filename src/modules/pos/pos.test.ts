@@ -60,7 +60,7 @@ describe("Punto de venta", () => {
 
     const open = await request(app).post("/pos/session").set(cashier.auth).send({ registerId, pin: cashierPin, openingAmount: 20000 })
     expect(open.status).toBe(201)
-    expect(open.body).toMatchObject({ status: "OPEN", register: { id: registerId }, summary: { expectedCash: 20000, salesCount: 0 } })
+    expect(open.body).toMatchObject({ status: "OPEN", register: { id: registerId }, summary: { openingAmount: 20000, salesCount: 0 } })
     // la caja ya está abierta: otra persona no la abre
     expect((await request(app).post("/pos/session").set(cashier2.auth).send({ registerId, pin: "7364", openingAmount: 0 })).status).toBe(409)
     // y no se desactiva con el turno abierto
@@ -92,18 +92,65 @@ describe("Punto de venta", () => {
     expect(await prisma.document.count()).toBe(1)
   })
 
-  it("entradas/retiros y cierre con arqueo por denominación", async () => {
+  it("negativas: sin stock se vende con el código del encargado, queda en negativo y le llega a inventario", async () => {
+    const body = { lines: [{ productId, quantity: 9 }], payments: [{ method: "CARD", amount: 10170 }] }
+    const ask = await sell(cashier, body)
+    expect(ask.status).toBe(409)
+    expect(ask.body).toMatchObject({ code: "NEGATIVE_NEEDS_AUTH", shortages: [{ productId, stock: 7, wanted: 9 }] })
+    // el código de otro cajero no autoriza negativas
+    expect((await sell(cashier, { ...body, negativePin: "7364" })).status).toBe(403)
+    const res = await sell(cashier, { ...body, negativePin: managerPin })
+    expect(res.status).toBe(201)
+    expect(res.body.negatives).toBe(1)
+    expect(await stockAt()).toBe(-2)
+    const neg = await prisma.stockNegative.findFirstOrThrow()
+    expect(neg).toMatchObject({ reportedById: cashier.user.id, authorizedById: manager.user.id, status: "OPEN" })
+    expect(Number(neg.quantity)).toBe(2)
+    expect(await prisma.notification.count({ where: { type: "stockNegative", userId: manager.user.id } })).toBe(1)
+
+    // inventario la ve y la resuelve contando lo que hay de verdad
+    expect((await request(app).get("/negatives").set(cashier.auth)).status).toBe(403)
+    const list = await request(app).get("/negatives?status=OPEN").set(admin.auth)
+    expect(list.body).toMatchObject({ openCount: 1, items: [{ product: { name: "Arroz" }, reportedBy: { id: cashier.user.id } }] })
+    expect((await request(app).post(`/negatives/${neg.id}/resolve`).set(admin.auth).send({})).status).toBe(400)
+    const solved = await request(app).post(`/negatives/${neg.id}/resolve`).set(admin.auth).send({ resolution: "Había 5 en la bodega de atrás", countedQuantity: 5 })
+    expect(solved.body).toMatchObject({ status: "RESOLVED", resolvedBy: { id: admin.user.id } })
+    expect(await stockAt()).toBe(5)
+    expect((await request(app).post(`/negatives/${neg.id}/resolve`).set(admin.auth).send({ resolution: "otra vez" })).status).toBe(400)
+  })
+
+  it("cierre ciego del cajero y después el arqueo de la jefa de caja", async () => {
     expect((await request(app).post("/pos/session/movements").set(cashier.auth).send({ type: "OUT", amount: 999999, reason: "Depósito" })).body.error).toMatch(/tanto efectivo/)
     expect((await request(app).post("/pos/session/movements").set(cashier.auth).send({ type: "OUT", amount: 5000, reason: "Pago al proveedor" })).status).toBe(201)
     const session = (await request(app).get("/pos/session").set(cashier.auth)).body
-    // 20000 inicial + 2000 en efectivo − 5000 retirados
-    expect(session.summary).toMatchObject({ expectedCash: 17000, salesCount: 1, payments: { CASH: 2000, SINPE: 1390 }, cashOut: 5000 })
+    // el cajero no ve el efectivo esperado (cierre ciego)
+    expect(session.summary).toMatchObject({ salesCount: 2, payments: { CASH: 2000, SINPE: 1390, CARD: 10170 }, cashOut: 5000 })
+    expect(session.summary.expectedCash).toBeUndefined()
 
-    expect((await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier2.auth).send({ denominations: {} })).status).toBe(403)
-    const closed = await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier.auth)
-      .send({ denominations: { "10000": 1, "5000": 1, "1000": 1, "500": 1 }, note: "Faltan 500" })
-    expect(closed.body).toMatchObject({ expectedCash: 17000, countedCash: 16500, difference: -500 })
+    // paso 1: el cajero cierra sin contar
+    expect((await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier2.auth).send({})).status).toBe(403)
+    const closed = await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier.auth).send({ note: "Todo normal" })
+    expect(closed.status).toBe(200)
+    expect(closed.body).toMatchObject({ status: "CLOSED", reconciledAt: null, summary: { salesCount: 2 } })
+    expect(closed.body.expectedCash).toBeUndefined()
+    expect(closed.body.summary.expectedCash).toBeUndefined()
     expect((await request(app).get("/pos/session").set(cashier.auth)).body).toBeNull()
-    expect((await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier.auth).send({ denominations: {} })).status).toBe(404)
+    expect((await request(app).post(`/pos/sessions/${session.id}/close`).set(cashier.auth).send({})).status).toBe(404)
+
+    // paso 2: la jefa de caja ve los pendientes y hace el arqueo con el cajero
+    expect((await request(app).get("/pos/sessions?pending=1").set(cashier.auth)).status).toBe(403)
+    const pending = await request(app).get("/pos/sessions?pending=1").set(manager.auth)
+    expect(pending.body).toMatchObject({ pendingCount: 1, items: [{ id: session.id, openedBy: { id: cashier.user.id } }] })
+    const reconcile = (body: object) => request(app).post(`/pos/sessions/${session.id}/reconcile`).set(manager.auth).send(body)
+    const res = await reconcile({ denominations: { "10000": 1, "5000": 1, "1000": 1, "500": 1 }, cardDeclared: 10000, note: "Faltan 500" })
+    // 20000 inicial + 2000 en efectivo − 5000 retirados = 17000; datáfono 10000 vs 10170 cobrados
+    expect(res.body).toMatchObject({ expectedCash: 17000, countedCash: 16500, difference: -500, cardDeclared: 10000, cardDifference: -170, reconciledBy: { id: manager.user.id } })
+    expect((await reconcile({ denominations: {} })).status).toBe(409)
+    // el cajero ve su reporte con lo contado, sin el esperado ni la diferencia
+    const mine = (await request(app).get(`/pos/sessions/${session.id}/report`).set(cashier.auth)).body
+    expect(mine).toMatchObject({ countedCash: 16500 })
+    expect(mine.expectedCash).toBeUndefined()
+    expect(mine.difference).toBeUndefined()
+    expect((await request(app).get(`/pos/sessions/${session.id}/report`).set(cashier2.auth)).status).toBe(404)
   })
 })

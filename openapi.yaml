@@ -227,6 +227,7 @@ components:
         name: { type: string }
         currency: { type: string, enum: [CRC, USD], description: Moneda en la que se muestran los montos }
         cashCodeDays: { type: integer, minimum: 7, maximum: 365, description: Días que dura un código de caja (30 por defecto) }
+        posShowStock: { type: boolean }
         legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -1218,6 +1219,7 @@ paths:
                 name: { type: string, minLength: 1, maxLength: 120 }
                 currency: { type: string, enum: [CRC, USD] }
                 cashCodeDays: { type: integer, minimum: 7, maximum: 365 }
+                posShowStock: { type: boolean, description: "El POS muestra la cantidad en stock (si no: disponible/agotado)" }
                 legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
                 idType: { $ref: '#/components/schemas/IdType' }
                 idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -2045,6 +2047,7 @@ paths:
                 locationId: { type: string, format: uuid }
                 name: { type: string, maxLength: 60 }
                 ticketWidth: { type: integer, enum: [80, 58], default: 80 }
+                customerDisplay: { type: boolean, default: false, description: "Segunda pantalla mirando al cliente" }
       responses:
         '201': { description: Caja creada }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -2064,6 +2067,7 @@ paths:
               properties:
                 name: { type: string, maxLength: 60 }
                 ticketWidth: { type: integer, enum: [80, 58] }
+                customerDisplay: { type: boolean }
                 isActive: { type: boolean }
       responses:
         '200': { description: Caja }
@@ -2145,29 +2149,67 @@ paths:
   /pos/sessions/{id}/close:
     post:
       tags: [Punto de venta]
-      summary: Cerrar un turno con arqueo por denominación (quien lo abrió o users.manage)
+      summary: "Paso 1: cierre ciego del cajero (quien lo abrió, users.manage o cash.reconcile)"
+      description: "Ya no se vende en ese turno y queda pendiente de arqueo. Devuelve el reporte del turno (sin el efectivo esperado para quien no hace arqueos)."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: Reporte del turno }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /pos/sessions:
+    get:
+      tags: [Punto de venta]
+      summary: Cierres de caja de mis sucursales (cash.reconcile, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: pending, in: query, schema: { type: string, enum: ['1', '0'] }, description: "1 = sin arqueo; 0 = con arqueo" }
+      responses:
+        '200': { description: "Página con pendingCount" }
+
+  /pos/sessions/{id}/report:
+    get:
+      tags: [Punto de venta]
+      summary: Reporte de un turno (el cajero, el suyo sin esperado ni diferencia; cash.reconcile, todos)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: "Turno con summary, movimientos, conteo y (cash.reconcile) expectedCash, difference, cardDifference" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /pos/sessions/{id}/reconcile:
+    post:
+      tags: [Punto de venta]
+      summary: "Paso 2: arqueo de la jefa de caja con el cajero (cash.reconcile; no el de su propia caja)"
       parameters: [{ $ref: '#/components/parameters/Id' }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: 
+            schema:
               type: object
               required: [denominations]
               properties:
                 denominations: { type: object, additionalProperties: { type: integer, minimum: 0 }, description: "valor → cantidad" }
+                cardDeclared: { type: number, minimum: 0, description: "Total del cierre en papel del datáfono (opcional)" }
                 note: { type: string, maxLength: 500 }
       responses:
-        '200': { description: "Resumen con countedCash y difference (negativo = faltante)" }
+        '200': { description: Reporte con el arqueo }
         '400': { $ref: '#/components/responses/BadRequest' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Ya tiene arqueo }
 
   /pos/sales:
     post:
       tags: [Punto de venta]
       summary: Vender (sales.sell, con caja abierta)
-      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. 409 NO_STOCK sin stock suficiente; 409 NO_SESSION sin caja abierta. Devuelve los datos del tiquete."
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Devuelve los datos del tiquete y negatives (cantidad de negativas)."
       requestBody:
         required: true
         content:
@@ -2178,6 +2220,7 @@ paths:
               properties:
                 customerId: { type: string, format: uuid }
                 notes: { type: string, maxLength: 500 }
+                negativePin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza las negativas" }
                 lines:
                   type: array
                   items:
@@ -2201,6 +2244,38 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Sin stock o sin caja abierta }
+
+  /negatives:
+    get:
+      tags: [Punto de venta]
+      summary: Negativas de mis ubicaciones (stock.move, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED] } }
+      responses:
+        '200': { description: "Página con openCount (pendientes)" }
+
+  /negatives/{id}/resolve:
+    post:
+      tags: [Punto de venta]
+      summary: Resolver una negativa (stock.move)
+      description: "Con countedQuantity ajusta el stock de la sucursal a lo contado."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution]
+              properties:
+                resolution: { type: string, maxLength: 500 }
+                countedQuantity: { type: number, minimum: 0 }
+      responses:
+        '200': { description: Negativa resuelta }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /pos/tickets/{id}:
     get:

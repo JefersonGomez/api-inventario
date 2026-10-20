@@ -220,11 +220,11 @@ describe("Roles, permisos y PIN de autorización", () => {
     await prisma.membership.updateMany({ where: { userId: manager.user.id }, data: { pinSetAt: new Date() } })
 
     // sin permisos de autorizar ya no autoriza, pero conserva el código (sigue abriendo caja)
-    await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void"] })
+    await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void", "sales.negative"] })
     expect((await request(app).post("/authorizations").set(cashier.auth).send({ pin: "4821", permission: "sales.void" })).status).toBe(401)
     expect((await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })).pinHash).not.toBeNull()
     // si tampoco abre caja, el código ya no sirve y se borra
-    await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void", "cash.manage"] })
+    await request(app).patch(`/users/${manager.user.id}/access`).set(admin.auth).send({ role: "MANAGER", revokedPermissions: ["sales.discount", "sales.void", "sales.negative", "cash.manage"] })
     expect((await prisma.membership.findFirstOrThrow({ where: { userId: manager.user.id } })).pinHash).toBeNull()
   })
 

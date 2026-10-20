@@ -24,7 +24,7 @@ export const assignPinSchema = z.object({ pin: pinField.optional() }).optional()
 
 export const authorizeSchema = z.object({
   pin: pinField,
-  permission: z.enum(AUTHORIZING_PERMISSIONS as ["sales.discount", "sales.void"]),
+  permission: z.enum(AUTHORIZING_PERMISSIONS as ["sales.discount", "sales.void", "sales.negative"]),
   reason: z.string().trim().max(200).optional(), // qué se autoriza (queda en auditoría)
 })
 

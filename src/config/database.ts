@@ -21,7 +21,7 @@ const TENANT_MODELS = new Set([
   "PurchaseRequest", "PurchaseOrder", "AuditLog", "Notification", "Invitation",
   "ProductGroup", "Customer", "Document", "DocumentSequence",
   "Location", "ProductStock", "StockTransfer", "StockCount", "ProductLot", "DailySummary",
-  "CashRegister", "CashSession", "CashMovement",
+  "CashRegister", "CashSession", "CashMovement", "StockNegative",
   // DocumentLine y DocumentPayment no tienen companyId: se crean y leen siempre a través de su Document
 ])
 
