@@ -532,6 +532,7 @@ model DocumentLine {
   unitPrice   Decimal       @db.Decimal(18, 5) // sin IVA
   discount    Decimal       @db.Decimal(18, 5) // monto, sin IVA
   discountLabel String? // naturaleza del descuento (Hacienda): el tipo de descuento usado
+  unitCost      Decimal?      @db.Decimal(12, 4) // costo promedio del producto al vender (para la ganancia); null = sin costo conocido
   // nota de crédito: la línea de la venta que se devuelve y en qué estado volvió el producto
   sourceLineId    String?
   sourceLine      DocumentLine?    @relation("LineReturns", fields: [sourceLineId], references: [id])

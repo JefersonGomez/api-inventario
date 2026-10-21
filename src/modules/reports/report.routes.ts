@@ -5,7 +5,9 @@ import {
   getMovementsReportController,
   getInventoryValueController,getInventoryValueBreakdownHandler,getStockForecastHandler,
   getDashboardController, peekDailySummaryHandler, dailySummaryHandler, summaryHistoryHandler,
+  mySalesHandler, salesReportHandler, salesTodayHandler,
 } from "./report.controller.ts";
+import { mySalesQuerySchema, salesReportQuerySchema } from "./sales-report.service.ts";
 import { validateQuery } from "../../middlewares/validate.middleware.ts";
 import { dailySummaryQuerySchema, summaryHistorySchema } from "./daily-summary.service.ts";
 
@@ -23,3 +25,7 @@ router.get("/daily-summary", validateQuery(dailySummaryQuerySchema), Authenticat
 router.post("/daily-summary", validateQuery(dailySummaryQuerySchema), Authenticated, Can("reports.view"), dailySummaryHandler);
 // historial de resúmenes del día (paginado; ?all=1 para descargarlo entero)
 router.get("/daily-summaries", validateQuery(summaryHistorySchema), Authenticated, Can("reports.view"), summaryHistoryHandler);
+// ventas: el reporte del período (la ganancia solo con costs.view), las de hoy para el Panel y las del cajero
+router.get("/sales", validateQuery(salesReportQuerySchema), Authenticated, Can("reports.view"), salesReportHandler);
+router.get("/sales-today", Authenticated, Can("reports.view"), salesTodayHandler);
+router.get("/my-sales", validateQuery(mySalesQuerySchema), Authenticated, Can("sales.sell"), mySalesHandler);

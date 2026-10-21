@@ -31,6 +31,7 @@ export type DocumentLineInput = {
   unit?: UnitOfMeasure
   taxRate?: TaxRate
   cabys?: string | null
+  unitCost?: number // costo unitario al vender (para la ganancia; no va a Hacienda)
   sourceLineId?: string // nota de crédito: línea de la venta que corrige
   returnCondition?: "GOOD" | "DAMAGED" // nota de crédito: estado del producto devuelto
 }
@@ -65,6 +66,7 @@ type Computed = {
   discount: Prisma.Decimal
   discountLabel: string | null
   taxRate: TaxRate
+  unitCost: number | null
   sourceLineId: string | null
   returnCondition: "GOOD" | "DAMAGED" | null
   taxAmount: Prisma.Decimal
@@ -126,6 +128,7 @@ async function resolveLines(lines: DocumentLineInput[], client: Db): Promise<Com
       discountLabel: l.discountWithTax ? (l.discountLabel?.slice(0, 80) ?? null) : null,
       unit,
       taxRate,
+      unitCost: l.unitCost ?? null,
       sourceLineId: l.sourceLineId ?? null,
       returnCondition: l.returnCondition ?? null,
     }

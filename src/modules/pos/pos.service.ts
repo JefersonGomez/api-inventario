@@ -480,7 +480,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   for (const l of input.lines) wanted.set(l.productId, (wanted.get(l.productId) ?? 0) + l.quantity)
   const products = await prisma.product.findMany({
     where: { id: { in: [...wanted.keys()] }, deletedAt: null },
-    select: { id: true, name: true, price: true, unit: true, tracksLots: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
+    select: { id: true, name: true, price: true, cost: true, unit: true, tracksLots: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
   })
   if (products.length !== wanted.size) throw new Error("Algún producto no existe")
   const stockOf = (p: (typeof products)[number]) => new D(p.stocks[0]?.quantity ?? 0)
@@ -552,8 +552,10 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
         ...(input.customerId && { customerId: input.customerId }),
         lines: input.lines.map((l, i) => {
           const d = discounts[i]
+          const cost = byId.get(l.productId)!.cost
           return {
             productId: l.productId, quantity: l.quantity,
+            ...(cost != null && { unitCost: cost.toNumber() }), // el costo de hoy queda guardado para la ganancia
             ...(d && d.amount.greaterThan(0) && { discountWithTax: d.amount.toNumber(), discountLabel: d.label }),
           }
         }),

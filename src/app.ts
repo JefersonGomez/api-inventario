@@ -1,3 +1,4 @@
+import "./config/timezone.ts" // primero: fija la zona horaria antes de usar fechas
 import Express from "express"
 import { router as authRouter } from "./modules/auth/auth.routes.ts"
 import { router as categoryRouter } from "./modules/categories/category.routes.ts"

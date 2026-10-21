@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast, getDashboardSummary } from "./report.service.ts";
 import { getDailySummary, peekDailySummary, summaryHistory } from "./daily-summary.service.ts";
+import { getMySales, getSalesReport, getSalesToday } from "./sales-report.service.ts";
 
 export async function getDashboardController(req: Request, res: Response) {
   try {
@@ -106,3 +107,15 @@ export async function summaryHistoryHandler(_req: Request, res: Response) {
     res.status(500).json({ error: (error as Error).message });
   }
 }
+
+// Ventas (7D-1): reporte del período, ventas de hoy (Panel) y las del cajero en el mes
+const reply = (fn: (req: Request, res: Response) => Promise<unknown>) => async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await fn(req, res));
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+};
+export const salesReportHandler = reply((req, res) => getSalesReport(res.locals.query, req.user!));
+export const salesTodayHandler = reply(() => getSalesToday());
+export const mySalesHandler = reply((req, res) => getMySales(res.locals.query, req.user!.id));

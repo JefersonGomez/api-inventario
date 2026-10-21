@@ -2620,6 +2620,37 @@ paths:
       responses:
         "200": { description: "{ id, date, data, text, generatedAt }" }
 
+  /reports/sales:
+    get:
+      tags: [Reportes]
+      summary: Reporte de ventas del período (reports.view; la ganancia solo con costs.view)
+      description: "Ventas = tiquetes y facturas; devoluciones = notas de crédito; montos con IVA. Devuelve totals y previous (período anterior del mismo largo) {gross, returns, net, tickets, average}, byDay, byMethod (CREDIT = lo que se fue a cuotas), byCashier, byRegister, discounts {total, byAuthorizer}, profit (null sin costs.view; con el costo guardado en cada línea al vender — DocumentLine.unitCost —, las ventas viejas sin él usan el costo actual; lo devuelto dañado sigue como costo), products (neto, hasta 100) y notSold (con stock en las ubicaciones de la persona y sin ventas, hasta 50). Días en la zona de Costa Rica. Máximo un año."
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: Reporte }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /reports/sales-today:
+    get:
+      tags: [Reportes]
+      summary: Ventas de hoy y de ayer para el Panel (reports.view)
+      responses:
+        '200': { description: "{ today, yesterday } con { gross, returns, net, tickets, average }" }
+
+  /reports/my-sales:
+    get:
+      tags: [Reportes]
+      summary: Las ventas del cajero en un mes (sales.sell)
+      description: "Sus tiquetes y facturas del mes y lo devuelto de ellas (para comisiones)."
+      parameters:
+        - { name: month, in: query, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, description: "AAAA-MM (por defecto el actual)" }
+      responses:
+        '200': { description: "{ month, gross, returns, net, tickets, returnsCount, byDay }" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /reports/daily-summaries:
     get:
       tags: [Reportes]

@@ -168,6 +168,7 @@ export async function createReturn(id: string, input: z.infer<typeof returnSchem
       unit: line.unit,
       taxRate: line.taxRate,
       cabys: line.cabys,
+      ...(line.unitCost != null && { unitCost: line.unitCost.toNumber() }), // el costo con que se vendió
       sourceLineId: line.id,
       returnCondition: condition,
     }
