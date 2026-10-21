@@ -23,7 +23,7 @@ export async function updateCompany(input: UpdateCompanyInput, userId: string) {
   const data = Object.fromEntries(
     Object.entries(input)
       .filter(([, v]) => v !== undefined)
-      .map(([k, v]) => [k, k === "name" || k === "currency" || k === "cashCodeDays" || k === "posShowStock" ? v : v || null])
+      .map(([k, v]) => [k, k === "name" || k === "currency" || k === "cashCodeDays" || k === "posShowStock" || k === "returnDays" ? v : v || null])
   ) as Prisma.CompanyUpdateInput;
   // sin número no hay tipo de identificación
   if ("idNumber" in data && !data.idNumber) data.idType = null;

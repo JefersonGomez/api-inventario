@@ -26,6 +26,7 @@ export const updateCompanySchema = z
     // días que dura un código de caja; también es lo que queda fijo después de que la persona lo cambia
     cashCodeDays: z.number().int().min(7, "Mínimo 7 días").max(365, "Máximo 365 días").optional(),
     posShowStock: z.boolean().optional(), // el POS muestra la cantidad en stock
+    returnDays: z.number().int().min(1, "Mínimo 1 día").max(365, "Máximo 365 días").optional(), // plazo para devolver una venta
     ...fiscalFields,
   })
   .superRefine((d, ctx) => {

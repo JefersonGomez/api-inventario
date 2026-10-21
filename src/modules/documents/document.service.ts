@@ -31,6 +31,8 @@ export type DocumentLineInput = {
   unit?: UnitOfMeasure
   taxRate?: TaxRate
   cabys?: string | null
+  sourceLineId?: string // nota de crédito: línea de la venta que corrige
+  returnCondition?: "GOOD" | "DAMAGED" // nota de crédito: estado del producto devuelto
 }
 
 export type IssueDocumentInput = {
@@ -49,6 +51,7 @@ export type IssueDocumentInput = {
   discountAuthorizedById?: string // encargado que autorizó los descuentos
   creditAuthorizedById?: string // encargado que autorizó el crédito
   creditDays?: number // venta a crédito: días hasta la última cuota
+  returnAuthorizedById?: string // nota de crédito: encargado que autorizó la devolución
 }
 
 type Computed = {
@@ -62,6 +65,8 @@ type Computed = {
   discount: Prisma.Decimal
   discountLabel: string | null
   taxRate: TaxRate
+  sourceLineId: string | null
+  returnCondition: "GOOD" | "DAMAGED" | null
   taxAmount: Prisma.Decimal
   subtotal: Prisma.Decimal
   total: Prisma.Decimal
@@ -121,6 +126,8 @@ async function resolveLines(lines: DocumentLineInput[], client: Db): Promise<Com
       discountLabel: l.discountWithTax ? (l.discountLabel?.slice(0, 80) ?? null) : null,
       unit,
       taxRate,
+      sourceLineId: l.sourceLineId ?? null,
+      returnCondition: l.returnCondition ?? null,
     }
   })
 }
@@ -165,7 +172,8 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
           (b, d) => (d.type === "CREDIT_NOTE" ? b.minus(d.total) : b.plus(d.total)),
           new D(original.total)
         )
-        if (totals.total.greaterThan(balance)) {
+        // margen de un céntimo: separar el IVA otra vez en una devolución total puede mover el 5.º decimal
+        if (totals.total.greaterThan(balance.plus(0.01))) {
           throw new Error(`La nota de crédito supera el saldo del comprobante (${balance.toFixed(2)})`)
         }
       }
@@ -214,6 +222,7 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         ...(input.cashSessionId && { cashSessionId: input.cashSessionId }),
         ...(input.discountAuthorizedById && { discountAuthorizedById: input.discountAuthorizedById }),
         ...(input.creditAuthorizedById && { creditAuthorizedById: input.creditAuthorizedById }),
+        ...(input.returnAuthorizedById && { returnAuthorizedById: input.returnAuthorizedById }),
         ...(payments.length && {
           payments: {
             createMany: {
@@ -242,6 +251,8 @@ export async function getDocument(id: string) {
       createdBy: { select: { id: true, name: true } },
       discountAuthorizedBy: { select: { id: true, name: true } },
       creditAuthorizedBy: { select: { id: true, name: true } },
+      returnAuthorizedBy: { select: { id: true, name: true } },
+      referenceDocument: { select: { id: true, consecutive: true, type: true, issuedAt: true } },
       installments: { orderBy: { number: "asc" } },
     },
   })

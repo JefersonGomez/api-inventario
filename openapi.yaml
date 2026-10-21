@@ -66,6 +66,7 @@ tags:
   - name: Clientes
   - name: Punto de venta
   - name: Cuentas por cobrar
+  - name: Ventas
   - name: Productos base
   - name: Solicitudes de compra
   - name: Órdenes de compra
@@ -245,6 +246,7 @@ components:
         currency: { type: string, enum: [CRC, USD], description: Moneda en la que se muestran los montos }
         cashCodeDays: { type: integer, minimum: 7, maximum: 365, description: Días que dura un código de caja (30 por defecto) }
         posShowStock: { type: boolean }
+        returnDays: { type: integer, minimum: 1, maximum: 365, description: Días para devolver una venta (30 por defecto) }
         legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -1235,6 +1237,7 @@ paths:
                 currency: { type: string, enum: [CRC, USD] }
                 cashCodeDays: { type: integer, minimum: 7, maximum: 365 }
                 posShowStock: { type: boolean, description: "El POS muestra la cantidad en stock (si no: disponible/agotado)" }
+                returnDays: { type: integer, minimum: 1, maximum: 365, description: "Plazo para devolver una venta" }
                 legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
                 idType: { $ref: '#/components/schemas/IdType' }
                 idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -2381,6 +2384,70 @@ paths:
         '200': { description: Cliente actualizado }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /sales:
+    get:
+      tags: [Ventas]
+      summary: Tiquetes, facturas y notas de crédito (sales.sell, sales.void o reports.view; paginado)
+      description: "q busca por el final del consecutivo o por el nombre del cliente. Se limita a las ubicaciones de la persona."
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: kind, in: query, schema: { type: string, enum: [SALE, CREDIT_NOTE] } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: registerId, in: query, schema: { type: string, format: uuid } }
+        - { name: customerId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Página de comprobantes }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /sales/{id}:
+    get:
+      tags: [Ventas]
+      summary: Comprobante con su tiquete, lo devuelto por línea (returned), sus notas de crédito y returnUntil
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: "{ document, company, register, location, cashier, returned, creditNotes, returnUntil }" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /sales/{id}/returns:
+    post:
+      tags: [Ventas]
+      summary: Devolver productos de una venta (nota de crédito)
+      description: "Siempre con pin de un encargado con sales.void (403 RETURN_PIN). No más de lo vendido menos lo ya devuelto; dentro de Company.returnDays (409 RETURN_EXPIRED). GOOD vuelve al stock (RETURN); DAMAGED no vuelve y avisa a inventario (returnDamaged). Venta a crédito: primero rebaja sus cuotas desde la última; el resto se reembolsa con refund (CASH necesita la caja abierta de quien devuelve, 409 NO_SESSION). Devuelve el tiquete de la nota, credited y refund."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines, reason, pin]
+              properties:
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [lineId, quantity, condition]
+                    properties:
+                      lineId: { type: string, format: uuid }
+                      quantity: { type: number }
+                      condition: { type: string, enum: [GOOD, DAMAGED] }
+                reason: { type: string, minLength: 3, maxLength: 200 }
+                refund:
+                  type: object
+                  required: [method]
+                  properties:
+                    method: { type: string, enum: [CASH, CARD, SINPE, TRANSFER] }
+                    reference: { type: string, maxLength: 60 }
+                pin: { type: string, pattern: '^\d{4,6}$' }
+      responses:
+        '201': { description: Tiquete de la nota de crédito }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: RETURN_PIN }
+        '409': { description: RETURN_EXPIRED o NO_SESSION }
 
   /negatives:
     get:

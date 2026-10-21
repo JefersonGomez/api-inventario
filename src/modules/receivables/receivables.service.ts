@@ -107,6 +107,27 @@ export async function createCreditInstallments(tx: Db, doc: { id: string; custom
   })
 }
 
+// Devolución de una venta a crédito (dentro de la transacción de la nota): rebaja lo pendiente de sus
+// cuotas desde la última; devuelve cuánto rebajó (el resto de la nota se le reembolsa al cliente)
+export async function creditReturn(tx: Db, doc: { id: string; customerId: string }, amount: Prisma.Decimal) {
+  await lockCustomer(tx, doc.customerId)
+  const rows = await tx.installment.findMany({
+    where: { documentId: doc.id, paid: { lt: prisma.installment.fields.amount } },
+    orderBy: [{ dueDate: "desc" }, { number: "desc" }],
+  })
+  let left = amount
+  for (const row of rows) {
+    if (!left.greaterThan(0)) break
+    const take = D.min(left, row.amount.minus(row.paid))
+    const rest = row.amount.minus(take)
+    // una cuota que queda en cero sin abonos se borra; si tenía abonos queda pagada con lo abonado
+    if (rest.isZero()) await tx.installment.delete({ where: { id: row.id } })
+    else await tx.installment.update({ where: { id: row.id }, data: { amount: rest } })
+    left = left.minus(take)
+  }
+  return amount.minus(left)
+}
+
 // ---------- Límite de crédito ----------
 
 export async function setCreditLimit(customerId: string, input: z.infer<typeof creditLimitSchema>, userId: string) {

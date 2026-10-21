@@ -161,6 +161,7 @@ model User {
   negativesResolved  StockNegative[] @relation("NegativeResolvedBy")
   discountsAuthorized Document[]     @relation("DiscountAuthorizedBy")
   creditsAuthorized   Document[]     @relation("CreditAuthorizedBy")
+  returnsAuthorized   Document[]     @relation("ReturnAuthorizedBy")
   customerPayments    CustomerPayment[]
 }
 
@@ -381,6 +382,7 @@ model Company {
   currency              CurrencyCode       @default(CRC)
   cashCodeDays          Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
   posShowStock          Boolean            @default(true) // el POS muestra la cantidad en stock (si no: disponible/agotado)
+  returnDays            Int                @default(30) // días para devolver una venta
   onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
   legalName             String? // razón social o nombre de la persona física
@@ -502,6 +504,8 @@ model Document {
   discountAuthorizedBy   User?          @relation("DiscountAuthorizedBy", fields: [discountAuthorizedById], references: [id])
   creditAuthorizedById   String? // encargado que autorizó la venta a crédito (POS, con su código)
   creditAuthorizedBy     User?          @relation("CreditAuthorizedBy", fields: [creditAuthorizedById], references: [id])
+  returnAuthorizedById   String? // nota de crédito: encargado que autorizó la devolución (con su código)
+  returnAuthorizedBy     User?          @relation("ReturnAuthorizedBy", fields: [returnAuthorizedById], references: [id])
   installments           Installment[]
   issuedAt            DateTime          @default(now())
   cashSessionId       String? // turno de caja donde se vendió (POS)
@@ -528,6 +532,11 @@ model DocumentLine {
   unitPrice   Decimal       @db.Decimal(18, 5) // sin IVA
   discount    Decimal       @db.Decimal(18, 5) // monto, sin IVA
   discountLabel String? // naturaleza del descuento (Hacienda): el tipo de descuento usado
+  // nota de crédito: la línea de la venta que se devuelve y en qué estado volvió el producto
+  sourceLineId    String?
+  sourceLine      DocumentLine?    @relation("LineReturns", fields: [sourceLineId], references: [id])
+  returns         DocumentLine[]   @relation("LineReturns")
+  returnCondition ReturnCondition?
   taxRate     TaxRate
   taxAmount   Decimal       @db.Decimal(18, 5)
   subtotal    Decimal       @db.Decimal(18, 5) // quantity × unitPrice − discount
@@ -985,4 +994,10 @@ model CustomerPayment {
 
   @@index([companyId, customerId])
   @@index([cashSessionId])
+}
+
+// Estado del producto devuelto: en buen estado vuelve al stock; dañado no vuelve (merma)
+enum ReturnCondition {
+  GOOD
+  DAMAGED
 }

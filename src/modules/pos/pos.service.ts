@@ -245,11 +245,10 @@ const sessionInclude = {
 } satisfies Prisma.CashSessionInclude
 
 // Efectivo esperado y totales por medio de pago del turno.
-// ponytail: solo ventas (tiquete/factura); las devoluciones en efectivo restan desde 7C.
 export async function sessionSummary(sessionId: string) {
   const session = await prisma.cashSession.findFirst({ where: { id: sessionId }, select: { openingAmount: true } })
   if (!session) throw fail("Turno no encontrado", 404)
-  const [byMethod, sales, movements, abonos] = await Promise.all([
+  const [byMethod, sales, movements, abonos, refundsBy] = await Promise.all([
     prisma.documentPayment.groupBy({
       by: ["method"],
       where: { document: { cashSessionId: sessionId, type: { in: ["TICKET", "INVOICE"] } } },
@@ -258,12 +257,20 @@ export async function sessionSummary(sessionId: string) {
     prisma.document.aggregate({ where: { cashSessionId: sessionId, type: { in: ["TICKET", "INVOICE"] } }, _count: true, _sum: { total: true } }),
     prisma.cashMovement.groupBy({ by: ["type"], where: { sessionId }, _sum: { amount: true } }),
     prisma.customerPayment.groupBy({ by: ["method"], where: { cashSessionId: sessionId }, _sum: { amount: true }, _count: true }),
+    prisma.documentPayment.groupBy({
+      by: ["method"],
+      where: { document: { cashSessionId: sessionId, type: "CREDIT_NOTE" } },
+      _sum: { amount: true },
+      _count: true,
+    }),
   ])
+  // devoluciones del turno: lo reembolsado sale de la caja (el efectivo resta del arqueo)
+  const refunds = Object.fromEntries(refundsBy.map((m) => [m.method, (m._sum.amount ?? new D(0)).toDecimalPlaces(2).toNumber()]))
   // abonos a crédito cobrados en este turno (el efectivo entra al arqueo)
   const collections = Object.fromEntries(abonos.map((m) => [m.method, (m._sum.amount ?? new D(0)).toNumber()]))
   const payments = Object.fromEntries(byMethod.map((m) => [m.method, (m._sum.amount ?? new D(0)).toDecimalPlaces(2).toNumber()]))
   const mov = (t: "IN" | "OUT") => movements.find((m) => m.type === t)?._sum.amount ?? new D(0)
-  const expectedCash = new D(session.openingAmount).plus(payments.CASH ?? 0).plus(collections.CASH ?? 0).plus(mov("IN")).minus(mov("OUT")).toDecimalPlaces(2)
+  const expectedCash = new D(session.openingAmount).plus(payments.CASH ?? 0).plus(collections.CASH ?? 0).minus(refunds.CASH ?? 0).plus(mov("IN")).minus(mov("OUT")).toDecimalPlaces(2)
   return {
     openingAmount: session.openingAmount.toNumber(),
     salesCount: sales._count,
@@ -271,6 +278,8 @@ export async function sessionSummary(sessionId: string) {
     payments, // { CASH, CARD, SINPE }
     collections, // abonos: { CASH, CARD, SINPE }
     collectionsCount: abonos.reduce((s, m) => s + m._count, 0),
+    refunds, // reembolsos de devoluciones: { CASH, CARD, SINPE }
+    refundsCount: refundsBy.reduce((s, m) => s + m._count, 0),
     cashIn: mov("IN").toNumber(),
     cashOut: mov("OUT").toNumber(),
     expectedCash: expectedCash.toNumber(),
