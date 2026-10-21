@@ -11,6 +11,7 @@ import { router as customerRouter } from "./modules/customers/customer.routes.ts
 import { router as locationRouter } from "./modules/locations/location.routes.ts"
 import { router as transferRouter } from "./modules/transfers/transfer.routes.ts"
 import { router as posRouter } from "./modules/pos/pos.routes.ts"
+import { router as receivablesRouter } from "./modules/receivables/receivables.routes.ts"
 import { router as negativeRouter } from "./modules/negatives/negative.routes.ts"
 import { router as stockCountRouter } from "./modules/stock-counts/stock-count.routes.ts"
 import { authorizationRouter } from "./modules/users/pin.routes.ts"
@@ -64,6 +65,7 @@ app.use("/customers", customerRouter)
 app.use("/locations", locationRouter)
 app.use("/transfers", transferRouter)
 app.use("/pos", posRouter)
+app.use("/receivables", receivablesRouter)
 app.use("/negatives", negativeRouter)
 app.use("/stock-counts", stockCountRouter)
 app.use("/authorizations", authorizationRouter)

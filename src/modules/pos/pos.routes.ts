@@ -39,6 +39,7 @@ router.put("/discount-types/:id", validate(discountTypeSchema), Authenticated, C
 
 // Venta y tiquete
 // con código de encargado (negativas o descuentos) cuenta para el límite de intentos de PIN
-const withPin = (req: { body: { negativePin?: string; discountPin?: string } }) => !!(req.body.negativePin || req.body.discountPin)
+const withPin = (req: { body: { negativePin?: string; discountPin?: string; creditPin?: string } }) =>
+  !!(req.body.negativePin || req.body.discountPin || req.body.creditPin)
 router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (req, res, next) => (withPin(req) ? pinLimiter(req, res, next) : next()), sellHandler)
 router.get("/tickets/:id", Authenticated, Can("sales.sell"), ticketHandler)

@@ -21,11 +21,18 @@ describe("Clientes y datos fiscales", () => {
     await prisma.$disconnect()
   })
 
-  it("el empleado registra un cliente; la cédula se guarda sin guiones y no se repite", async () => {
+  it("el empleado registra un cliente (sin poder darle crédito); la cédula se guarda sin guiones y no se repite", async () => {
     const res = await request(app).post("/customers").set(employee.auth)
       .send({ name: "Ferretería La Unión", idType: "JURIDICA", idNumber: "3-101-123456", email: "compras@union.test", creditLimit: 500000, creditDays: 30 })
     expect(res.status).toBe(201)
-    expect(res.body).toMatchObject({ idType: "JURIDICA", idNumber: "3101123456", creditLimit: 500000, creditDays: 30 })
+    expect(res.body).toMatchObject({ idType: "JURIDICA", idNumber: "3101123456", creditLimit: null, creditDays: null })
+    // el crédito lo habilita solo quien tiene credit.manage (el admin)
+    const credit = (who: { auth: object }) => request(app).put(`/receivables/${res.body.id}/credit`).set(who.auth as never).send({ creditLimit: 500000 })
+    expect((await credit(employee)).status).toBe(403)
+    expect((await credit(admin)).body).toMatchObject({ creditLimit: 500000 })
+    // editar el cliente no toca su crédito
+    await request(app).put(`/customers/${res.body.id}`).set(employee.auth).send({ name: "Ferretería La Unión S.A.", idType: "JURIDICA", idNumber: "3101123456", creditLimit: 1 })
+    expect((await request(app).get(`/customers/${res.body.id}`).set(employee.auth)).body.creditLimit).toBe(500000)
 
     const dup = await request(app).post("/customers").set(admin.auth).send({ name: "Otra", idType: "JURIDICA", idNumber: "3101123456" })
     expect(dup.status).toBe(400)
@@ -41,7 +48,7 @@ describe("Clientes y datos fiscales", () => {
     expect((await bad({ name: "Sin cédula" })).status).toBe(201) // consumidor final: sin identificación
   })
 
-  it("sin límite de crédito no queda plazo; solo el ADMIN borra y el borrado libera la cédula", async () => {
+  it("solo el ADMIN borra y el borrado libera la cédula", async () => {
     const created = await request(app).post("/customers").set(admin.auth).send({ name: "Contado", idType: "FISICA", idNumber: "205550111", creditDays: 15 })
     expect(created.body).toMatchObject({ creditLimit: null, creditDays: null })
 

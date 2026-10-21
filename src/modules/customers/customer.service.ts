@@ -15,9 +15,7 @@ function toData(input: CustomerInput) {
     phone: input.phone || null,
     address: input.address || null,
     economicActivity: input.economicActivity || null,
-    creditLimit: input.creditLimit ?? null,
-    // sin límite de crédito no hay plazo
-    creditDays: input.creditLimit == null ? null : (input.creditDays ?? null),
+    // el crédito no va acá: lo habilita solo quien tiene credit.manage (PUT /receivables/:id/credit)
   }
 }
 

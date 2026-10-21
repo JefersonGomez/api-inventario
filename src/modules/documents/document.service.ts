@@ -47,6 +47,8 @@ export type IssueDocumentInput = {
   terminalCode?: string
   cashSessionId?: string // turno de caja del POS
   discountAuthorizedById?: string // encargado que autorizó los descuentos
+  creditAuthorizedById?: string // encargado que autorizó el crédito
+  creditDays?: number // venta a crédito: días hasta la última cuota
 }
 
 type Computed = {
@@ -173,9 +175,10 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
 
     const payments = input.payments ?? []
     if (payments.some((p) => !(p.amount > 0))) throw new Error("Cada pago debe ser mayor que 0")
+    // a crédito los pagos son la prima: pueden sumar menos que el total (el resto va a cuotas)
     if (payments.length) {
       const paid = payments.reduce((s, p) => s.plus(p.amount), new D(0))
-      if (paid.minus(totals.total).abs().greaterThan(0.01)) {
+      if (saleCondition === "CREDIT" ? paid.greaterThan(totals.total.plus(0.01)) : paid.minus(totals.total).abs().greaterThan(0.01)) {
         throw new Error(`Los pagos (${paid.toFixed(2)}) no suman el total (${totals.total.toFixed(2)})`)
       }
     }
@@ -200,7 +203,7 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         consecutive: buildConsecutive(branchCode, terminalCode, type, seq.last),
         customerId: customer?.id ?? null,
         saleCondition,
-        creditDays: saleCondition === "CREDIT" ? (customer?.creditDays ?? null) : null,
+        creditDays: saleCondition === "CREDIT" ? (input.creditDays ?? customer?.creditDays ?? null) : null,
         currency,
         ...totals,
         referenceDocumentId: isNote ? input.referenceDocumentId! : null,
@@ -210,6 +213,7 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         lines: { createMany: { data: lines } },
         ...(input.cashSessionId && { cashSessionId: input.cashSessionId }),
         ...(input.discountAuthorizedById && { discountAuthorizedById: input.discountAuthorizedById }),
+        ...(input.creditAuthorizedById && { creditAuthorizedById: input.creditAuthorizedById }),
         ...(payments.length && {
           payments: {
             createMany: {
@@ -237,6 +241,8 @@ export async function getDocument(id: string) {
       customer: true,
       createdBy: { select: { id: true, name: true } },
       discountAuthorizedBy: { select: { id: true, name: true } },
+      creditAuthorizedBy: { select: { id: true, name: true } },
+      installments: { orderBy: { number: "asc" } },
     },
   })
   if (!doc) throw new Error("Comprobante no encontrado")

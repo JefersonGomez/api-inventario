@@ -65,6 +65,7 @@ tags:
   - name: Proveedores
   - name: Clientes
   - name: Punto de venta
+  - name: Cuentas por cobrar
   - name: Productos base
   - name: Solicitudes de compra
   - name: Órdenes de compra
@@ -426,8 +427,6 @@ components:
         phone: { type: string, nullable: true }
         address: { type: string, nullable: true }
         economicActivity: { type: string, nullable: true }
-        creditLimit: { type: number, minimum: 0, nullable: true }
-        creditDays: { type: integer, minimum: 1, maximum: 365, nullable: true, description: Se ignora sin límite de crédito }
 
     ProductGroup:
       type: object
@@ -2225,16 +2224,23 @@ paths:
     post:
       tags: [Punto de venta]
       summary: Vender (sales.sell, con caja abierta)
-      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas)."
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Crédito: credit = { frequency BIWEEKLY|MONTHLY, installments } (hasta 6 meses) con creditPin de un encargado con sales.credit (sin él 409 CREDIT_NEEDS_AUTH, código que no sirve 403 CREDIT_PIN); los payments son la prima y el resto va a cuotas; 409 CREDIT_CUSTOMER (cliente sin crédito), CREDIT_OVERDUE (cuotas vencidas) o CREDIT_LIMIT (pasa el límite). Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas)."
       requestBody:
         required: true
         content:
           application/json:
             schema: 
               type: object
-              required: [lines, payments]
+              required: [lines]
               properties:
                 customerId: { type: string, format: uuid }
+                credit:
+                  type: object
+                  required: [frequency, installments]
+                  properties:
+                    frequency: { type: string, enum: [BIWEEKLY, MONTHLY] }
+                    installments: { type: integer, minimum: 1, maximum: 12, description: "Mensual hasta 6, quincenal hasta 12" }
+                creditPin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza el crédito" }
                 notes: { type: string, maxLength: 500 }
                 negativePin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza las negativas" }
                 discountPin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza los descuentos y ajustes de precio" }
@@ -2299,6 +2305,82 @@ paths:
         '200': { description: Tipo actualizado }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /receivables:
+    get:
+      tags: [Cuentas por cobrar]
+      summary: Clientes con crédito o saldo, con lo vencido (receivables.manage, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: overdue, in: query, schema: { type: string, enum: ['1', '0'] }, description: "1 = solo con cuotas vencidas" }
+      responses:
+        '200': { description: "{ items, total, page, pageSize, totals: { balance, overdue } }" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /receivables/payments:
+    post:
+      tags: [Cuentas por cobrar]
+      summary: Registrar un abono
+      description: "inRegister true = en la caja abierta de quien cobra (sales.sell; efectivo, tarjeta o SINPE; el efectivo entra al arqueo). false = sin caja (receivables.manage; reference obligatoria). Se aplica a la cuota más vieja primero; no puede superar el saldo. Devuelve el recibo."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, amount, method, inRegister]
+              properties:
+                customerId: { type: string, format: uuid }
+                amount: { type: number }
+                method: { type: string, enum: [CASH, CARD, SINPE, TRANSFER] }
+                reference: { type: string, maxLength: 60 }
+                tendered: { type: number, description: "Efectivo recibido" }
+                note: { type: string, maxLength: 200 }
+                inRegister: { type: boolean }
+      responses:
+        '201': { description: "Recibo: { payment (balanceBefore, amount, balanceAfter), company }" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: NO_SESSION }
+
+  /receivables/payments/{id}:
+    get:
+      tags: [Cuentas por cobrar]
+      summary: Recibo de un abono (sales.sell o receivables.manage)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Recibo }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /receivables/{id}:
+    get:
+      tags: [Cuentas por cobrar]
+      summary: Estado de cuenta del cliente (sales.sell o receivables.manage)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: "{ customer, creditLimit, balance, available, overdue, overdueCount, installments, payments }" }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /receivables/{id}/credit:
+    put:
+      tags: [Cuentas por cobrar]
+      summary: Habilitar o quitar el crédito de un cliente (credit.manage)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creditLimit]
+              properties:
+                creditLimit: { type: number, nullable: true, description: "null = sin crédito; necesita identificación" }
+      responses:
+        '200': { description: Cliente actualizado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /negatives:
     get:

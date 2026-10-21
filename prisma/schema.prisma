@@ -160,6 +160,8 @@ model User {
   negativesAuthorized StockNegative[] @relation("NegativeAuthorizedBy")
   negativesResolved  StockNegative[] @relation("NegativeResolvedBy")
   discountsAuthorized Document[]     @relation("DiscountAuthorizedBy")
+  creditsAuthorized   Document[]     @relation("CreditAuthorizedBy")
+  customerPayments    CustomerPayment[]
 }
 
 model Category {
@@ -423,6 +425,8 @@ model Company {
   cashMovements         CashMovement[]
   stockNegatives        StockNegative[]
   discountTypes         DiscountType[]
+  installments          Installment[]
+  customerPayments      CustomerPayment[]
 
   @@index([ownerId])
 }
@@ -460,6 +464,8 @@ model Customer {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   documents        Document[]
+  installments     Installment[]
+  payments         CustomerPayment[]
 
   @@index([companyId])
 }
@@ -494,6 +500,9 @@ model Document {
   createdBy           User              @relation(fields: [createdById], references: [id])
   discountAuthorizedById String? // encargado que autorizó los descuentos (POS, con su código)
   discountAuthorizedBy   User?          @relation("DiscountAuthorizedBy", fields: [discountAuthorizedById], references: [id])
+  creditAuthorizedById   String? // encargado que autorizó la venta a crédito (POS, con su código)
+  creditAuthorizedBy     User?          @relation("CreditAuthorizedBy", fields: [creditAuthorizedById], references: [id])
+  installments           Installment[]
   issuedAt            DateTime          @default(now())
   cashSessionId       String? // turno de caja donde se vendió (POS)
   cashSession         CashSession?      @relation(fields: [cashSessionId], references: [id])
@@ -838,6 +847,7 @@ model CashSession {
   reconcileNote  String?
   documents     Document[]
   movements     CashMovement[]
+  customerPayments CustomerPayment[]
 
   @@index([companyId, status])
 }
@@ -924,4 +934,55 @@ model StockNegative {
   createdAt        DateTime       @default(now())
 
   @@index([companyId, status])
+}
+
+enum CreditFrequency {
+  BIWEEKLY // quincenal
+  MONTHLY
+}
+
+// Cuota de una venta a crédito (7B-2): plan quincenal o mensual, hasta 6 meses, sin intereses.
+// paid sube con los abonos (a la cuota más vieja primero). Vencida = dueDate < hoy y paid < amount.
+model Installment {
+  id         String          @id @default(uuid())
+  companyId  String
+  company    Company         @relation(fields: [companyId], references: [id])
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  documentId String
+  document   Document        @relation(fields: [documentId], references: [id])
+  number     Int
+  frequency  CreditFrequency
+  dueDate    DateTime        @db.Date
+  amount     Decimal         @db.Decimal(18, 2)
+  paid       Decimal         @default(0) @db.Decimal(18, 2)
+  notifiedAt DateTime? // aviso de vencida ya enviado
+
+  @@unique([documentId, number])
+  @@index([companyId, customerId, dueDate])
+}
+
+// Abono de un cliente a su crédito: en la caja (cashSessionId, el efectivo entra al arqueo) o desde
+// Cuentas por cobrar sin caja (con referencia). Guarda el saldo antes y después para el recibo.
+model CustomerPayment {
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id])
+  customerId    String
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  amount        Decimal       @db.Decimal(18, 2)
+  method        PaymentMethod
+  reference     String?
+  tendered      Decimal?      @db.Decimal(18, 2)
+  balanceBefore Decimal       @db.Decimal(18, 2)
+  balanceAfter  Decimal       @db.Decimal(18, 2)
+  note          String?
+  cashSessionId String?
+  cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([companyId, customerId])
+  @@index([cashSessionId])
 }

@@ -7,6 +7,8 @@
 //  - Venta: tiquete + salida de stock (SALE) en la misma transacción. Sin stock suficiente no se vende.
 //  - Descuentos (7B): por línea o sobre el total, de un tipo creado por el admin. SIEMPRE con el código
 //    del encargado (sales.discount). Con cliente identificado sale factura en vez de tiquete.
+//  - Crédito (7B-2): el resto que no se paga va a cuotas (receivables.service), con el código del encargado
+//    (sales.credit); los pagos de la venta son la prima.
 import { z } from "zod"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
@@ -20,6 +22,7 @@ import { getDocument, issueDocument } from "../documents/document.service.ts"
 import { authorizeWithPin, CodeExpiredError, renewWithManagerPin, verifyOwnPin } from "../users/pin.service.ts"
 import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
+import { assertCreditAllowed, createCreditInstallments, creditPlanSchema, dueDates, today } from "../receivables/receivables.service.ts"
 
 const D = Prisma.Decimal
 type Actor = { id: string; permissions: string[] }
@@ -97,12 +100,14 @@ export const saleSchema = z.object({
         tendered: money.optional(), // efectivo: lo que entregó el cliente
       })
     )
-    .min(1)
-    .max(5),
+    .max(5)
+    .default([]), // a crédito: la prima (puede no haber)
   notes: z.string().trim().max(500).optional(),
   negativePin: pin.optional(), // código del encargado que autoriza las negativas de esta venta
   discountPin: pin.optional(), // código del encargado que autoriza los descuentos y ajustes de precio de esta venta
-})
+  credit: creditPlanSchema.optional(), // lo que no cubren los pagos va a cuotas
+  creditPin: pin.optional(), // código del encargado que autoriza el crédito
+}).refine((s) => s.payments.length || s.credit, { message: "Indica cómo paga", path: ["payments"] })
 
 // ---------- Tipos de descuento ----------
 
@@ -244,7 +249,7 @@ const sessionInclude = {
 export async function sessionSummary(sessionId: string) {
   const session = await prisma.cashSession.findFirst({ where: { id: sessionId }, select: { openingAmount: true } })
   if (!session) throw fail("Turno no encontrado", 404)
-  const [byMethod, sales, movements] = await Promise.all([
+  const [byMethod, sales, movements, abonos] = await Promise.all([
     prisma.documentPayment.groupBy({
       by: ["method"],
       where: { document: { cashSessionId: sessionId, type: { in: ["TICKET", "INVOICE"] } } },
@@ -252,15 +257,20 @@ export async function sessionSummary(sessionId: string) {
     }),
     prisma.document.aggregate({ where: { cashSessionId: sessionId, type: { in: ["TICKET", "INVOICE"] } }, _count: true, _sum: { total: true } }),
     prisma.cashMovement.groupBy({ by: ["type"], where: { sessionId }, _sum: { amount: true } }),
+    prisma.customerPayment.groupBy({ by: ["method"], where: { cashSessionId: sessionId }, _sum: { amount: true }, _count: true }),
   ])
+  // abonos a crédito cobrados en este turno (el efectivo entra al arqueo)
+  const collections = Object.fromEntries(abonos.map((m) => [m.method, (m._sum.amount ?? new D(0)).toNumber()]))
   const payments = Object.fromEntries(byMethod.map((m) => [m.method, (m._sum.amount ?? new D(0)).toDecimalPlaces(2).toNumber()]))
   const mov = (t: "IN" | "OUT") => movements.find((m) => m.type === t)?._sum.amount ?? new D(0)
-  const expectedCash = new D(session.openingAmount).plus(payments.CASH ?? 0).plus(mov("IN")).minus(mov("OUT")).toDecimalPlaces(2)
+  const expectedCash = new D(session.openingAmount).plus(payments.CASH ?? 0).plus(collections.CASH ?? 0).plus(mov("IN")).minus(mov("OUT")).toDecimalPlaces(2)
   return {
     openingAmount: session.openingAmount.toNumber(),
     salesCount: sales._count,
     salesTotal: (sales._sum.total ?? new D(0)).toDecimalPlaces(2).toNumber(),
     payments, // { CASH, CARD, SINPE }
+    collections, // abonos: { CASH, CARD, SINPE }
+    collectionsCount: abonos.reduce((s, m) => s + m._count, 0),
     cashIn: mov("IN").toNumber(),
     cashOut: mov("OUT").toNumber(),
     expectedCash: expectedCash.toNumber(),
@@ -509,6 +519,17 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     if (!auth) throw fail("Ese código no autoriza descuentos (tiene que ser de un encargado, vigente)", 403, "DISCOUNT_PIN")
     discountAuthorizedById = auth.authorizedBy.id
   }
+  // crédito: cliente habilitado, sin cuotas vencidas y con el código del encargado (el límite se revisa al emitir)
+  let creditCustomer: Awaited<ReturnType<typeof assertCreditAllowed>> | null = null
+  let creditAuthorizedById: string | undefined
+  if (input.credit) {
+    creditCustomer = await assertCreditAllowed(input.customerId)
+    if (!input.creditPin) throw fail("La venta a crédito la autoriza el encargado con su código", 409, "CREDIT_NEEDS_AUTH")
+    const plan = `${input.credit.installments} cuota(s) ${input.credit.frequency === "BIWEEKLY" ? "quincenales" : "mensuales"}`
+    const auth = await authorizeWithPin(actor.id, input.creditPin, "sales.credit", `Crédito a ${creditCustomer.name}: ${plan}`)
+    if (!auth) throw fail("Ese código no autoriza créditos (tiene que ser de un encargado, vigente)", 403, "CREDIT_PIN")
+    creditAuthorizedById = auth.authorizedBy.id
+  }
   // con cliente identificado: factura (el cliente la puede usar para su contabilidad)
   const customer = input.customerId
     ? await prisma.customer.findFirst({ where: { id: input.customerId, deletedAt: null }, select: { idType: true, idNumber: true } })
@@ -528,6 +549,11 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
           }
         }),
         ...(discountAuthorizedById && { discountAuthorizedById }),
+        ...(input.credit && {
+          saleCondition: "CREDIT" as const,
+          creditDays: Math.round((dueDates(input.credit).at(-1)!.getTime() - today().getTime()) / 86_400_000),
+          creditAuthorizedById: creditAuthorizedById!,
+        }),
         payments: input.payments,
         ...(input.notes && { notes: input.notes }),
         branchCode: register.location.code ?? "001",
@@ -537,6 +563,12 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
       actor.id,
       tx
     )
+    if (input.credit) {
+      const paid = input.payments.reduce((s, p) => s.plus(p.amount), new D(0))
+      const amount = new D(doc.total).minus(paid).toDecimalPlaces(2)
+      if (!amount.greaterThan(0)) throw new Error("Con lo que paga no queda nada a crédito: cóbrala de contado")
+      await createCreditInstallments(tx, { id: doc.id, customerId: creditCustomer!.id, amount, plan: input.credit, limit: new D(creditCustomer!.creditLimit!) })
+    }
     for (const l of input.lines) {
       await createMovement(l.productId, actor.id, "OUT", l.quantity, `Venta ${doc.consecutive}`, tx, {
         source: "SALE", sourceId: doc.id, locationId: register.locationId, allowNegative: !!authorizedBy,

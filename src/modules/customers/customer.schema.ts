@@ -11,9 +11,6 @@ export const customerSchema = z
     phone: optionalText(30),
     address: optionalText(300),
     economicActivity: optionalText(20),
-    // crédito: sin límite = cliente de contado
-    creditLimit: z.number().nonnegative().nullable().optional(),
-    creditDays: z.number().int().min(1).max(365).nullable().optional(),
   })
   .superRefine(checkFiscalId)
 
