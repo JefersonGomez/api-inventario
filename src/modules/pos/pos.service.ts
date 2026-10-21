@@ -72,7 +72,21 @@ export const discountTypeSchema = z
 const discountPick = z.object({ typeId: z.uuid(), value: z.number().positive().max(1e9).optional() })
 export const saleSchema = z.object({
   customerId: z.uuid().optional(),
-  lines: z.array(z.object({ productId: z.uuid(), quantity: quantitySchema, discount: discountPick.optional() })).min(1).max(500),
+  lines: z
+    .array(
+      z
+        .object({
+          productId: z.uuid(),
+          quantity: quantitySchema,
+          discount: discountPick.optional(),
+          // ajuste de precio (precio de góndola mal): solo hacia abajo, con motivo y el código del encargado
+          price: money.positive().optional(),
+          priceReason: z.string().trim().min(3).max(60).optional(),
+        })
+        .refine((l) => l.price === undefined || l.priceReason, { message: "Indica el motivo del cambio de precio", path: ["priceReason"] })
+    )
+    .min(1)
+    .max(500),
   discount: discountPick.optional(), // sobre el total: se reparte entre las líneas (Hacienda solo tiene descuento por línea)
   payments: z
     .array(
@@ -87,7 +101,7 @@ export const saleSchema = z.object({
     .max(5),
   notes: z.string().trim().max(500).optional(),
   negativePin: pin.optional(), // código del encargado que autoriza las negativas de esta venta
-  discountPin: pin.optional(), // código del encargado que autoriza los descuentos de esta venta
+  discountPin: pin.optional(), // código del encargado que autoriza los descuentos y ajustes de precio de esta venta
 })
 
 // ---------- Tipos de descuento ----------
@@ -469,16 +483,27 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     authorizedBy = auth.authorizedBy
   }
 
-  // descuentos: siempre con el código del encargado
+  // descuentos y ajustes de precio: siempre con el código del encargado. El ajuste va como descuento
+  // (el comprobante lleva el precio del catálogo y la diferencia, como lo pide Hacienda)
   const byId = new Map(products.map((p) => [p.id, p]))
-  const hasDiscount = !!input.discount || input.lines.some((l) => l.discount)
+  const hasDiscount = !!input.discount || input.lines.some((l) => l.discount || l.price !== undefined)
   let discounts: ReturnType<typeof computeDiscounts>["lines"] = []
   let discountAuthorizedById: string | undefined
   if (hasDiscount) {
     const types = new Map((await prisma.discountType.findMany()).map((t) => [t.id, t as DiscountRow]))
-    const grosses = input.lines.map((l) => new D(byId.get(l.productId)!.price).times(l.quantity))
+    const adjusts = input.lines.map((l) => {
+      const p = byId.get(l.productId)!
+      if (l.price === undefined) return null
+      if (!new D(l.price).lessThan(p.price)) throw new Error(`${p.name}: el precio nuevo tiene que ser menor que ${p.price}`)
+      return { amount: r2(new D(p.price).minus(l.price).times(l.quantity)), label: `Ajuste de precio: ${l.priceReason}`, describe: `${p.name} ${p.price} → ${l.price} (${l.priceReason})` }
+    })
+    const grosses = input.lines.map((l) => new D(l.price ?? byId.get(l.productId)!.price).times(l.quantity))
     const computed = computeDiscounts(grosses, input.lines.map((l) => l.discount), input.discount, types)
-    discounts = computed.lines
+    computed.described.unshift(...adjusts.flatMap((a) => (a ? [a.describe] : [])))
+    discounts = computed.lines.map((d, i) => {
+      const a = adjusts[i]
+      return a ? { amount: d.amount.plus(a.amount), label: [a.label, d.label].filter(Boolean).join(" + ") } : d
+    })
     if (!input.discountPin) throw fail("Los descuentos los autoriza el encargado con su código", 409, "DISCOUNT_NEEDS_AUTH")
     const auth = await authorizeWithPin(actor.id, input.discountPin, "sales.discount", `Descuentos: ${computed.described.join(", ")}`.slice(0, 200))
     if (!auth) throw fail("Ese código no autoriza descuentos (tiene que ser de un encargado, vigente)", 403, "DISCOUNT_PIN")

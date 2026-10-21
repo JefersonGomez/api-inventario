@@ -182,6 +182,16 @@ describe("Punto de venta", () => {
     expect(res.body.document).toMatchObject({ type: "INVOICE", customer: { id: customerId }, discountAuthorizedBy: { id: manager.user.id } })
     expect(Number(res.body.document.total)).toBeCloseTo(1934, 2)
     expect(res.body.document.lines[0]).toMatchObject({ discountLabel: "Adulto mayor + Libre" })
+
+    // ajuste de precio (góndola a 1000): solo hacia abajo, con motivo y el código; va como descuento
+    const adjusted = { lines: [{ productId, quantity: 2, price: 1000, priceReason: "Precio de góndola" }], payments: [{ method: "CARD", amount: 2000 }] }
+    expect((await sell(cashier2, { ...adjusted, lines: [{ productId, quantity: 2, price: 1000 }] })).status).toBe(400) // sin motivo
+    expect((await sell(cashier2, adjusted)).body.code).toBe("DISCOUNT_NEEDS_AUTH")
+    expect((await sell(cashier2, { ...adjusted, lines: [{ ...adjusted.lines[0], price: 1200 }], discountPin: managerPin })).body.error).toMatch(/menor/)
+    const fixed = await sell(cashier2, { ...adjusted, discountPin: managerPin })
+    expect(fixed.status).toBe(201)
+    expect(Number(fixed.body.document.total)).toBeCloseTo(2000, 2)
+    expect(fixed.body.document.lines[0]).toMatchObject({ discountLabel: "Ajuste de precio: Precio de góndola" })
   })
 
   it("el descuento sobre el total se reparte entre las líneas sin perder centavos", () => {
