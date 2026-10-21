@@ -3,11 +3,12 @@ import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import { pinLimiter } from "../../middlewares/rate-limit.middleware.ts"
 import {
-  cashMovementSchema, closeSessionSchema, createRegisterSchema, openSessionSchema, reconcileSchema, renewCodeSchema, saleSchema,
+  cashMovementSchema, closeSessionSchema, createRegisterSchema, discountTypeSchema, openSessionSchema, reconcileSchema, renewCodeSchema, saleSchema,
   sessionListQuerySchema, updateRegisterSchema,
 } from "./pos.service.ts"
 import {
-  addCashMovementHandler, closeSessionHandler, createRegisterHandler, currentSessionHandler, listCashMovementsHandler,
+  addCashMovementHandler, closeSessionHandler, createDiscountTypeHandler, createRegisterHandler, currentSessionHandler,
+  listCashMovementsHandler, listDiscountTypesHandler, updateDiscountTypeHandler,
   listRegistersHandler, listSessionsHandler, openSessionHandler, reconcileHandler, renewCodeHandler, sellHandler, sessionReportHandler,
   ticketHandler, updateRegisterHandler,
 } from "./pos.controller.ts"
@@ -31,7 +32,13 @@ router.get("/sessions", validateQuery(sessionListQuerySchema), Authenticated, Ca
 router.get("/sessions/:id/report", Authenticated, sessionReportHandler) // el cajero ve el suyo (sin el esperado)
 router.post("/sessions/:id/reconcile", validate(reconcileSchema), Authenticated, Can("cash.reconcile"), reconcileHandler)
 
+// Tipos de descuento: los crea el admin; el POS los lista para elegir
+router.get("/discount-types", Authenticated, listDiscountTypesHandler)
+router.post("/discount-types", validate(discountTypeSchema), Authenticated, Can("company.manage"), createDiscountTypeHandler)
+router.put("/discount-types/:id", validate(discountTypeSchema), Authenticated, Can("company.manage"), updateDiscountTypeHandler)
+
 // Venta y tiquete
-// con código de encargado (negativas) cuenta para el límite de intentos de PIN
-router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (req, res, next) => (req.body.negativePin ? pinLimiter(req, res, next) : next()), sellHandler)
+// con código de encargado (negativas o descuentos) cuenta para el límite de intentos de PIN
+const withPin = (req: { body: { negativePin?: string; discountPin?: string } }) => !!(req.body.negativePin || req.body.discountPin)
+router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (req, res, next) => (withPin(req) ? pinLimiter(req, res, next) : next()), sellHandler)
 router.get("/tickets/:id", Authenticated, Can("sales.sell"), ticketHandler)

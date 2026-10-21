@@ -3,6 +3,8 @@ import request from "supertest"
 import app from "../../app.ts"
 import { resetDb, createUser, mainLocationId } from "../../test/helpers.ts"
 import { prismaRoot as prisma } from "../../config/database.ts"
+import { Prisma } from "../../generated/prisma/client.ts"
+import { computeDiscounts } from "./pos.service.ts"
 
 type User = Awaited<ReturnType<typeof createUser>>
 
@@ -152,5 +154,39 @@ describe("Punto de venta", () => {
     expect(mine.expectedCash).toBeUndefined()
     expect(mine.difference).toBeUndefined()
     expect((await request(app).get(`/pos/sessions/${session.id}/report`).set(cashier2.auth)).status).toBe(404)
+  })
+
+  it("descuentos: por línea y sobre el total, siempre con el código del encargado; con cliente sale factura", async () => {
+    const type = (body: object) => request(app).post("/pos/discount-types").set(admin.auth).send(body)
+    expect((await request(app).post("/pos/discount-types").set(cashier.auth).send({ name: "X", kind: "PERCENT", value: 5 })).status).toBe(403)
+    expect((await type({ name: "Libre", kind: "AMOUNT", value: null })).status).toBe(400) // libre sin tope
+    const senior = (await type({ name: "Adulto mayor", kind: "PERCENT", value: 10, appliesTo: "LINE" })).body.id
+    const free = (await type({ name: "Libre", kind: "AMOUNT", value: null, maxPercent: 20, appliesTo: "TOTAL" })).body.id
+    expect((await request(app).get("/pos/discount-types").set(cashier2.auth)).body).toHaveLength(2)
+
+    expect((await request(app).post("/pos/session").set(cashier2.auth).send({ registerId, pin: "7364", openingAmount: 0 })).status).toBe(201)
+    const customerId = (await request(app).post("/customers").set(cashier2.auth).send({ name: "Ana Mora", idType: "FISICA", idNumber: "101110111" })).body.id
+    // 2 × 1130 = 2260 − 10 % (226) = 2034 − 100 sobre el total = 1934
+    const body = {
+      customerId,
+      lines: [{ productId, quantity: 2, discount: { typeId: senior } }],
+      discount: { typeId: free, value: 100 },
+      payments: [{ method: "CARD", amount: 1934 }],
+    }
+    expect((await sell(cashier2, body)).body.code).toBe("DISCOUNT_NEEDS_AUTH")
+    expect((await sell(cashier2, { ...body, discountPin: "4821" })).status).toBe(403) // otro cajero no autoriza
+    expect((await sell(cashier2, { ...body, discount: { typeId: free, value: 1000 }, discountPin: managerPin })).body.error).toMatch(/hasta 20/)
+    expect((await sell(cashier2, { ...body, discount: { typeId: senior }, discountPin: managerPin })).body.error).toMatch(/por línea/)
+    const res = await sell(cashier2, { ...body, discountPin: managerPin })
+    expect(res.status).toBe(201)
+    expect(res.body.document).toMatchObject({ type: "INVOICE", customer: { id: customerId }, discountAuthorizedBy: { id: manager.user.id } })
+    expect(Number(res.body.document.total)).toBeCloseTo(1934, 2)
+    expect(res.body.document.lines[0]).toMatchObject({ discountLabel: "Adulto mayor + Libre" })
+  })
+
+  it("el descuento sobre el total se reparte entre las líneas sin perder centavos", () => {
+    const types = new Map([["t", { id: "t", name: "Promo", kind: "AMOUNT" as const, value: new Prisma.Decimal(100), maxPercent: null, appliesTo: "BOTH" as const, isActive: true }]])
+    const { lines } = computeDiscounts([1, 1, 1].map((v) => new Prisma.Decimal(v * 1000)), [], { typeId: "t" }, types)
+    expect(lines.map((l) => l.amount.toNumber())).toEqual([33.34, 33.33, 33.33])
   })
 })

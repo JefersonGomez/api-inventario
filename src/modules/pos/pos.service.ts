@@ -5,6 +5,8 @@
 //    también con el código del encargado) y un monto inicial; se cierra con arqueo por denominación.
 //    Una caja abierta por persona y un turno abierto por caja (índices únicos parciales).
 //  - Venta: tiquete + salida de stock (SALE) en la misma transacción. Sin stock suficiente no se vende.
+//  - Descuentos (7B): por línea o sobre el total, de un tipo creado por el admin. SIEMPRE con el código
+//    del encargado (sales.discount). Con cliente identificado sale factura en vez de tiquete.
 import { z } from "zod"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
@@ -56,9 +58,22 @@ export const sessionListQuerySchema = z.object({
   ...pageQuery,
   pending: z.enum(["1", "0"]).optional(), // 1 = cerradas sin arqueo
 })
+export const discountTypeSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60),
+    kind: z.enum(["PERCENT", "AMOUNT"]),
+    value: z.number().positive().max(1e9).nullable(), // null = el cajero escribe cuánto
+    maxPercent: z.number().positive().max(100).nullable().optional(), // tope de los libres
+    appliesTo: z.enum(["LINE", "TOTAL", "BOTH"]).default("BOTH"),
+    isActive: z.boolean().default(true),
+  })
+  .refine((d) => d.value !== null || d.maxPercent, { message: "Un descuento libre necesita un tope (%)", path: ["maxPercent"] })
+  .refine((d) => d.kind !== "PERCENT" || d.value === null || d.value <= 100, { message: "El porcentaje va de 0 a 100", path: ["value"] })
+const discountPick = z.object({ typeId: z.uuid(), value: z.number().positive().max(1e9).optional() })
 export const saleSchema = z.object({
   customerId: z.uuid().optional(),
-  lines: z.array(z.object({ productId: z.uuid(), quantity: quantitySchema })).min(1).max(500),
+  lines: z.array(z.object({ productId: z.uuid(), quantity: quantitySchema, discount: discountPick.optional() })).min(1).max(500),
+  discount: discountPick.optional(), // sobre el total: se reparte entre las líneas (Hacienda solo tiene descuento por línea)
   payments: z
     .array(
       z.object({
@@ -72,7 +87,78 @@ export const saleSchema = z.object({
     .max(5),
   notes: z.string().trim().max(500).optional(),
   negativePin: pin.optional(), // código del encargado que autoriza las negativas de esta venta
+  discountPin: pin.optional(), // código del encargado que autoriza los descuentos de esta venta
 })
+
+// ---------- Tipos de descuento ----------
+
+export async function listDiscountTypes() {
+  return prisma.discountType.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] })
+}
+
+export async function saveDiscountType(id: string | null, input: z.infer<typeof discountTypeSchema>, userId: string) {
+  const data = { ...input, maxPercent: input.value === null ? input.maxPercent! : null }
+  if (id && !(await prisma.discountType.findFirst({ where: { id } }))) throw fail("Tipo de descuento no encontrado", 404)
+  // se desactivan, no se borran: su nombre ya está en comprobantes
+  const saved = id
+    ? await prisma.discountType.update({ where: { id }, data })
+    : await prisma.discountType.create({ data: { companyId: currentCompanyId(), ...data } })
+  await logAudit(userId, id ? "UPDATE" : "CREATE", "DiscountType", saved.id, input)
+  return saved
+}
+
+type DiscountRow = { id: string; name: string; kind: "PERCENT" | "AMOUNT"; value: Prisma.Decimal | null; maxPercent: Prisma.Decimal | null; appliesTo: "LINE" | "TOTAL" | "BOTH"; isActive: boolean }
+type DiscountPick = { typeId: string; value?: number | undefined }
+const r2 = (v: Prisma.Decimal) => v.toDecimalPlaces(2)
+
+// Monto (con IVA) de un descuento sobre una base. Los libres llevan el valor que escribe el cajero, hasta su tope.
+function discountAmount(pick: DiscountPick, base: Prisma.Decimal, types: Map<string, DiscountRow>, scope: "LINE" | "TOTAL") {
+  const type = types.get(pick.typeId)
+  if (!type?.isActive) throw new Error("El tipo de descuento no existe o está desactivado")
+  if (type.appliesTo !== "BOTH" && type.appliesTo !== scope) {
+    throw new Error(`«${type.name}» es solo ${type.appliesTo === "LINE" ? "por línea" : "sobre el total"}`)
+  }
+  const value = type.value ?? (pick.value !== undefined ? new D(pick.value) : null)
+  if (!value) throw new Error(`«${type.name}»: indica cuánto descontar`)
+  const amount = type.kind === "PERCENT" ? r2(base.times(value).div(100)) : value
+  if (type.value === null && amount.greaterThan(base.times(type.maxPercent!).div(100).plus(0.005))) {
+    throw new Error(`«${type.name}» permite hasta ${type.maxPercent}%`)
+  }
+  if (amount.greaterThan(base)) throw new Error(`«${type.name}» descuenta más de lo que vale`)
+  if (!amount.greaterThan(0)) throw new Error(`«${type.name}»: el descuento tiene que ser mayor que 0`)
+  return { amount, label: type.name, describe: type.kind === "PERCENT" ? `${type.name} ${value}%` : `${type.name} ${value}` }
+}
+
+// Descuentos de la venta por línea (con IVA). El del total se reparte en proporción a lo que queda de
+// cada línea; la más grande se lleva el redondeo. El frontend hace la misma cuenta (lib/pos.js).
+export function computeDiscounts(grosses: Prisma.Decimal[], linePicks: (DiscountPick | undefined)[], totalPick: DiscountPick | undefined, types: Map<string, DiscountRow>) {
+  const out = grosses.map(() => ({ amount: new D(0), labels: [] as string[] }))
+  const described: string[] = []
+  linePicks.forEach((pick, i) => {
+    if (!pick) return
+    const d = discountAmount(pick, grosses[i]!, types, "LINE")
+    out[i] = { amount: d.amount, labels: [d.label] }
+    described.push(`${d.describe} (línea ${i + 1})`)
+  })
+  if (totalPick) {
+    const after = grosses.map((g, i) => g.minus(out[i]!.amount))
+    const base = after.reduce((s, v) => s.plus(v), new D(0))
+    const d = discountAmount(totalPick, base, types, "TOTAL")
+    described.push(`${d.describe} (total)`)
+    const biggest = after.reduce((b, v, i) => (v.greaterThan(after[b]!) ? i : b), 0)
+    let given = new D(0)
+    after.forEach((v, i) => {
+      if (i === biggest || v.isZero()) return
+      const share = r2(d.amount.times(v).div(base))
+      out[i]!.amount = out[i]!.amount.plus(share)
+      out[i]!.labels.push(d.label)
+      given = given.plus(share)
+    })
+    out[biggest]!.amount = out[biggest]!.amount.plus(d.amount.minus(given))
+    out[biggest]!.labels.push(d.label)
+  }
+  return { lines: out.map((o) => ({ amount: o.amount, label: o.labels.join(" + ") })), described }
+}
 
 // ---------- Cajas ----------
 
@@ -361,7 +447,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   for (const l of input.lines) wanted.set(l.productId, (wanted.get(l.productId) ?? 0) + l.quantity)
   const products = await prisma.product.findMany({
     where: { id: { in: [...wanted.keys()] }, deletedAt: null },
-    select: { id: true, name: true, unit: true, tracksLots: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
+    select: { id: true, name: true, price: true, unit: true, tracksLots: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
   })
   if (products.length !== wanted.size) throw new Error("Algún producto no existe")
   const stockOf = (p: (typeof products)[number]) => new D(p.stocks[0]?.quantity ?? 0)
@@ -383,12 +469,40 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     authorizedBy = auth.authorizedBy
   }
 
+  // descuentos: siempre con el código del encargado
+  const byId = new Map(products.map((p) => [p.id, p]))
+  const hasDiscount = !!input.discount || input.lines.some((l) => l.discount)
+  let discounts: ReturnType<typeof computeDiscounts>["lines"] = []
+  let discountAuthorizedById: string | undefined
+  if (hasDiscount) {
+    const types = new Map((await prisma.discountType.findMany()).map((t) => [t.id, t as DiscountRow]))
+    const grosses = input.lines.map((l) => new D(byId.get(l.productId)!.price).times(l.quantity))
+    const computed = computeDiscounts(grosses, input.lines.map((l) => l.discount), input.discount, types)
+    discounts = computed.lines
+    if (!input.discountPin) throw fail("Los descuentos los autoriza el encargado con su código", 409, "DISCOUNT_NEEDS_AUTH")
+    const auth = await authorizeWithPin(actor.id, input.discountPin, "sales.discount", `Descuentos: ${computed.described.join(", ")}`.slice(0, 200))
+    if (!auth) throw fail("Ese código no autoriza descuentos (tiene que ser de un encargado, vigente)", 403, "DISCOUNT_PIN")
+    discountAuthorizedById = auth.authorizedBy.id
+  }
+  // con cliente identificado: factura (el cliente la puede usar para su contabilidad)
+  const customer = input.customerId
+    ? await prisma.customer.findFirst({ where: { id: input.customerId, deletedAt: null }, select: { idType: true, idNumber: true } })
+    : null
+  if (input.customerId && !customer) throw new Error("El cliente no existe")
+
   const doc = await prisma.$transaction(async (tx) => {
     const doc = await issueDocument(
       {
-        type: "TICKET",
+        type: customer?.idType && customer.idNumber ? "INVOICE" : "TICKET",
         ...(input.customerId && { customerId: input.customerId }),
-        lines: input.lines,
+        lines: input.lines.map((l, i) => {
+          const d = discounts[i]
+          return {
+            productId: l.productId, quantity: l.quantity,
+            ...(d && d.amount.greaterThan(0) && { discountWithTax: d.amount.toNumber(), discountLabel: d.label }),
+          }
+        }),
+        ...(discountAuthorizedById && { discountAuthorizedById }),
         payments: input.payments,
         ...(input.notes && { notes: input.notes }),
         branchCode: register.location.code ?? "001",

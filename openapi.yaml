@@ -143,6 +143,22 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    DiscountPick:
+      type: object
+      required: [typeId]
+      properties:
+        typeId: { type: string, format: uuid }
+        value: { type: number, minimum: 0.01, description: "Solo en los tipos libres: % o monto que escribe el cajero" }
+    DiscountTypeInput:
+      type: object
+      required: [name, kind, value]
+      properties:
+        name: { type: string, maxLength: 60 }
+        kind: { type: string, enum: [PERCENT, AMOUNT] }
+        value: { type: number, nullable: true, description: "null = libre (el cajero escribe cuánto)" }
+        maxPercent: { type: number, nullable: true, maximum: 100, description: "Tope de los libres" }
+        appliesTo: { type: string, enum: [LINE, TOTAL, BOTH], default: BOTH }
+        isActive: { type: boolean, default: true }
     PageMeta:
       type: object
       description: "Respuesta de un listado paginado: { items, total, page, pageSize, pageCount }"
@@ -2209,7 +2225,7 @@ paths:
     post:
       tags: [Punto de venta]
       summary: Vender (sales.sell, con caja abierta)
-      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Devuelve los datos del tiquete y negatives (cantidad de negativas)."
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas)."
       requestBody:
         required: true
         content:
@@ -2221,6 +2237,8 @@ paths:
                 customerId: { type: string, format: uuid }
                 notes: { type: string, maxLength: 500 }
                 negativePin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza las negativas" }
+                discountPin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza los descuentos" }
+                discount: { $ref: '#/components/schemas/DiscountPick' }
                 lines:
                   type: array
                   items:
@@ -2229,6 +2247,7 @@ paths:
                     properties:
                       productId: { type: string, format: uuid }
                       quantity: { type: number }
+                      discount: { $ref: '#/components/schemas/DiscountPick' }
                 payments:
                   type: array
                   items:
@@ -2244,6 +2263,40 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Sin stock o sin caja abierta }
+
+  /pos/discount-types:
+    get:
+      tags: [Punto de venta]
+      summary: Tipos de descuento (activos e inactivos)
+      responses:
+        '200': { description: Lista de tipos de descuento }
+    post:
+      tags: [Punto de venta]
+      summary: Crear tipo de descuento (company.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscountTypeInput' }
+      responses:
+        '201': { description: Tipo creado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/discount-types/{id}:
+    put:
+      tags: [Punto de venta]
+      summary: Editar o desactivar un tipo de descuento (company.manage)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscountTypeInput' }
+      responses:
+        '200': { description: Tipo actualizado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /negatives:
     get:

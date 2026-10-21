@@ -27,6 +27,7 @@ export type DocumentLineInput = {
   description?: string
   unitPriceWithTax?: number
   discountWithTax?: number // monto de descuento de la línea, con IVA
+  discountLabel?: string // naturaleza del descuento (el tipo usado)
   unit?: UnitOfMeasure
   taxRate?: TaxRate
   cabys?: string | null
@@ -45,6 +46,7 @@ export type IssueDocumentInput = {
   branchCode?: string
   terminalCode?: string
   cashSessionId?: string // turno de caja del POS
+  discountAuthorizedById?: string // encargado que autorizó los descuentos
 }
 
 type Computed = {
@@ -56,6 +58,7 @@ type Computed = {
   quantity: Prisma.Decimal
   unitPrice: Prisma.Decimal
   discount: Prisma.Decimal
+  discountLabel: string | null
   taxRate: TaxRate
   taxAmount: Prisma.Decimal
   subtotal: Prisma.Decimal
@@ -113,6 +116,7 @@ async function resolveLines(lines: DocumentLineInput[], client: Db): Promise<Com
       productId: p?.id ?? null,
       description,
       cabys: l.cabys !== undefined ? l.cabys : (p?.cabys ?? null),
+      discountLabel: l.discountWithTax ? (l.discountLabel?.slice(0, 80) ?? null) : null,
       unit,
       taxRate,
     }
@@ -205,6 +209,7 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         createdById: userId,
         lines: { createMany: { data: lines } },
         ...(input.cashSessionId && { cashSessionId: input.cashSessionId }),
+        ...(input.discountAuthorizedById && { discountAuthorizedById: input.discountAuthorizedById }),
         ...(payments.length && {
           payments: {
             createMany: {
@@ -231,6 +236,7 @@ export async function getDocument(id: string) {
       payments: true,
       customer: true,
       createdBy: { select: { id: true, name: true } },
+      discountAuthorizedBy: { select: { id: true, name: true } },
     },
   })
   if (!doc) throw new Error("Comprobante no encontrado")
