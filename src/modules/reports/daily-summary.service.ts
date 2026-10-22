@@ -1,13 +1,14 @@
 // Resumen del día con IA (Bloque 6D, decisiones del 16-oct-2026): los números los calcula el servidor y
 // la IA solo los redacta en pocas líneas. Uno por día por empresa, guardado: abrirlo diez veces cuesta una.
 // Es de toda la empresa y sin costos (lo ve cualquiera con reports.view). Si la IA está en pausa o falla,
-// se devuelven igual los números (text: null). Ventas y facturación se suman cuando existan (Bloques 7 y 9).
+// se devuelven igual los números (text: null). Desde 7D-2 incluye las ventas del día (sales-report.service).
 import { z } from "zod"
 import { prisma, prismaRoot } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { pageArgs, pageQuery, pageResult, queryFlag } from "../../shared/pagination.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
 import { generateMetered, MODELS } from "../ai/ai.service.ts"
+import { salesOfDay } from "./sales-report.service.ts"
 
 export const dailySummaryQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // día del navegador (la clave del resumen guardado)
@@ -19,7 +20,7 @@ type SummaryData = Awaited<ReturnType<typeof computeDay>>
 
 async function computeDay(since: Date) {
   const soon = new Date(since.getTime() + 8 * 24 * 60 * 60 * 1000)
-  const [moves, lowStock, expiringLots, expiringProducts, pendingRequests, openOrders, inTransit, openCounts] = await Promise.all([
+  const [moves, lowStock, expiringLots, expiringProducts, pendingRequests, openOrders, inTransit, openCounts, sales] = await Promise.all([
     prisma.stockMovement.groupBy({ by: ["type", "source"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
     prismaRoot.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" WHERE "companyId" = ${currentCompanyId()} AND "deletedAt" IS NULL AND "stock" <= "minStock"`,
     prisma.productLot.count({ where: { quantity: { gt: 0 }, expiresAt: { not: null, lte: soon }, product: { deletedAt: null } } }),
@@ -28,6 +29,7 @@ async function computeDay(since: Date) {
     prisma.purchaseOrder.count({ where: { status: { in: ["PENDING", "PARTIAL"] } } }),
     prisma.stockTransfer.count({ where: { status: "IN_TRANSIT" } }),
     prisma.stockCount.count({ where: { status: "OPEN" } }),
+    salesOfDay(since),
   ])
   const count = (type: string, sources?: string[]) =>
     moves.filter((m) => m.type === type && (!sources || sources.includes(m.source))).reduce((s, m) => s + m._count._all, 0)
@@ -42,12 +44,15 @@ async function computeDay(since: Date) {
     openOrders,
     transfersInTransit: inTransit,
     openCounts,
+    // ventas del día (montos con IVA): neto, devoluciones, tiquetes, más vendidos, abonos, cuotas vencidas, arqueos con diferencia
+    sales,
   }
 }
 
-const PROMPT = `Eres el asistente de un sistema de inventario. Con estos números del día escribe un resumen breve en español
+const PROMPT = `Eres el asistente de un sistema de inventario y punto de venta. Con estos números del día escribe un resumen breve en español
 para el dueño del negocio: 3 a 5 viñetas cortas ("- "), lo más importante primero, y una última línea con la acción
 más urgente si la hay. Usa solo estos números; no inventes nada; si todo está en cero, dilo en una línea.
+Los montos de "sales" van con IVA y en la moneda de la empresa (sin símbolo); si sales.tickets es 0, no hables de ventas.
 Números del día (JSON):
 `
 

@@ -1,12 +1,12 @@
 // Guía de primeros pasos (Bloque 6B): qué le falta a una empresa nueva para dejar todo listo. Cada paso
 // se calcula con los datos reales (no se marca a mano). El administrador puede ocultar la guía.
-// Cuando exista el POS (Bloque 7) se suma el paso "abrir la primera caja".
+// Último paso (7D-2): crear una caja y abrir el primer turno.
 import { prisma, prismaRoot } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
 
 export async function onboardingStatus() {
   const companyId = currentCompanyId()
-  const [company, branch, categories, products, withoutCabys, pending, members, invitations, withPin] = await Promise.all([
+  const [company, branch, categories, products, withoutCabys, pending, members, invitations, withPin, sessions] = await Promise.all([
     prismaRoot.company.findUniqueOrThrow({
       where: { id: companyId },
       select: { legalName: true, idNumber: true, economicActivity: true, province: true, onboardingDismissedAt: true },
@@ -19,6 +19,7 @@ export async function onboardingStatus() {
     prismaRoot.membership.count({ where: { companyId, isActive: true } }),
     prisma.invitation.count({ where: { acceptedAt: null, revokedAt: null } }),
     prismaRoot.membership.count({ where: { companyId, isActive: true, pinHash: { not: null } } }),
+    prisma.cashSession.count(),
   ])
 
   const steps = [
@@ -31,6 +32,8 @@ export async function onboardingStatus() {
     { key: "taxes", link: "/products", done: products > 0 && withoutCabys === 0 && pending === 0, meta: { withoutCabys, pending } },
     { key: "team", link: "/users", done: members > 1 || invitations > 0 },
     { key: "cashCodes", link: "/profile?tab=cash", done: withPin > 0 },
+    // se marca sola cuando alguien abre el primer turno de caja (la caja se crea en Configuración → Cajas)
+    { key: "firstRegister", link: "/settings?tab=registers", done: sessions > 0 },
   ]
   return {
     steps,

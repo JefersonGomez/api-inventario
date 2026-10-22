@@ -3,6 +3,10 @@ import { Type } from "@google/genai";
 import * as reportsService from "../reports/report.service.ts";
 import * as productService from "../products/products.service.ts";
 import * as movementsService from "../movements/movements.service.ts";
+import { getSalesReport } from "../reports/sales-report.service.ts";
+import { listReceivables } from "../receivables/receivables.service.ts";
+
+const ymd = (d: Date) => d.toLocaleDateString("sv");
 export const toolDeclarations = [
   {
     name: "getLowStockReport",
@@ -46,9 +50,31 @@ export const toolDeclarations = [
       },
     },
   },
+  {
+    name: "getSalesReport",
+    description: "Reporte de ventas de un período (fechas AAAA-MM-DD, máximo un año): venta neta (vendido menos devoluciones), vendido, devoluciones, tiquetes y tiquete promedio, el período anterior del mismo largo para comparar, ventas por medio de pago (CREDIT = lo que se fue a cuotas), por cajero, los 15 productos más vendidos (neto, por monto), 15 productos con stock que no se vendieron y, si la persona puede ver costos, la ganancia (profit). Montos con IVA. Útil para '¿cuánto vendí?', '¿cómo vamos contra el mes pasado?', '¿qué es lo que más se vende?', '¿qué no se vende?'. Si no dan fechas, usa el mes en curso.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        from: { type: Type.STRING, description: "Fecha inicial AAAA-MM-DD. Opcional (por defecto el 1 del mes en curso)." },
+        to: { type: Type.STRING, description: "Fecha final AAAA-MM-DD. Opcional (por defecto hoy)." },
+      },
+    },
+  },
+  {
+    name: "getReceivables",
+    description: "Cuentas por cobrar: clientes con crédito o con saldo pendiente, con su límite, saldo, monto vencido, cantidad de cuotas vencidas y próxima cuota, más los totales. Útil para '¿quién me debe?', '¿quién está atrasado?', '¿cuánto tengo por cobrar?'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        overdueOnly: { type: Type.BOOLEAN, description: "true = solo los que tienen cuotas vencidas." },
+      },
+    },
+  },
 ];
 
-export const toolExecutors: Record<string, (args: any) => Promise<unknown>> = {
+// ctx: permisos de quien pregunta (la ganancia de ventas solo con costs.view)
+export const toolExecutors: Record<string, (args: any, ctx: { permissions: string[] }) => Promise<unknown>> = {
   getLowStockReport: () => reportsService.getLowStockReport(),
   getInventoryValueReport: () => reportsService.getInventoryValueReport(),
   // ponytail: tope de 100 resultados por consulta; si hiciera falta más, agregar paginación a la herramienta
@@ -56,4 +82,18 @@ export const toolExecutors: Record<string, (args: any) => Promise<unknown>> = {
     productService.listProducts({ view: "flat", page: 1, pageSize: 100, ...(args?.query && { q: String(args.query) }) }),
   getMovements: (args) =>
     movementsService.listMovements({ page: 1, pageSize: 100, ...(args?.productId && { productId: String(args.productId) }) }),
+  // recortado: el reporte completo trae 100 productos y 50 sin ventas, demasiado para el modelo
+  getSalesReport: async (args, ctx) => {
+    const now = new Date();
+    const from = typeof args?.from === "string" ? args.from : ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+    const to = typeof args?.to === "string" ? args.to : ymd(now);
+    const r = await getSalesReport({ from, to }, ctx);
+    return {
+      from: r.from, to: r.to, totals: r.totals, previous: r.previous, byMethod: r.byMethod,
+      byCashier: r.byCashier.map(({ name, net, tickets }) => ({ name, net, tickets })),
+      topProducts: r.products.slice(0, 15), notSold: r.notSold.slice(0, 15).map(({ name, stock }) => ({ name, stock })),
+      discounts: r.discounts.total, ...(r.profit && { profit: r.profit }),
+    };
+  },
+  getReceivables: (args) => listReceivables({ page: 1, pageSize: 50, q: undefined, ...(args?.overdueOnly === true && { overdue: "1" as const }) }),
 };

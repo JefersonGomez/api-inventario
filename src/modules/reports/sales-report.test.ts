@@ -3,6 +3,9 @@ import request from "supertest"
 import app from "../../app.ts"
 import { resetDb, createUser, mainLocationId } from "../../test/helpers.ts"
 import { prismaRoot as prisma } from "../../config/database.ts"
+import { runWithCompany } from "../../shared/tenant.ts"
+import { toolExecutors } from "../assistant/assistant.tools.ts"
+import { salesOfDay } from "./sales-report.service.ts"
 
 type User = Awaited<ReturnType<typeof createUser>>
 
@@ -72,6 +75,16 @@ describe("Reporte de ventas", () => {
     await request(app).post(`/sales/${sale.id}/returns`).set(cashier.auth)
       .send({ lines: [{ lineId, quantity: 1, condition: "DAMAGED" }], reason: "Roto", refund: { method: "CASH" }, pin: managerPin })
     expect(await profit()).toMatchObject({ revenue: 3000, cost: 2700, profit: 300 })
+  })
+
+  it("el asistente y el resumen del día ven las ventas; la ganancia solo con costos", async () => {
+    const ask = (permissions: string[]) => runWithCompany(admin.companyId, () => toolExecutors.getSalesReport!({ from: today, to: today }, { permissions })) as Promise<Record<string, unknown>>
+    expect(await ask([])).toMatchObject({ totals: { net: 3390 } })
+    expect((await ask([])).profit).toBeUndefined()
+    expect((await ask(["costs.view"])).profit).toMatchObject({ profit: 300 })
+    const start = new Date(new Date().setHours(0, 0, 0, 0))
+    expect(await runWithCompany(admin.companyId, () => salesOfDay(start))).toMatchObject({ net: 3390, tickets: 3, topProducts: ["Arroz"] })
+    expect((await request(app).get("/company/onboarding").set(admin.auth)).body.steps.find((st: { key: string }) => st.key === "firstRegister")).toMatchObject({ done: true })
   })
 
   it("ventas de hoy para el Panel y las del cajero en el mes", async () => {

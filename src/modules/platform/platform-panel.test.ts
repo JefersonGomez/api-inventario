@@ -68,7 +68,7 @@ describe("Panel de plataforma: actividad y medidor de IA", () => {
       },
     })
     const overview = (await request(app).get("/platform/overview").set(owner.auth)).body
-    expect(overview.activity.find((a: { companyId: string }) => a.companyId === client.companyId)).toMatchObject({ movementsWeek: 1 })
+    expect(overview.activity.find((a: { companyId: string }) => a.companyId === client.companyId)).toMatchObject({ movementsWeek: 1, salesMonth: 0, ticketsMonth: 0, registers: 0 })
     expect(overview.signups).toHaveLength(12)
     expect(overview.signups.at(-1).count).toBe(2) // las dos empresas de este test, esta semana
 

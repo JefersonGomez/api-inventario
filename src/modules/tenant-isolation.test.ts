@@ -106,7 +106,7 @@ describe("Aislamiento entre empresas", () => {
   })
 
   it("el asistente IA solo consulta datos de su empresa", async () => {
-    const products = (await runWithCompany(A.companyId, () => toolExecutors.searchProducts!({}))) as { items: { name: string }[] }
+    const products = (await runWithCompany(A.companyId, () => toolExecutors.searchProducts!({}, { permissions: [] }))) as { items: { name: string }[] }
     expect(products.items.map((p) => p.name)).toEqual(["Producto A"])
   })
 

@@ -11,7 +11,7 @@ const MODEL = MODELS.chat;
 const MAX_TOOL_ROUNDS = 5;
 
 const SYSTEM_INSTRUCTION = `
-Sos un asistente de solo lectura para un sistema de inventario.
+Sos un asistente de solo lectura para un sistema de inventario y punto de venta (ventas, devoluciones, crédito y cuentas por cobrar).
 Respondé siempre basándote en los datos reales que obtengas de las herramientas disponibles.
 Nunca inventes cifras, nombres de productos, ni cantidades.
 Si una pregunta requiere datos que no podés obtener con las herramientas disponibles, decilo explícitamente en vez de inventar una respuesta.
@@ -32,7 +32,9 @@ export async function chatWithAssistant(userMessage: string, permissions: string
       model: MODEL,
       contents,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+        // la fecha de hoy, para resolver "esta semana", "el mes pasado"…
+        systemInstruction: `${SYSTEM_INSTRUCTION}
+Hoy es ${new Date().toLocaleDateString("sv")}.`,
         tools: [{ functionDeclarations: declarations }],
       },
     }, userId);
@@ -67,7 +69,7 @@ export async function chatWithAssistant(userMessage: string, permissions: string
         result = { error: `Herramienta desconocida o no ejecutable: ${toolName}` };
       } else {
         try {
-          result = await executor(call.args);
+          result = await executor(call.args, { permissions });
           if (!seesCosts) result = stripCosts(JSON.parse(JSON.stringify(result)));
         } catch (error) {
           result = { error: (error as Error).message };

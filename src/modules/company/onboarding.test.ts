@@ -20,7 +20,7 @@ describe("Primeros pasos", () => {
 
   it("una empresa nueva arranca con todo pendiente", async () => {
     const s = await status()
-    expect(s).toMatchObject({ completed: 0, total: 7, dismissed: false })
+    expect(s).toMatchObject({ completed: 0, total: 8, dismissed: false })
   })
 
   it("cada paso se marca solo al hacerlo", async () => {

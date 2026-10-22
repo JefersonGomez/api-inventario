@@ -36,7 +36,7 @@ describe("Resumen del día", () => {
   it("si la IA falla, devuelve los números sin texto y no guarda", async () => {
     fail = true
     const res = await request(app).post(`/reports/daily-summary${qs}`).set(admin.auth)
-    expect(res.body).toMatchObject({ text: null, data: { lowStock: 1, movements: { in: 1 } } })
+    expect(res.body).toMatchObject({ text: null, data: { lowStock: 1, movements: { in: 1 }, sales: { tickets: 0, net: 0 } } })
     expect((await request(app).get(`/reports/daily-summary${qs}`).set(admin.auth)).body).toBeNull()
   })
 

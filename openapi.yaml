@@ -2690,7 +2690,7 @@ paths:
     get:
       tags: [Plataforma]
       summary: Actividad por empresa y empresas nuevas por semana (solo el dueño de la plataforma)
-      description: "activity: lastSeenAt (último inicio o renovación de sesión), movementsWeek, lastMovementAt. signups: 12 semanas."
+      description: "activity: lastSeenAt (último inicio o renovación de sesión), movementsWeek, lastMovementAt, salesMonth (neto de 30 días en la moneda de la empresa), ticketsMonth y registers (cajas activas). signups: 12 semanas."
       responses:
         "200": { description: Resumen }
         "403": { $ref: "#/components/responses/Forbidden" }

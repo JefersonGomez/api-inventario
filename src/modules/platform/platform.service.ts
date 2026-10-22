@@ -60,14 +60,35 @@ const DAY = 24 * 60 * 60 * 1000;
 
 // Actividad de cada empresa (Bloque 6A): última entrada de alguien (último inicio o renovación de sesión),
 // movimientos de la última semana y el último. Solo números: ningún dato de inventario del cliente.
-// Ventas de la semana: cuando exista el POS (Bloque 7).
+// Ventas (7D-2): solo cifras generales de los últimos 30 días (neto y tiquetes) y cuántas cajas tiene,
+// para ver quién usa la caja; nunca el detalle de las ventas.
 export async function companyActivity() {
   const weekAgo = new Date(Date.now() - 7 * DAY);
-  const [sessions, moves, lastMoves] = await Promise.all([
+  const monthAgo = new Date(Date.now() - 30 * DAY);
+  const [sessions, moves, lastMoves, docs, registers] = await Promise.all([
     prismaRoot.refreshToken.groupBy({ by: ["companyId"], _max: { createdAt: true } }),
     prismaRoot.stockMovement.groupBy({ by: ["companyId"], where: { createdAt: { gte: weekAgo } }, _count: { _all: true } }),
     prismaRoot.stockMovement.groupBy({ by: ["companyId"], _max: { createdAt: true } }),
+    prismaRoot.document.groupBy({
+      by: ["companyId", "type"],
+      where: { issuedAt: { gte: monthAgo }, type: { in: ["TICKET", "INVOICE", "CREDIT_NOTE"] } },
+      _sum: { total: true },
+      _count: { _all: true },
+    }),
+    prismaRoot.cashRegister.groupBy({ by: ["companyId"], where: { isActive: true }, _count: { _all: true } }),
   ]);
+  const sales = new Map<string, { net: number; tickets: number }>();
+  for (const d of docs) {
+    const row = sales.get(d.companyId) ?? { net: 0, tickets: 0 };
+    const total = Number(d._sum.total ?? 0);
+    if (d.type === "CREDIT_NOTE") row.net -= total;
+    else {
+      row.net += total;
+      row.tickets += d._count._all;
+    }
+    sales.set(d.companyId, row);
+  }
+  const regs = new Map(registers.map((r) => [r.companyId, r._count._all]));
   const last = new Map(sessions.map((s) => [s.companyId, s._max.createdAt]));
   const week = new Map(moves.map((m) => [m.companyId, m._count._all]));
   const lastMove = new Map(lastMoves.map((m) => [m.companyId, m._max.createdAt]));
@@ -77,6 +98,9 @@ export async function companyActivity() {
     lastSeenAt: last.get(c.id) ?? null,
     movementsWeek: week.get(c.id) ?? 0,
     lastMovementAt: lastMove.get(c.id) ?? null,
+    salesMonth: Math.round((sales.get(c.id)?.net ?? 0) * 100) / 100, // en la moneda de esa empresa
+    ticketsMonth: sales.get(c.id)?.tickets ?? 0,
+    registers: regs.get(c.id) ?? 0,
   }));
 }
 

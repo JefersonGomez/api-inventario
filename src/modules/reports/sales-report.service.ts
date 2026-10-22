@@ -260,3 +260,31 @@ export async function getMySales(q: z.infer<typeof mySalesQuerySchema>, userId: 
     byDay: [...byDay].sort(([a], [b]) => a.localeCompare(b)).map(([date, r]) => ({ date, gross: num(r.gross), tickets: r.tickets })),
   }
 }
+
+// Resumen del día con IA: ventas, devoluciones, abonos, cuotas vencidas, más vendidos y arqueos con diferencia
+// desde `since` (inicio del día). De toda la empresa y sin costos, como el resto del resumen.
+export async function salesOfDay(since: Date) {
+  const now = new Date()
+  const where = { companyId: currentCompanyId(), issuedAt: { gte: since, lte: now } }
+  const [totals, top, collections, overdue, reconciled] = await Promise.all([
+    totalsFor(since, now),
+    prisma.documentLine.groupBy({
+      by: ["description"],
+      where: { document: { ...where, type: { in: [...SALES] } } },
+      _sum: { total: true },
+      orderBy: { _sum: { total: "desc" } },
+      take: 3,
+    }),
+    prisma.customerPayment.aggregate({ where: { createdAt: { gte: since } }, _sum: { amount: true }, _count: true }),
+    prisma.installment.count({ where: { dueDate: { lt: new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) }, paid: { lt: prisma.installment.fields.amount } } }),
+    prisma.cashSession.findMany({ where: { reconciledAt: { gte: since }, difference: { not: 0 } }, select: { difference: true } }),
+  ])
+  return {
+    ...totals,
+    topProducts: top.map((t) => t.description),
+    collections: num(collections._sum.amount), collectionsCount: collections._count,
+    overdueInstallments: overdue,
+    cashDifferences: reconciled.length,
+    cashDifferenceTotal: num(reconciled.reduce((s, r) => s + Number(r.difference ?? 0), 0)),
+  }
+}
