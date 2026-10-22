@@ -1,3 +1,5 @@
+# Integración continua de la API: en cada push y pull request revisa tipos, corre los tests contra un
+# Postgres temporal, valida el openapi.yaml y comprueba que la imagen de Docker se construye.
 name: CI
 
 on:
@@ -5,31 +7,71 @@ on:
     branches: [main]
   pull_request:
 
+# si llegan dos pushes seguidos a la misma rama, se cancela la corrida vieja
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Postgres de usar y tirar: GitHub lo crea para esta corrida y lo borra al terminar
     services:
       postgres:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: inventario_db_test
-        ports: ["5432:5432"]
+          POSTGRES_DB: inventario_db_test # resetDb() exige que el nombre termine en _test
+        ports:
+          - 5432:5432
         options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      # tienen prioridad sobre .env.test (dotenv no pisa variables ya definidas)
+      # valores solo de prueba (no son secretos: la base existe unos minutos dentro de la corrida)
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/inventario_db_test
-      JWT_SECRET_KEY: ci-secret
+      JWT_SECRET_KEY: clave-solo-para-la-ci-de-github-actions
+      TZ: America/Costa_Rica
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - run: npx tsc --noEmit
-      - run: npm test
+          cache: npm # guarda la caché de npm entre corridas: la instalación tarda mucho menos
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Generar el cliente de Prisma
+        run: npx prisma generate
+
+      - name: Aplicar las migraciones a la base de prueba
+        run: npx prisma migrate deploy
+
+      - name: Revisar tipos (TypeScript)
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Validar openapi.yaml
+        run: npx --yes @redocly/cli@1.34.0 lint openapi.yaml
+
+  docker:
+    # la imagen se construye sin publicarla: solo comprueba que el Dockerfile sigue funcionando
+    # (publicarla y desplegar es el paso siguiente, CD)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Construir la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
