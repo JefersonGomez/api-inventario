@@ -75,3 +75,58 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------- CD: solo en push a main y si todo lo de arriba pasó ----------
+
+  publish:
+    # sube la imagen a GitHub Container Registry con dos etiquetas: "latest" y el commit exacto
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # el GITHUB_TOKEN de esta corrida puede publicar en ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construir y publicar
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # el nombre en ghcr.io va en minúsculas
+          tags: |
+            ghcr.io/jefersongomez/stockly-api:latest
+            ghcr.io/jefersongomez/stockly-api:${{ github.sha }}
+          cache-from: type=gha # reutiliza lo que ya construyó el job "docker"
+
+  deploy:
+    # entra por SSH a la VPS, actualiza los archivos de deploy/, baja la imagen nueva y reinicia
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production # aparece en la pestaña "Deployments" del repo con su historial
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar la llave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # ponytail: confía en la huella de la VPS al primer contacto; para más seguridad, guardarla en un secret
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+      - name: Copiar docker-compose y Caddyfile
+        run: scp deploy/docker-compose.prod.yml deploy/Caddyfile "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/stockly/"
+      - name: Actualizar los contenedores
+        run: |
+          ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" '
+            set -e
+            cd /opt/stockly
+            docker compose -f docker-compose.prod.yml pull api
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+          '
