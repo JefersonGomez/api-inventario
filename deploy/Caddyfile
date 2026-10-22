@@ -1,0 +1,15 @@
+# Caddy recibe todo el tráfico y saca el certificado HTTPS solo (Let's Encrypt) para SITE_ADDRESS.
+# Con SITE_ADDRESS=http://localhost (prueba en tu computadora) no pide certificado.
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# /api/... va a la API sin el prefijo (/api/auth/login → /auth/login); incluye /api/socket.io
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	# todo lo demás es la app de React
+	handle {
+		reverse_proxy web:80
+	}
+}

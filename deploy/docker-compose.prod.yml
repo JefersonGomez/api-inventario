@@ -1,0 +1,61 @@
+# Stockly en producción: base de datos, API, frontend y Caddy (HTTPS) en una sola máquina.
+# Uso (en la VPS, en esta carpeta, con el archivo .env al lado):
+#   docker compose -f docker-compose.prod.yml up -d
+# Las imágenes las construye GitHub Actions; en tu computadora se pueden construir a mano (ver README.md).
+name: stockly
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stockly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: stockly
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # sin "ports": la base NO se publica a internet; solo la ven los otros contenedores
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockly -d stockly"]
+      interval: 5s
+      retries: 10
+
+  api:
+    image: ${API_IMAGE:-stockly-api:local}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # la dirección "db" es el nombre del servicio de arriba dentro de la red de Docker
+      DATABASE_URL: postgresql://stockly:${POSTGRES_PASSWORD}@db:5432/stockly
+      NODE_ENV: production
+      PORT: 3000
+      TRUST_PROXY: 1 # Caddy está delante: la IP real del visitante viene en X-Forwarded-For
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads # fotos de perfil: sobreviven a cada despliegue
+
+  web:
+    image: ${WEB_IMAGE:-stockly-web:local}
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Falta SITE_ADDRESS en .env}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificados HTTPS: si se pierden, Caddy los vuelve a pedir
+    depends_on:
+      - api
+      - web
+
+volumes:
+  db_data:
+  uploads:
+  caddy_data:

@@ -5,10 +5,10 @@
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
     "owner": "tsx scripts/make-platform-owner.ts",
-    "start": "node dist/server.js",
-    "reset-password": "tsx scripts/reset-password.ts"
+    "start": "tsx src/server.ts",
+    "reset-password": "tsx scripts/reset-password.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "Jeferson Bustamante Gomez",
@@ -27,10 +27,8 @@
     "@types/swagger-ui-express": "^4.1.8",
     "@typescript/native": "npm:typescript@^7.0.2",
     "jest": "^30.5.1",
-    "prisma": "^7.9.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.12",
-    "tsx": "^4.23.12",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
   "dependencies": {
@@ -45,8 +43,10 @@
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.3.0",
+    "prisma": "^7.9.1",
     "socket.io": "^4.8.4",
     "swagger-ui-express": "^5.0.1",
+    "tsx": "^4.23.12",
     "yaml": "^2.9.0",
     "zod": "^4.5.4"
   },
