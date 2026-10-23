@@ -384,6 +384,9 @@ model Company {
   cashCodeDays          Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
   posShowStock          Boolean            @default(true) // el POS muestra la cantidad en stock (si no: disponible/agotado)
   returnDays            Int                @default(30) // días para devolver una venta
+  requirePaymentRef     Boolean            @default(true) // tarjeta y SINPE exigen la referencia (autorización / comprobante)
+  sinpeNumber           String? // SINPE Móvil general (8 dígitos); cada sucursal puede tener el suyo
+  sinpeName             String? // a nombre de quién está ese SINPE
   isDemo                Boolean            @default(false) // empresa de la demo pública: se borra y se recrea cada noche
   onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
@@ -626,6 +629,8 @@ model Location {
   type           LocationType    @default(BRANCH)
   code           String? // sucursales: 3 dígitos para el consecutivo de los comprobantes ("001")
   address        String?
+  sinpeNumber    String? // SINPE Móvil de esta sucursal (si no, el general de la empresa)
+  sinpeName      String?
   isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -858,6 +863,7 @@ model CashSession {
   reconciledBy   User?             @relation("SessionReconciledBy", fields: [reconciledById], references: [id])
   reconciledAt   DateTime?
   cardDeclared   Decimal?          @db.Decimal(18, 2) // total del cierre en papel del datáfono (opcional, para comparar)
+  sinpeDeclared  Decimal?          @db.Decimal(18, 2) // total de SINPE que entró según la app del banco (opcional, para comparar)
   reconcileNote  String?
   documents     Document[]
   movements     CashMovement[]

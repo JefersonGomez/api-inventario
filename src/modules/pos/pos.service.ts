@@ -55,6 +55,7 @@ export const reconcileSchema = z.object({
   // { "20000": 3, "500": 12 }: valor de la denominación → cantidad
   denominations: z.record(z.string().regex(/^\d+(\.\d+)?$/), z.number().int().min(0).max(100_000)),
   cardDeclared: money.optional(), // total que imprimió el datáfono en su cierre (opcional, para comparar)
+  sinpeDeclared: money.optional(), // total de SINPE que entró según la app del banco (opcional, para comparar)
   note: z.string().trim().max(500).optional(),
 })
 export const sessionListQuerySchema = z.object({
@@ -97,7 +98,8 @@ export const saleSchema = z.object({
       z.object({
         method: z.enum(["CASH", "CARD", "SINPE"]),
         amount: money.positive(),
-        reference: z.string().trim().max(60).optional(), // autorización del datáfono / comprobante SINPE
+        // autorización del datáfono / comprobante SINPE (sin espacios: el mismo comprobante se reconoce igual)
+        reference: z.string().max(60).transform((s) => s.replace(/\s+/g, "")).optional(),
         tendered: money.optional(), // efectivo: lo que entregó el cliente
       })
     )
@@ -251,7 +253,7 @@ export async function updateRegister(id: string, input: z.infer<typeof updateReg
 // ---------- Turnos ----------
 
 const sessionInclude = {
-  register: { include: { location: { select: { id: true, name: true, code: true } } } },
+  register: { include: { location: { select: { id: true, name: true, code: true, sinpeNumber: true, sinpeName: true } } } },
   openedBy: { select: { id: true, name: true } },
 } satisfies Prisma.CashSessionInclude
 
@@ -407,13 +409,15 @@ export async function reconcileSession(id: string, input: z.infer<typeof reconci
     where: { id, reconciledAt: null },
     data: {
       reconciledById: actor.id, reconciledAt: new Date(), countedCash, difference, denominations: input.denominations,
-      ...(input.cardDeclared !== undefined && { cardDeclared: input.cardDeclared }), reconcileNote: input.note || null,
+      ...(input.cardDeclared !== undefined && { cardDeclared: input.cardDeclared }),
+      ...(input.sinpeDeclared !== undefined && { sinpeDeclared: input.sinpeDeclared }), reconcileNote: input.note || null,
     },
   })
   if (!count) throw fail("Este cierre ya tiene arqueo", 409)
   await logAudit(actor.id, "UPDATE", "CashSession", id, {
     reconciled: true, expectedCash: expected.toNumber(), countedCash: countedCash.toNumber(), difference: difference.toNumber(),
     ...(input.cardDeclared !== undefined && { cardDeclared: input.cardDeclared }),
+    ...(input.sinpeDeclared !== undefined && { sinpeDeclared: input.sinpeDeclared }),
   })
   return getSessionReport(id, actor)
 }
@@ -457,8 +461,10 @@ export async function getSessionReport(id: string, actor: Actor) {
   const reconciler = actor.permissions.includes("cash.reconcile")
   if (session.openedById !== actor.id && !reconciler) throw fail("Turno no encontrado", 404)
   const summary = await sessionSummary(id)
-  const { expectedCash, countedCash, difference, denominations, cardDeclared, ...rest } = session
+  const { expectedCash, countedCash, difference, denominations, cardDeclared, sinpeDeclared, ...rest } = session
   const company = await getCompany()
+  // lo que debió cobrar el datáfono / entrar por SINPE: ventas + abonos − devoluciones de ese medio
+  const net = (m: "CARD" | "SINPE") => new D(summary.payments[m] ?? 0).plus(summary.collections[m] ?? 0).minus(summary.refunds[m] ?? 0)
   return {
     ...rest,
     company: { name: company.name, currency: company.currency },
@@ -467,15 +473,35 @@ export async function getSessionReport(id: string, actor: Actor) {
     countedCash: countedCash && Number(countedCash),
     denominations,
     cardDeclared: cardDeclared && Number(cardDeclared),
+    sinpeDeclared: sinpeDeclared && Number(sinpeDeclared),
     ...(reconciler && {
       expectedCash: Number(expectedCash ?? summary.expectedCash),
       difference: difference && Number(difference),
-      cardDifference: cardDeclared ? Number(new D(cardDeclared).minus(summary.payments.CARD ?? 0)) : null,
+      cardDifference: cardDeclared ? Number(new D(cardDeclared).minus(net("CARD"))) : null,
+      sinpeDifference: sinpeDeclared ? Number(new D(sinpeDeclared).minus(net("SINPE"))) : null,
     }),
   }
 }
 
 // ---------- Venta ----------
+
+// Tarjeta y SINPE: la referencia (autorización del voucher / comprobante del SINPE) es obligatoria si la
+// empresa lo pide (por defecto sí), y un comprobante SINPE no se puede usar en dos ventas: así no pasa
+// una captura vieja. ponytail: solo compara contra ventas; abonos de crédito con SINPE no se revisan.
+async function assertPaymentReferences(payments: z.infer<typeof saleSchema>["payments"]) {
+  const { requirePaymentRef } = await getCompany()
+  if (requirePaymentRef && payments.some((p) => p.method !== "CASH" && !p.reference)) {
+    throw fail("Anota la referencia: el n.º de autorización del voucher o el comprobante del SINPE", 400, "PAYMENT_REF_REQUIRED")
+  }
+  const sinpe = payments.filter((p) => p.method === "SINPE" && p.reference).map((p) => p.reference!)
+  if (new Set(sinpe).size < sinpe.length) throw fail("El mismo comprobante SINPE está dos veces en esta venta", 409, "SINPE_REF_USED")
+  if (!sinpe.length) return
+  const used = await prisma.documentPayment.findFirst({
+    where: { method: "SINPE", reference: { in: sinpe, mode: "insensitive" }, document: { companyId: currentCompanyId(), type: { not: "CREDIT_NOTE" } } },
+    select: { reference: true, document: { select: { consecutive: true } } },
+  })
+  if (used) throw fail(`El comprobante SINPE ${used.reference} ya se usó en la venta ${used.document.consecutive}. Pide el comprobante de este pago.`, 409, "SINPE_REF_USED")
+}
 
 export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   // la misma venta reenviada (se cortó la red sin saber si llegó): se devuelve la primera, no se duplica
@@ -503,6 +529,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
       throw new Error("Lo recibido en efectivo no puede ser menor que el monto")
     }
   }
+  await assertPaymentReferences(input.payments)
 
   // stock suficiente en la sucursal de la caja (aviso claro antes; el increment atómico lo garantiza igual)
   const wanted = new Map<string, number>()

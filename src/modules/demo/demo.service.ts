@@ -197,7 +197,7 @@ export async function resetDemo(opts: { days?: number; log?: (m: string) => void
       name: "Ferretería El Tornillo", isDemo: true, ownerId: admin.id, currency: "CRC",
       legalName: "Ferretería El Tornillo S.A.", idType: "JURIDICA", idNumber: "3101999888", economicActivity: "475201",
       invoiceEmail: "facturas@eltornillo.demo", phone: "2222-3333", province: "1", canton: "01", district: "01",
-      addressDetail: "Avenida Central, calle 5", returnDays: 365, onboardingDismissedAt: new Date(),
+      addressDetail: "Avenida Central, calle 5", returnDays: 365, sinpeNumber: "88887777", sinpeName: "Ferretería El Tornillo S.A.", onboardingDismissedAt: new Date(),
     },
   })
   const cid = company.id
@@ -262,6 +262,7 @@ export async function resetDemo(opts: { days?: number; log?: (m: string) => void
       p.unit === "M" ? 2 + Math.floor(random() * 24) : p.unit === "KG" || p.unit === "L" ? round2(0.5 + Math.floor(random() * 6) * 0.5) : 1 + Math.floor(random() * (p.price < 3000 ? 6 : 2))
     const creditCustomers = customers.filter((c) => c.credit)
     const sold: { id: string; lineId: string; method: string; daysAgo: number }[] = []
+    let refs = 0 // referencias de voucher/SINPE únicas (un comprobante SINPE no se repite)
     let negativeDone = false
     for (let daysAgo = days; daysAgo >= 1; daysAgo--) {
       const day = new Date(now.getTime() - daysAgo * DAY)
@@ -285,7 +286,7 @@ export async function resetDemo(opts: { days?: number; log?: (m: string) => void
           const method = r < 0.55 ? "CASH" : r < 0.85 ? "CARD" : "SINPE"
           const payments = credit
             ? []
-            : [{ method, amount: total, ...(method === "CASH" && { tendered: Math.ceil(total / 1000) * 1000 }), ...(method !== "CASH" && { reference: String(100000 + Math.floor(random() * 899999)) }) }]
+            : [{ method, amount: total, ...(method === "CASH" && { tendered: Math.ceil(total / 1000) * 1000 }), ...(method !== "CASH" && { reference: String(100000 + refs++) }) }]
           try {
             const res = await sell({
               lines, payments: payments as never,

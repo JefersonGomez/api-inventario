@@ -247,6 +247,9 @@ components:
         cashCodeDays: { type: integer, minimum: 7, maximum: 365, description: Días que dura un código de caja (30 por defecto) }
         posShowStock: { type: boolean }
         returnDays: { type: integer, minimum: 1, maximum: 365, description: Días para devolver una venta (30 por defecto) }
+        requirePaymentRef: { type: boolean, description: "Tarjeta y SINPE exigen la referencia (true por defecto)" }
+        sinpeNumber: { type: string, nullable: true, description: "SINPE Móvil general, 8 dígitos (cada sucursal puede tener el suyo)" }
+        sinpeName: { type: string, nullable: true }
         legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -1262,6 +1265,9 @@ paths:
                 cashCodeDays: { type: integer, minimum: 7, maximum: 365 }
                 posShowStock: { type: boolean, description: "El POS muestra la cantidad en stock (si no: disponible/agotado)" }
                 returnDays: { type: integer, minimum: 1, maximum: 365, description: "Plazo para devolver una venta" }
+                requirePaymentRef: { type: boolean, description: "Tarjeta y SINPE exigen la referencia (autorización / comprobante)" }
+                sinpeNumber: { type: string, nullable: true, description: "8 dígitos; se aceptan guiones y espacios; "" o null = borrar" }
+                sinpeName: { type: string, nullable: true, maxLength: 80 }
                 legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
                 idType: { $ref: '#/components/schemas/IdType' }
                 idNumber: { type: string, nullable: true, description: Sin guiones }
@@ -1942,6 +1948,8 @@ paths:
                 name: { type: string }
                 type: { type: string, enum: [BRANCH, WAREHOUSE] }
                 address: { type: string, nullable: true }
+                sinpeNumber: { type: string, nullable: true, description: "SINPE Móvil de la sucursal (8 dígitos); vacío = el general de la empresa" }
+                sinpeName: { type: string, nullable: true }
                 isActive: { type: boolean }
       responses:
         '200':
@@ -2241,6 +2249,7 @@ paths:
               properties:
                 denominations: { type: object, additionalProperties: { type: integer, minimum: 0 }, description: "valor → cantidad" }
                 cardDeclared: { type: number, minimum: 0, description: "Total del cierre en papel del datáfono (opcional)" }
+                sinpeDeclared: { type: number, minimum: 0, description: "Total de SINPE que entró según el banco (opcional); se compara con ventas + abonos − devoluciones por SINPE" }
                 note: { type: string, maxLength: 500 }
       responses:
         '200': { description: Reporte con el arqueo }
@@ -2251,7 +2260,7 @@ paths:
     post:
       tags: [Punto de venta]
       summary: Vender (sales.sell, con caja abierta)
-      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Crédito: credit = { frequency BIWEEKLY|MONTHLY, installments } (hasta 6 meses) con creditPin de un encargado con sales.credit (sin él 409 CREDIT_NEEDS_AUTH, código que no sirve 403 CREDIT_PIN); los payments son la prima y el resto va a cuotas; 409 CREDIT_CUSTOMER (cliente sin crédito), CREDIT_OVERDUE (cuotas vencidas) o CREDIT_LIMIT (pasa el límite). Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas). Idempotencia (8B): con clientSaleId (uuid que genera la caja), si esa venta ya existe se devuelve la misma con duplicate: true en vez de duplicarla. Venta hecha sin conexión: soldAt (hora real, dentro del turno) + seenPrice por línea (precio cobrado); solo contado simple (sin descuentos, ajustes de precio ni crédito); las negativas se aceptan sin código (StockNegative.offline) y si el precio cambió queda en la auditoría."
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Crédito: credit = { frequency BIWEEKLY|MONTHLY, installments } (hasta 6 meses) con creditPin de un encargado con sales.credit (sin él 409 CREDIT_NEEDS_AUTH, código que no sirve 403 CREDIT_PIN); los payments son la prima y el resto va a cuotas; 409 CREDIT_CUSTOMER (cliente sin crédito), CREDIT_OVERDUE (cuotas vencidas) o CREDIT_LIMIT (pasa el límite). Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas). Tarjeta y SINPE: con requirePaymentRef de la empresa (por defecto) la referencia es obligatoria (400 PAYMENT_REF_REQUIRED); un comprobante SINPE ya usado en otra venta se rechaza (409 SINPE_REF_USED, la referencia se guarda sin espacios). Idempotencia (8B): con clientSaleId (uuid que genera la caja), si esa venta ya existe se devuelve la misma con duplicate: true en vez de duplicarla. Venta hecha sin conexión: soldAt (hora real, dentro del turno) + seenPrice por línea (precio cobrado); solo contado simple (sin descuentos, ajustes de precio ni crédito); las negativas se aceptan sin código (StockNegative.offline) y si el precio cambió queda en la auditoría."
       requestBody:
         required: true
         content:

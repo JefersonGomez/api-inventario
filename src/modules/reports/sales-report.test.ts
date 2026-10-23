@@ -34,7 +34,7 @@ describe("Reporte de ventas", () => {
 
     const sell = (body: object) => request(app).post("/pos/sales").set(cashier.auth).send(body)
     await sell({ lines: [{ productId, quantity: 3 }], payments: [{ method: "CASH", amount: 3390 }] })
-    const card = (await sell({ lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 1130 }] })).body.document
+    const card = (await sell({ lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 1130, reference: "AUT1" }] })).body.document
     // devolución de la venta con tarjeta
     const lineId = (await request(app).get(`/sales/${card.id}`).set(cashier.auth)).body.document.lines[0].id
     await request(app).post(`/sales/${card.id}/returns`).set(cashier.auth)

@@ -5,6 +5,7 @@ import { prisma } from "../../config/database.ts"
 import { activeLocationId, allowedLocationIds, assertLocationAllowed, currentCompanyId, locationScope } from "../../shared/tenant.ts"
 import { getCompany } from "../company/company.service.ts"
 import { logAudit } from "../audit/audit.service.ts"
+import { sinpeFields } from "../../shared/sinpe.ts"
 
 // La que nace con cada empresa (registro, otra empresa, tests)
 export const MAIN_LOCATION = (companyId: string) => ({
@@ -16,6 +17,7 @@ export const locationSchema = z.object({
   name: text(80).min(1, "El nombre es obligatorio"),
   type: z.enum(["BRANCH", "WAREHOUSE"]),
   address: text(250).nullable().optional(),
+  ...sinpeFields, // SINPE Móvil de la sucursal (si no tiene, la caja usa el general de la empresa)
 })
 export const updateLocationSchema = locationSchema.partial().extend({ isActive: z.boolean().optional() })
 export type LocationInput = z.infer<typeof locationSchema>
@@ -56,6 +58,8 @@ export async function createLocation(input: LocationInput, userId: string) {
       name: input.name,
       type: input.type,
       address: input.address || null,
+      sinpeNumber: input.sinpeNumber || null,
+      sinpeName: input.sinpeName || null,
       code: input.type === "BRANCH" ? await nextBranchCode() : null,
     },
   })
@@ -92,6 +96,8 @@ export async function updateLocation(id: string, input: LocationUpdate, userId: 
     data: {
       ...(input.name !== undefined && { name: input.name }),
       ...(input.address !== undefined && { address: input.address || null }),
+      ...(input.sinpeNumber !== undefined && { sinpeNumber: input.sinpeNumber || null }),
+      ...(input.sinpeName !== undefined && { sinpeName: input.sinpeName || null }),
       ...(input.isActive !== undefined && { isActive: input.isActive }),
       ...(input.type !== undefined && {
         type,

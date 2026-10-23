@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { checkFiscalId, fiscalIdFields } from "../../shared/fiscal.ts";
+import { sinpeFields } from "../../shared/sinpe.ts";
 
 const currency = z.enum(["CRC", "USD"]);
 const text = (max: number) => z.string().trim().max(max).nullable().optional();
@@ -27,6 +28,8 @@ export const updateCompanySchema = z
     cashCodeDays: z.number().int().min(7, "Mínimo 7 días").max(365, "Máximo 365 días").optional(),
     posShowStock: z.boolean().optional(), // el POS muestra la cantidad en stock
     returnDays: z.number().int().min(1, "Mínimo 1 día").max(365, "Máximo 365 días").optional(), // plazo para devolver una venta
+    requirePaymentRef: z.boolean().optional(), // tarjeta y SINPE exigen la referencia
+    ...sinpeFields,
     ...fiscalFields,
   })
   .superRefine((d, ctx) => {

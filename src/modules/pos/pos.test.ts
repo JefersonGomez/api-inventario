@@ -86,16 +86,16 @@ describe("Punto de venta", () => {
   })
 
   it("sin stock suficiente no se vende y no queda nada a medias", async () => {
-    const res = await sell(cashier, { lines: [{ productId, quantity: 8 }], payments: [{ method: "CARD", amount: 9040 }] })
+    const res = await sell(cashier, { lines: [{ productId, quantity: 8 }], payments: [{ method: "CARD", amount: 9040, reference: "AUT1" }] })
     expect(res.status).toBe(409)
     expect(res.body.error).toMatch(/Arroz \(hay 7\)/)
-    expect((await sell(cashier, { lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 500 }] })).body.error).toMatch(/no suman/)
+    expect((await sell(cashier, { lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 500, reference: "AUT1" }] })).body.error).toMatch(/no suman/)
     expect(await stockAt()).toBe(7)
     expect(await prisma.document.count()).toBe(1)
   })
 
   it("negativas: sin stock se vende con el código del encargado, queda en negativo y le llega a inventario", async () => {
-    const body = { lines: [{ productId, quantity: 9 }], payments: [{ method: "CARD", amount: 10170 }] }
+    const body = { lines: [{ productId, quantity: 9 }], payments: [{ method: "CARD", amount: 10170, reference: "AUT1" }] }
     const ask = await sell(cashier, body)
     expect(ask.status).toBe(409)
     expect(ask.body).toMatchObject({ code: "NEGATIVE_NEEDS_AUTH", shortages: [{ productId, stock: 7, wanted: 9 }] })
@@ -144,9 +144,9 @@ describe("Punto de venta", () => {
     const pending = await request(app).get("/pos/sessions?pending=1").set(manager.auth)
     expect(pending.body).toMatchObject({ pendingCount: 1, items: [{ id: session.id, openedBy: { id: cashier.user.id } }] })
     const reconcile = (body: object) => request(app).post(`/pos/sessions/${session.id}/reconcile`).set(manager.auth).send(body)
-    const res = await reconcile({ denominations: { "10000": 1, "5000": 1, "1000": 1, "500": 1 }, cardDeclared: 10000, note: "Faltan 500" })
+    const res = await reconcile({ denominations: { "10000": 1, "5000": 1, "1000": 1, "500": 1 }, cardDeclared: 10000, sinpeDeclared: 1390, note: "Faltan 500" })
     // 20000 inicial + 2000 en efectivo − 5000 retirados = 17000; datáfono 10000 vs 10170 cobrados
-    expect(res.body).toMatchObject({ expectedCash: 17000, countedCash: 16500, difference: -500, cardDeclared: 10000, cardDifference: -170, reconciledBy: { id: manager.user.id } })
+    expect(res.body).toMatchObject({ expectedCash: 17000, countedCash: 16500, difference: -500, cardDeclared: 10000, cardDifference: -170, sinpeDeclared: 1390, sinpeDifference: 0, reconciledBy: { id: manager.user.id } })
     expect((await reconcile({ denominations: {} })).status).toBe(409)
     // el cajero ve su reporte con lo contado, sin el esperado ni la diferencia
     const mine = (await request(app).get(`/pos/sessions/${session.id}/report`).set(cashier.auth)).body
@@ -171,7 +171,7 @@ describe("Punto de venta", () => {
       customerId,
       lines: [{ productId, quantity: 2, discount: { typeId: senior } }],
       discount: { typeId: free, value: 100 },
-      payments: [{ method: "CARD", amount: 1934 }],
+      payments: [{ method: "CARD", amount: 1934, reference: "AUT1" }],
     }
     expect((await sell(cashier2, body)).body.code).toBe("DISCOUNT_NEEDS_AUTH")
     expect((await sell(cashier2, { ...body, discountPin: "4821" })).status).toBe(403) // otro cajero no autoriza
@@ -184,7 +184,7 @@ describe("Punto de venta", () => {
     expect(res.body.document.lines[0]).toMatchObject({ discountLabel: "Adulto mayor + Libre" })
 
     // ajuste de precio (góndola a 1000): solo hacia abajo, con motivo y el código; va como descuento
-    const adjusted = { lines: [{ productId, quantity: 2, price: 1000, priceReason: "Precio de góndola" }], payments: [{ method: "CARD", amount: 2000 }] }
+    const adjusted = { lines: [{ productId, quantity: 2, price: 1000, priceReason: "Precio de góndola" }], payments: [{ method: "CARD", amount: 2000, reference: "AUT1" }] }
     expect((await sell(cashier2, { ...adjusted, lines: [{ productId, quantity: 2, price: 1000 }] })).status).toBe(400) // sin motivo
     expect((await sell(cashier2, adjusted)).body.code).toBe("DISCOUNT_NEEDS_AUTH")
     expect((await sell(cashier2, { ...adjusted, lines: [{ ...adjusted.lines[0], price: 1200 }], discountPin: managerPin })).body.error).toMatch(/menor/)
@@ -234,6 +234,27 @@ describe("Punto de venta", () => {
       link: "/cash-closings", meta: { total: 1200, reason: "Algún producto no existe" },
     })
     expect(await prisma.auditLog.findFirst({ where: { entityType: "OfflineSaleFailed", entityId: other.clientSaleId } })).not.toBeNull()
+  })
+
+  it("pagos: referencia obligatoria con tarjeta y SINPE, un comprobante SINPE no se repite y el SINPE de cada sucursal", async () => {
+    await prisma.productStock.update({ where: { productId_locationId: { productId, locationId: main } }, data: { quantity: 100 } })
+    const one = { lines: [{ productId, quantity: 1 }] }
+    expect((await sell(cashier2, { ...one, payments: [{ method: "CARD", amount: 1130 }] })).body.code).toBe("PAYMENT_REF_REQUIRED")
+    // "sp 123" es el mismo comprobante "SP123" de la primera venta: una captura vieja no pasa
+    const reused = await sell(cashier2, { ...one, payments: [{ method: "SINPE", amount: 1130, reference: "sp 123" }] })
+    expect(reused.body.code).toBe("SINPE_REF_USED")
+    expect(reused.body.error).toMatch(/00100001040000000001/)
+    expect((await sell(cashier2, { ...one, payments: [{ method: "SINPE", amount: 1130, reference: "SP 999" }] })).status).toBe(201)
+
+    // la empresa puede no exigir la referencia; su SINPE general se guarda sin guiones
+    expect((await request(app).put("/company").set(admin.auth).send({ sinpeNumber: "123" })).status).toBe(400)
+    await request(app).put("/company").set(admin.auth).send({ requirePaymentRef: false, sinpeNumber: "8888-7777", sinpeName: "Mi Tienda" })
+    expect((await sell(cashier2, { ...one, payments: [{ method: "CARD", amount: 1130 }] })).status).toBe(201)
+    await request(app).put("/company").set(admin.auth).send({ requirePaymentRef: true })
+    expect((await request(app).get("/company").set(admin.auth)).body).toMatchObject({ sinpeNumber: "88887777", sinpeName: "Mi Tienda", requirePaymentRef: true })
+    // la sucursal con su propio SINPE: la caja lo recibe con el turno
+    await request(app).patch(`/locations/${main}`).set(admin.auth).send({ sinpeNumber: "8777 6666", sinpeName: "Sucursal Centro" })
+    expect((await request(app).get("/pos/session").set(cashier2.auth)).body.register.location).toMatchObject({ sinpeNumber: "87776666", sinpeName: "Sucursal Centro" })
   })
 
   it("el descuento sobre el total se reparte entre las líneas sin perder centavos", () => {

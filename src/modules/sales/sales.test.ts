@@ -85,7 +85,7 @@ describe("Ventas y devoluciones", () => {
   })
 
   it("pasado el plazo de la empresa no se devuelve", async () => {
-    const sale = (await sell({ lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 1130 }] })).body.document
+    const sale = (await sell({ lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 1130, reference: "AUT1" }] })).body.document
     // el comprobante es inmutable: solo el test lo envejece, con el trigger apagado
     await prisma.$executeRawUnsafe(`ALTER TABLE "Document" DISABLE TRIGGER "Document_immutable"`)
     await prisma.document.update({ where: { id: sale.id }, data: { issuedAt: new Date(Date.now() - 31 * 86_400_000) } })
