@@ -112,6 +112,14 @@ export const saleSchema = z.object({
   soldAt: z.coerce.date().optional(), // venta hecha sin conexión: la hora real (solo contado simple, ver sell)
 }).refine((s) => s.payments.length || s.credit, { message: "Indica cómo paga", path: ["payments"] })
 
+// venta sin conexión que el servidor rechazó al sincronizar (8C): la caja la reporta una vez
+export const offlineFailureSchema = z.object({
+  clientSaleId: z.uuid(),
+  error: z.string().trim().min(1).max(300),
+  total: money,
+  soldAt: z.coerce.date(),
+})
+
 // ---------- Tipos de descuento ----------
 
 export async function listDiscountTypes() {
@@ -647,6 +655,21 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   })
   if (!doc) return (await previous())!
   return { ...(await getTicket(doc.id)), negatives: short.length }
+}
+
+// La venta ya se cobró pero no entró al sistema: queda en la auditoría y se avisa a quien hace arqueos,
+// porque esa plata va a aparecer como sobrante en la caja
+export async function reportOfflineFailure(input: z.infer<typeof offlineFailureSchema>, actor: Actor) {
+  const session = await myOpenSession(actor.id)
+  await logAudit(actor.id, "CREATE", "OfflineSaleFailed", input.clientSaleId, { ...input, soldAt: input.soldAt.toISOString(), register: session?.register.name ?? null })
+  const ids = await memberIdsWith("cash.reconcile", session?.register.locationId)
+  await createNotifications(
+    ids.map((userId) => ({
+      userId, type: "offlineSaleFailed", title: session?.register.name ?? "Caja", link: "/cash-closings",
+      meta: { total: input.total, reason: input.error, cashier: session?.openedBy.name ?? "" },
+    }))
+  )
+  return { ok: true }
 }
 
 // Catálogo de la caja (8B): todo lo que necesita para vender sin conexión, con el stock de su sucursal.

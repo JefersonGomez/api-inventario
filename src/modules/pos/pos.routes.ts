@@ -3,14 +3,14 @@ import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import { pinLimiter } from "../../middlewares/rate-limit.middleware.ts"
 import {
-  cashMovementSchema, closeSessionSchema, createRegisterSchema, discountTypeSchema, openSessionSchema, reconcileSchema, renewCodeSchema, saleSchema,
+  cashMovementSchema, closeSessionSchema, offlineFailureSchema, createRegisterSchema, discountTypeSchema, openSessionSchema, reconcileSchema, renewCodeSchema, saleSchema,
   sessionListQuerySchema, updateRegisterSchema,
 } from "./pos.service.ts"
 import {
   addCashMovementHandler, closeSessionHandler, createDiscountTypeHandler, createRegisterHandler, currentSessionHandler,
   listCashMovementsHandler, listDiscountTypesHandler, updateDiscountTypeHandler,
   listRegistersHandler, listSessionsHandler, openSessionHandler, reconcileHandler, renewCodeHandler, sellHandler, sessionReportHandler,
-  ticketHandler, updateRegisterHandler, catalogHandler,
+  ticketHandler, updateRegisterHandler, catalogHandler, offlineFailureHandler,
 } from "./pos.controller.ts"
 
 export const router = Router()
@@ -45,3 +45,5 @@ router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (r
 router.get("/tickets/:id", Authenticated, Can("sales.sell"), ticketHandler)
 // catálogo para vender sin conexión (8B)
 router.get("/catalog", Authenticated, Can("sales.sell"), catalogHandler)
+// venta sin conexión rechazada al sincronizar: auditoría + aviso a quien hace arqueos (8C)
+router.post("/offline-failures", validate(offlineFailureSchema), Authenticated, Can("sales.sell"), offlineFailureHandler)

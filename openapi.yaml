@@ -2517,6 +2517,26 @@ paths:
         '200': { description: "{ sessionId, products: [{ id, name, sku, barcode, price, minStock, taxRate, unit, tracksLots, categoryId, stock }], categories: [{ id, name }], at }" }
         '409': { description: NO_SESSION }
 
+  /pos/offline-failures:
+    post:
+      tags: [Punto de venta]
+      summary: Reportar una venta sin conexión que el servidor rechazó al sincronizar (sales.sell)
+      description: "La caja la reporta una vez: queda en la auditoría (OfflineSaleFailed) y se avisa a quien hace arqueos (cash.reconcile) de esa sucursal, porque esa plata va a salir como sobrante. En la caja el cajero la reintenta o la descarta."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientSaleId, error, total, soldAt]
+              properties:
+                clientSaleId: { type: string, format: uuid }
+                error: { type: string, maxLength: 300, description: "Lo que respondió el servidor" }
+                total: { type: number }
+                soldAt: { type: string, format: date-time }
+      responses:
+        '201': { description: "{ ok: true }" }
+
   /pos/tickets/{id}:
     get:
       tags: [Punto de venta]

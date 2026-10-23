@@ -226,6 +226,14 @@ describe("Punto de venta", () => {
     expect((await sell(cashier2, { ...other, lines: [{ productId, quantity: 1, price: 1000, priceReason: "Góndola" }] })).body.error).toMatch(/Sin conexión solo/)
     expect((await sell(cashier2, { ...other, soldAt: new Date(2020, 0, 1) })).body.error).toMatch(/no es de este turno/)
     await prisma.product.update({ where: { id: productId }, data: { price: 1130 } })
+
+    // (8C) la que el servidor rechazó al sincronizar: auditoría + aviso a quien hace arqueos
+    const failure = { clientSaleId: other.clientSaleId, error: "Algún producto no existe", total: 1200, soldAt }
+    expect((await request(app).post("/pos/offline-failures").set(cashier2.auth).send(failure)).status).toBe(201)
+    expect(await prisma.notification.findFirst({ where: { userId: admin.user.id, type: "offlineSaleFailed" } })).toMatchObject({
+      link: "/cash-closings", meta: { total: 1200, reason: "Algún producto no existe" },
+    })
+    expect(await prisma.auditLog.findFirst({ where: { entityType: "OfflineSaleFailed", entityId: other.clientSaleId } })).not.toBeNull()
   })
 
   it("el descuento sobre el total se reparte entre las líneas sin perder centavos", () => {
