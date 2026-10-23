@@ -511,12 +511,14 @@ model Document {
   installments           Installment[]
   issuedAt            DateTime          @default(now())
   cashSessionId       String? // turno de caja donde se vendió (POS)
+  clientSaleId        String? // id que generó la caja (8B): si la venta llega dos veces, no se duplica
   cashSession         CashSession?      @relation(fields: [cashSessionId], references: [id])
   lines               DocumentLine[]
   negatives           StockNegative[]
   payments            DocumentPayment[]
 
   @@unique([companyId, type, branchCode, terminalCode, number])
+  @@unique([companyId, clientSaleId])
   @@index([companyId, issuedAt])
 }
 
@@ -935,8 +937,9 @@ model StockNegative {
   stockBefore      Decimal        @db.Decimal(14, 3) // lo que decía el sistema antes de la venta
   reportedById     String // el cajero
   reportedBy       User           @relation("NegativeReportedBy", fields: [reportedById], references: [id])
-  authorizedById   String // el encargado que dio su código
-  authorizedBy     User           @relation("NegativeAuthorizedBy", fields: [authorizedById], references: [id])
+  authorizedById   String? // el encargado que dio su código (null = venta sin conexión, sin código)
+  authorizedBy     User?          @relation("NegativeAuthorizedBy", fields: [authorizedById], references: [id])
+  offline          Boolean        @default(false) // vendida sin conexión: nadie la autorizó, se revisa después
   status           NegativeStatus @default(OPEN)
   resolvedById     String?
   resolvedBy       User?          @relation("NegativeResolvedBy", fields: [resolvedById], references: [id])

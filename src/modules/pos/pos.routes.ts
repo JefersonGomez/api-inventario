@@ -10,7 +10,7 @@ import {
   addCashMovementHandler, closeSessionHandler, createDiscountTypeHandler, createRegisterHandler, currentSessionHandler,
   listCashMovementsHandler, listDiscountTypesHandler, updateDiscountTypeHandler,
   listRegistersHandler, listSessionsHandler, openSessionHandler, reconcileHandler, renewCodeHandler, sellHandler, sessionReportHandler,
-  ticketHandler, updateRegisterHandler,
+  ticketHandler, updateRegisterHandler, catalogHandler,
 } from "./pos.controller.ts"
 
 export const router = Router()
@@ -43,3 +43,5 @@ const withPin = (req: { body: { negativePin?: string; discountPin?: string; cred
   !!(req.body.negativePin || req.body.discountPin || req.body.creditPin)
 router.post("/sales", validate(saleSchema), Authenticated, Can("sales.sell"), (req, res, next) => (withPin(req) ? pinLimiter(req, res, next) : next()), sellHandler)
 router.get("/tickets/:id", Authenticated, Can("sales.sell"), ticketHandler)
+// catálogo para vender sin conexión (8B)
+router.get("/catalog", Authenticated, Can("sales.sell"), catalogHandler)

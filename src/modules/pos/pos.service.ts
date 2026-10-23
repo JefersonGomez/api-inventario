@@ -85,6 +85,7 @@ export const saleSchema = z.object({
           // ajuste de precio (precio de góndola mal): solo hacia abajo, con motivo y el código del encargado
           price: money.positive().optional(),
           priceReason: z.string().trim().min(3).max(60).optional(),
+          seenPrice: money.optional(), // sin conexión: el precio (con IVA) que vio y cobró el cajero
         })
         .refine((l) => l.price === undefined || l.priceReason, { message: "Indica el motivo del cambio de precio", path: ["priceReason"] })
     )
@@ -107,6 +108,8 @@ export const saleSchema = z.object({
   discountPin: pin.optional(), // código del encargado que autoriza los descuentos y ajustes de precio de esta venta
   credit: creditPlanSchema.optional(), // lo que no cubren los pagos va a cuotas
   creditPin: pin.optional(), // código del encargado que autoriza el crédito
+  clientSaleId: z.uuid().optional(), // lo genera la caja: si la misma venta llega dos veces, se devuelve la primera
+  soldAt: z.coerce.date().optional(), // venta hecha sin conexión: la hora real (solo contado simple, ver sell)
 }).refine((s) => s.payments.length || s.credit, { message: "Indica cómo paga", path: ["payments"] })
 
 // ---------- Tipos de descuento ----------
@@ -467,8 +470,26 @@ export async function getSessionReport(id: string, actor: Actor) {
 // ---------- Venta ----------
 
 export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
+  // la misma venta reenviada (se cortó la red sin saber si llegó): se devuelve la primera, no se duplica
+  const previous = async () => {
+    const prev = input.clientSaleId && (await prisma.document.findFirst({ where: { clientSaleId: input.clientSaleId }, select: { id: true } }))
+    return prev ? { ...(await getTicket(prev.id)), negatives: 0, duplicate: true } : null
+  }
+  const already = await previous()
+  if (already) return already
+
   const session = await requireMyOpenSession(actor.id)
   const { register } = session
+  // venta hecha sin conexión (8B): solo contado simple, porque los códigos del encargado no se validan sin red
+  const offline = input.soldAt !== undefined
+  if (offline) {
+    if (!input.clientSaleId) throw new Error("La venta sin conexión necesita el id de la caja")
+    if (input.credit || input.discount || input.lines.some((l) => l.discount || l.price !== undefined)) {
+      throw new Error("Sin conexión solo se vende de contado, sin descuentos, ajustes de precio ni crédito")
+    }
+    const at = input.soldAt!.getTime()
+    if (at > Date.now() + 5 * 60_000 || at < session.openedAt.getTime() - 60_000) throw new Error("La hora de la venta sin conexión no es de este turno")
+  }
   for (const p of input.payments) {
     if (p.tendered !== undefined && (p.method !== "CASH" || p.tendered < p.amount)) {
       throw new Error("Lo recibido en efectivo no puede ser menor que el monto")
@@ -489,9 +510,10 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   // con lotes no hay negativa: sin stock no se sabe de qué lote sale
   const withLots = short.filter((p) => p.tracksLots)
   if (withLots.length) throw fail(`Sin stock suficiente en ${register.location.name}: ${describe(withLots)}`, 409, "NO_STOCK")
-  // negativas: venden igual, con el código de un encargado (sales.negative)
+  // negativas: venden igual, con el código de un encargado (sales.negative); sin conexión ya se vendió:
+  // se acepta y queda para revisar en Negativas
   let authorizedBy: { id: string; name: string } | null = null
-  if (short.length) {
+  if (short.length && !offline) {
     if (!input.negativePin) {
       throw Object.assign(fail(`Negativa: el sistema no tiene stock suficiente de ${describe(short)}. Pide el código del encargado.`, 409, "NEGATIVE_NEEDS_AUTH"), {
         shortages: short.map((p) => ({ productId: p.id, name: p.name, stock: stockOf(p).toNumber(), wanted: wanted.get(p.id)! })),
@@ -545,6 +567,14 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     : null
   if (input.customerId && !customer) throw new Error("El cliente no existe")
 
+  // sin conexión se cobra lo que vio el cajero; si el precio cambió mientras tanto, queda en la auditoría
+  const priceChanges = offline
+    ? input.lines.flatMap((l) => {
+        const p = byId.get(l.productId)!
+        return l.seenPrice !== undefined && !new D(l.seenPrice).equals(p.price) ? [{ product: p.name, charged: l.seenPrice, current: Number(p.price) }] : []
+      })
+    : []
+
   const doc = await prisma.$transaction(async (tx) => {
     const doc = await issueDocument(
       {
@@ -556,6 +586,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
           return {
             productId: l.productId, quantity: l.quantity,
             ...(cost != null && { unitCost: cost.toNumber() }), // el costo de hoy queda guardado para la ganancia
+            ...(offline && l.seenPrice !== undefined && { unitPriceWithTax: l.seenPrice }),
             ...(d && d.amount.greaterThan(0) && { discountWithTax: d.amount.toNumber(), discountLabel: d.label }),
           }
         }),
@@ -570,10 +601,13 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
         branchCode: register.location.code ?? "001",
         terminalCode: register.terminalCode,
         cashSessionId: session.id,
+        ...(input.clientSaleId && { clientSaleId: input.clientSaleId }),
+        ...(offline && { issuedAt: input.soldAt! }),
       },
       actor.id,
       tx
     )
+    if (priceChanges.length) await logAudit(actor.id, "CREATE", "Document", doc.id, { offline: true, priceChanges }, tx)
     if (input.credit) {
       const paid = input.payments.reduce((s, p) => s.plus(p.amount), new D(0))
       const amount = new D(doc.total).minus(paid).toDecimalPlaces(2)
@@ -582,15 +616,15 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     }
     for (const l of input.lines) {
       await createMovement(l.productId, actor.id, "OUT", l.quantity, `Venta ${doc.consecutive}`, tx, {
-        source: "SALE", sourceId: doc.id, locationId: register.locationId, allowNegative: !!authorizedBy,
+        source: "SALE", sourceId: doc.id, locationId: register.locationId, allowNegative: short.length > 0,
       })
     }
-    if (authorizedBy) {
+    if (short.length) {
       await tx.stockNegative.createMany({
         data: short.map((p) => ({
           companyId: currentCompanyId(), productId: p.id, locationId: register.locationId, documentId: doc.id,
           quantity: new D(wanted.get(p.id)!).minus(D.max(stockOf(p), 0)), stockBefore: stockOf(p),
-          reportedById: actor.id, authorizedById: authorizedBy.id,
+          reportedById: actor.id, authorizedById: authorizedBy?.id ?? null, offline,
         })),
       })
       // aviso a quien maneja el inventario de esa sucursal
@@ -606,8 +640,37 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
       )
     }
     return doc
+  }).catch(async (e) => {
+    // dos envíos de la misma venta a la vez: el segundo choca con el índice único y devuelve el primero
+    if (input.clientSaleId && e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return null
+    throw e
   })
-  return { ...(await getTicket(doc.id)), negatives: authorizedBy ? short.length : 0 }
+  if (!doc) return (await previous())!
+  return { ...(await getTicket(doc.id)), negatives: short.length }
+}
+
+// Catálogo de la caja (8B): todo lo que necesita para vender sin conexión, con el stock de su sucursal.
+// La caja lo guarda en el navegador y lo vuelve a pedir cada pocos minutos.
+// ponytail: se manda completo cada vez; con decenas de miles de productos, pedir solo lo cambiado (updatedAt)
+export async function posCatalog(actor: Actor) {
+  const session = await requireMyOpenSession(actor.id)
+  const [products, categories] = await Promise.all([
+    prisma.product.findMany({
+      where: { deletedAt: null },
+      select: {
+        id: true, name: true, sku: true, barcode: true, price: true, minStock: true, taxRate: true, unit: true, tracksLots: true, categoryId: true,
+        stocks: { where: { locationId: session.register.locationId }, select: { quantity: true } },
+      },
+      orderBy: [{ name: "asc" }, { sku: "asc" }],
+    }),
+    prisma.category.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ])
+  return {
+    sessionId: session.id,
+    products: products.map(({ stocks, ...p }) => ({ ...p, stock: Number(stocks[0]?.quantity ?? 0) })),
+    categories,
+    at: new Date(),
+  }
 }
 
 // Todo lo que lleva el tiquete impreso: comprobante, emisor, sucursal, caja y cajero

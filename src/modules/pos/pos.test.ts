@@ -194,6 +194,40 @@ describe("Punto de venta", () => {
     expect(fixed.body.document.lines[0]).toMatchObject({ discountLabel: "Ajuste de precio: Precio de góndola" })
   })
 
+  it("sin conexión (8B): catálogo, la venta reenviada no se duplica, negativa sin código y el precio que vio el cajero", async () => {
+    const catalog = await request(app).get("/pos/catalog").set(cashier2.auth)
+    expect(catalog.status).toBe(200)
+    const item = catalog.body.products.find((p: { id: string }) => p.id === productId)
+    expect(item).toMatchObject({ name: "Arroz", price: 1130, stock: await stockAt() })
+
+    // mientras la caja estaba sin red: subió el precio y vendió más de lo que había
+    await prisma.product.update({ where: { id: productId }, data: { price: 1200 } })
+    const before = await stockAt()
+    const quantity = Math.max(before, 0) + 2
+    const soldAt = new Date(Date.now() - 60_000)
+    const body = {
+      clientSaleId: crypto.randomUUID(), soldAt,
+      lines: [{ productId, quantity, seenPrice: 1130 }],
+      payments: [{ method: "CASH", amount: 1130 * quantity }],
+    }
+    const first = await sell(cashier2, body)
+    expect(first.status).toBe(201)
+    expect(Number(first.body.document.total)).toBeCloseTo(1130 * quantity, 2)
+    expect(new Date(first.body.document.issuedAt).getTime()).toBe(soldAt.getTime())
+    const again = await sell(cashier2, body) // se cortó la red y la caja la reenvía
+    expect(again.body).toMatchObject({ duplicate: true, document: { id: first.body.document.id } })
+    expect(await stockAt()).toBe(before - quantity)
+    expect(await prisma.stockNegative.findFirst({ where: { documentId: first.body.document.id } })).toMatchObject({ offline: true, authorizedById: null })
+    const audits = await prisma.auditLog.findMany({ where: { entityId: first.body.document.id } })
+    expect(audits.find((a) => (a.changes as { offline?: boolean })?.offline)?.changes).toMatchObject({ offline: true, priceChanges: [{ product: "Arroz", charged: 1130, current: 1200 }] })
+
+    // sin conexión solo contado simple, y con la hora de este turno
+    const other = { ...body, clientSaleId: crypto.randomUUID(), lines: [{ productId, quantity: 1 }], payments: [{ method: "CASH", amount: 1200 }] }
+    expect((await sell(cashier2, { ...other, lines: [{ productId, quantity: 1, price: 1000, priceReason: "Góndola" }] })).body.error).toMatch(/Sin conexión solo/)
+    expect((await sell(cashier2, { ...other, soldAt: new Date(2020, 0, 1) })).body.error).toMatch(/no es de este turno/)
+    await prisma.product.update({ where: { id: productId }, data: { price: 1130 } })
+  })
+
   it("el descuento sobre el total se reparte entre las líneas sin perder centavos", () => {
     const types = new Map([["t", { id: "t", name: "Promo", kind: "AMOUNT" as const, value: new Prisma.Decimal(100), maxPercent: null, appliesTo: "BOTH" as const, isActive: true }]])
     const { lines } = computeDiscounts([1, 1, 1].map((v) => new Prisma.Decimal(v * 1000)), [], { typeId: "t" }, types)

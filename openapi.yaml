@@ -2251,7 +2251,7 @@ paths:
     post:
       tags: [Punto de venta]
       summary: Vender (sales.sell, con caja abierta)
-      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Crédito: credit = { frequency BIWEEKLY|MONTHLY, installments } (hasta 6 meses) con creditPin de un encargado con sales.credit (sin él 409 CREDIT_NEEDS_AUTH, código que no sirve 403 CREDIT_PIN); los payments son la prima y el resto va a cuotas; 409 CREDIT_CUSTOMER (cliente sin crédito), CREDIT_OVERDUE (cuotas vencidas) o CREDIT_LIMIT (pasa el límite). Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas)."
+      description: "Emite el tiquete y saca el stock de la sucursal de la caja en la misma transacción. Sin stock suficiente: 409 NEGATIVE_NEEDS_AUTH con shortages (se reintenta con negativePin = código de un encargado con sales.negative; el stock queda en negativo y se registra la negativa para inventario); productos con lotes 409 NO_STOCK; 409 NO_SESSION sin caja abierta. Descuentos (por línea o sobre el total, de un tipo de descuento): siempre con discountPin de un encargado con sales.discount, si no 409 DISCOUNT_NEEDS_AUTH; el del total se reparte entre las líneas. Ajuste de precio por línea (price menor al del catálogo + priceReason, mismo discountPin): va como descuento «Ajuste de precio: motivo». Crédito: credit = { frequency BIWEEKLY|MONTHLY, installments } (hasta 6 meses) con creditPin de un encargado con sales.credit (sin él 409 CREDIT_NEEDS_AUTH, código que no sirve 403 CREDIT_PIN); los payments son la prima y el resto va a cuotas; 409 CREDIT_CUSTOMER (cliente sin crédito), CREDIT_OVERDUE (cuotas vencidas) o CREDIT_LIMIT (pasa el límite). Con un cliente identificado emite factura (INVOICE) en vez de tiquete. Devuelve los datos del comprobante y negatives (cantidad de negativas). Idempotencia (8B): con clientSaleId (uuid que genera la caja), si esa venta ya existe se devuelve la misma con duplicate: true en vez de duplicarla. Venta hecha sin conexión: soldAt (hora real, dentro del turno) + seenPrice por línea (precio cobrado); solo contado simple (sin descuentos, ajustes de precio ni crédito); las negativas se aceptan sin código (StockNegative.offline) y si el precio cambió queda en la auditoría."
       requestBody:
         required: true
         content:
@@ -2268,6 +2268,8 @@ paths:
                     frequency: { type: string, enum: [BIWEEKLY, MONTHLY] }
                     installments: { type: integer, minimum: 1, maximum: 12, description: "Mensual hasta 6, quincenal hasta 12" }
                 creditPin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza el crédito" }
+                clientSaleId: { type: string, format: uuid, description: "Lo genera la caja: la misma venta reenviada no se duplica" }
+                soldAt: { type: string, format: date-time, description: "Venta hecha sin conexión: la hora real en que se vendió" }
                 notes: { type: string, maxLength: 500 }
                 negativePin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza las negativas" }
                 discountPin: { type: string, pattern: '^\d{4,6}$', description: "Código del encargado que autoriza los descuentos y ajustes de precio" }
@@ -2283,6 +2285,7 @@ paths:
                       discount: { $ref: '#/components/schemas/DiscountPick' }
                       price: { type: number, description: "Precio unitario con IVA menor al del catálogo (precio de góndola)" }
                       priceReason: { type: string, minLength: 3, maxLength: 60, description: "Obligatorio con price" }
+                      seenPrice: { type: number, description: "Sin conexión: el precio con IVA que vio y cobró el cajero" }
                 payments:
                   type: array
                   items:
@@ -2504,6 +2507,15 @@ paths:
         '200': { description: Negativa resuelta }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /pos/catalog:
+    get:
+      tags: [Punto de venta]
+      summary: Catálogo de la caja para vender sin conexión (sales.sell, con caja abierta)
+      description: "Todos los productos activos con el stock de la sucursal de la caja, y las categorías. La caja lo guarda en el navegador (IndexedDB) y lo vuelve a pedir cada 5 minutos."
+      responses:
+        '200': { description: "{ sessionId, products: [{ id, name, sku, barcode, price, minStock, taxRate, unit, tracksLots, categoryId, stock }], categories: [{ id, name }], at }" }
+        '409': { description: NO_SESSION }
 
   /pos/tickets/{id}:
     get:

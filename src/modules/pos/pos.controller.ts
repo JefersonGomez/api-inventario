@@ -1,7 +1,7 @@
 import type { Request, Response } from "express"
 import {
   addCashMovement, closeSession, createRegister, currentSession, getSessionReport, getTicket, listCashMovements, listRegisters,
-  listDiscountTypes, listSessions, openSession, reconcileSession, renewCodeWithManager, saveDiscountType, sell, updateRegister,
+  listDiscountTypes, listSessions, openSession, posCatalog, reconcileSession, renewCodeWithManager, saveDiscountType, sell, updateRegister,
 } from "./pos.service.ts"
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts"
 
@@ -42,4 +42,5 @@ export const createDiscountTypeHandler = handle((req) => saveDiscountType(null, 
 export const updateDiscountTypeHandler = handle((req) => saveDiscountType(req.params.id, req.body, req.user!.id), 200, ["discount-types"])
 
 export const sellHandler = handle((req) => sell(req.body, req.user!), 201, [...STOCK_TOPICS, ...TOPICS, "documents", "negatives"])
+export const catalogHandler = handle((req) => posCatalog(req.user!))
 export const ticketHandler = handle((req) => getTicket(req.params.id))
