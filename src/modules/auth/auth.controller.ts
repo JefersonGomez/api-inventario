@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { pinStatus } from "../users/pin.service.ts";
-import { Register, Login, refreshAccessToken, logout, switchCompany } from "./auth.service.ts";
+import { Register, Login, refreshAccessToken, logout, switchCompany, openSession } from "./auth.service.ts";
+import { DEMO_CODES, demoUser } from "../demo/demo.service.ts";
 
 export async function RegisterController(req: Request, res: Response) {
   try {
@@ -51,6 +52,21 @@ export async function logoutCotroller(req: Request, res: Response) {
 }
 
 // usuario de la sesión + sus permisos efectivos en la empresa activa (el frontend decide qué mostrar)
+// Demo pública (DEMO_ENABLED=1): entrar sin contraseña como el administrador o el cajero de la ferretería demo
+export async function demoInfoHandler(_req: Request, res: Response) {
+  res.json(process.env.DEMO_ENABLED === "1" ? { enabled: true, codes: DEMO_CODES } : { enabled: false });
+}
+export async function demoLoginHandler(req: Request, res: Response) {
+  try {
+    if (process.env.DEMO_ENABLED !== "1") return res.status(404).json({ error: "La demo no está disponible" });
+    const found = await demoUser(req.body?.role === "CASHIER" ? "CASHIER" : "ADMIN");
+    if (!found) return res.status(503).json({ error: "La demo se está preparando, intenta en unos minutos" });
+    res.json(await openSession(found.userId, found.companyId, true));
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+}
+
 export async function meHandler(req: Request, res: Response) {
   res.json({ user: { ...req.user, ...(await pinStatus(req.user!.id)) } });
 }

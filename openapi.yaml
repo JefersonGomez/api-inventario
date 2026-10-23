@@ -819,6 +819,30 @@ paths:
               schema: { $ref: '#/components/schemas/User' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /auth/demo:
+    get:
+      tags: [Auth]
+      summary: ¿Está activa la demo pública? (DEMO_ENABLED=1) y los códigos de caja que muestra
+      security: []
+      responses:
+        '200': { description: "{ enabled: false } o { enabled: true, codes: { cashier, manager } }" }
+    post:
+      tags: [Auth]
+      summary: Entrar a la demo sin contraseña como su administrador o su cajero
+      description: "Solo con DEMO_ENABLED=1 (si no, 404). Devuelve lo mismo que /auth/login. Las cuentas demo (User.isDemo) no pueden cambiar su correo ni se les cambian código o accesos (403). La empresa demo (Company.isDemo) se borra y se recrea cada noche con npm run demo:reset."
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [ADMIN, CASHIER] }
+      responses:
+        '200': { description: Sesión de la demo }
+        '404': { description: La demo no está activa }
+        '503': { description: La demo todavía no se creó }
+
   /auth/login:
     post:
       tags: [Auth]

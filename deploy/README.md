@@ -33,3 +33,15 @@ Abrir `http://localhost` (o `http://localhost:8080` si pusiste `HTTP_PORT=8080`)
 
 Para apagar: `docker compose -f docker-compose.prod.yml down` (los datos quedan en los volúmenes;
 `down -v` los borra).
+
+## En la VPS: respaldo diario y demo pública
+
+El despliegue automático copia `backup.sh` a `/opt/stockly`. En el crontab del usuario `deploy` (`crontab -e`),
+con la VPS en hora UTC (Costa Rica = UTC−6, así que 9:00 UTC son las 3:00 a. m.):
+
+```cron
+# 3:00 a. m. CR: respaldo de la base (se guardan 7 días)
+0 9 * * * /opt/stockly/backup.sh >> /opt/stockly/backup.log 2>&1
+# 3:15 a. m. CR: la demo vuelve a empezar (solo con DEMO_ENABLED=1 en .env)
+15 9 * * * cd /opt/stockly && docker compose -f docker-compose.prod.yml exec -T api npm run demo:reset >> /opt/stockly/demo-reset.log 2>&1
+```

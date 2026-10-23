@@ -1,5 +1,6 @@
 import { prismaRoot as prisma } from "../../config/database.ts";
 import bcrypt from "bcrypt"
+import { assertNotDemoUser } from "../demo/demo-guard.ts"
 // Tipo de retorno para el perfil (sin passwordHash)
 // el rol es por empresa: lo agrega el controller desde req.user
 const profileSelect = {
@@ -65,6 +66,8 @@ export async function changePassword(userID:string,currentPassword:string,newPas
 }
 
 export async function updateProfile(userId: string, name: string, email: string) {
+  const current = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } })
+  if (current?.email !== email) await assertNotDemoUser(userId)
   const existingEmail = await prisma.user.findUnique({ where: { email } })
 
   if (existingEmail && existingEmail.id !== userId) {

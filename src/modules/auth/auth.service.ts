@@ -11,7 +11,7 @@ import { MAIN_LOCATION } from "../locations/location.service.ts";
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
-const userPublic = { id: true, name: true, email: true, avatarUrl: true, phone: true, company: true } as const;
+const userPublic = { id: true, name: true, email: true, avatarUrl: true, phone: true, company: true, isDemo: true } as const;
 
 // Registro = crear cuenta + su primera empresa, de la que es ADMIN y dueño.
 // Los empleados no se registran solos: los agrega el admin de cada empresa.

@@ -8,7 +8,8 @@
     "owner": "tsx scripts/make-platform-owner.ts",
     "start": "tsx src/server.ts",
     "reset-password": "tsx scripts/reset-password.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:reset": "tsx scripts/demo-reset.ts"
   },
   "keywords": [],
   "author": "Jeferson Bustamante Gomez",

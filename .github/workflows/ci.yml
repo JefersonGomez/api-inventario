@@ -119,13 +119,14 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           # ponytail: confía en la huella de la VPS al primer contacto; para más seguridad, guardarla en un secret
           ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
-      - name: Copiar docker-compose y Caddyfile
-        run: scp deploy/docker-compose.prod.yml deploy/Caddyfile "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/stockly/"
+      - name: Copiar docker-compose, Caddyfile y el script de respaldo
+        run: scp deploy/docker-compose.prod.yml deploy/Caddyfile deploy/backup.sh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/stockly/"
       - name: Actualizar los contenedores
         run: |
           ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" '
             set -e
             cd /opt/stockly
+            chmod +x backup.sh
             docker compose -f docker-compose.prod.yml pull api
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f

@@ -38,7 +38,7 @@ export async function Authenticated(
     const membership = await prismaRoot.membership.findUnique({
       where: { userId_companyId: { userId: payload.id, companyId: payload.companyId } },
       include: {
-        user: { select: { isActive: true, isPlatformOwner: true } },
+        user: { select: { isActive: true, isPlatformOwner: true, isDemo: true } },
         company: { select: { suspendedAt: true, suspensionReason: true } },
       },
     });
@@ -73,6 +73,7 @@ export async function Authenticated(
       role: membership.role,
       permissions: effectivePermissions(membership.role, membership.grantedPermissions, membership.revokedPermissions),
       isPlatformOwner: membership.user.isPlatformOwner,
+      isDemo: membership.user.isDemo,
       locationIds: allowed,
       activeLocationId: active,
     };

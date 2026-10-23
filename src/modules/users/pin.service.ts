@@ -13,6 +13,7 @@ import { currentCompanyId } from "../../shared/tenant.ts"
 import { AUTHORIZING_PERMISSIONS, canAuthorize, effectivePermissions, needsPin } from "../../config/permissions.ts"
 import { logAudit } from "../audit/audit.service.ts"
 import { createNotifications } from "../notifications/notifications.persist.ts"
+import { assertNotDemoUser } from "../demo/demo-guard.ts"
 
 export const PIN_WARN_DAYS = 5 // aviso de "por vencer"
 const DAY = 24 * 60 * 60 * 1000
@@ -95,6 +96,7 @@ export async function cashCodeTeam(requester: { id: string; permissions: string[
 // Asignar (o renovar, si lo olvidó o venció) el código de otra persona: el elegido o uno al azar.
 // Le llega un aviso; el código solo se devuelve acá, para entregárselo.
 export async function assignPinTo(targetUserId: string, requester: { id: string; permissions: string[] }, chosen?: string) {
+  await assertNotDemoUser(targetUserId) // los códigos de la demo se muestran en pantalla: no se cambian
   const target = await membershipOf(targetUserId)
   if (!needsPin(target.perms)) throw new Error("Esta persona no abre caja ni autoriza: no necesita código")
   if (!canManageCodeOf(requester, { userId: targetUserId, perms: target.perms })) {

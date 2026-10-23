@@ -136,6 +136,7 @@ model User {
   company            String?
   isActive           Boolean           @default(true) // cuenta suspendida a nivel plataforma
   plan               PlanCode          @default(BASIC)
+  isDemo             Boolean           @default(false) // cuenta de la demo pública: no cambia correo, contraseña ni código
   lastCompanyId      String? // empresa que se abre al iniciar sesión
   memberships        Membership[]
   invitationsSent    Invitation[]
@@ -383,6 +384,7 @@ model Company {
   cashCodeDays          Int                @default(30) // días que dura un código de caja (y que queda fijo tras cambiarlo)
   posShowStock          Boolean            @default(true) // el POS muestra la cantidad en stock (si no: disponible/agotado)
   returnDays            Int                @default(30) // días para devolver una venta
+  isDemo                Boolean            @default(false) // empresa de la demo pública: se borra y se recrea cada noche
   onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
   legalName             String? // razón social o nombre de la persona física

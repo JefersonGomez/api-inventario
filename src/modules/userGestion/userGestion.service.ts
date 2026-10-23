@@ -8,6 +8,7 @@ import { catalogResult, contains, type CatalogQuery } from "../../shared/paginat
 import { AUTHORIZING_PERMISSIONS, PERMISSIONS, ROLE_PERMISSIONS, effectivePermissions, needsPin, type Permission } from "../../config/permissions.ts";
 import type { UpdateAccessInput } from "./userGestion.schema.ts";
 import type { Role } from "../../generated/prisma/enums.ts";
+import { assertNotDemoUser } from "../demo/demo-guard.ts";
 
 // Para la pantalla de Usuarios: qué permisos existen y cuáles trae cada rol
 export const permissionCatalog = () => ({
@@ -63,6 +64,7 @@ export async function getAllUsers(f: CatalogQuery) {
 // empresa siempre es Administrador (así la empresa nunca queda sin quien la administre).
 export async function updateUserAccess(targetUserId: string, input: UpdateAccessInput, requestingUserId: string) {
   if (targetUserId === requestingUserId) throw new Error("No podés cambiar tu propio acceso");
+  await assertNotDemoUser(targetUserId);
   const companyId = currentCompanyId();
   const membership = await prismaRoot.membership.findUnique({
     where: { userId_companyId: { userId: targetUserId, companyId } },
@@ -107,6 +109,7 @@ export async function updateUserAccess(targetUserId: string, input: UpdateAccess
 }
 
 export async function toggleUserActive(targetUserId: string, requestingUserId: string) {
+  await assertNotDemoUser(targetUserId);
   if (targetUserId === requestingUserId) {
     throw new Error("No podés desactivar tu propia cuenta");
   }
