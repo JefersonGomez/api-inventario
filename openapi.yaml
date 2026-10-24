@@ -1266,7 +1266,7 @@ paths:
                 posShowStock: { type: boolean, description: "El POS muestra la cantidad en stock (si no: disponible/agotado)" }
                 returnDays: { type: integer, minimum: 1, maximum: 365, description: "Plazo para devolver una venta" }
                 requirePaymentRef: { type: boolean, description: "Tarjeta y SINPE exigen la referencia (autorización / comprobante)" }
-                sinpeNumber: { type: string, nullable: true, description: "8 dígitos; se aceptan guiones y espacios; "" o null = borrar" }
+                sinpeNumber: { type: string, nullable: true, description: "8 dígitos; se aceptan guiones y espacios; vacío o null = borrar" }
                 sinpeName: { type: string, nullable: true, maxLength: 80 }
                 legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
                 idType: { $ref: '#/components/schemas/IdType' }
