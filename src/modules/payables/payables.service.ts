@@ -16,28 +16,51 @@ import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
 import { today } from "../receivables/receivables.service.ts"
 import { activeAccount } from "../banks/banks.service.ts"
+import { TAX_PERCENT } from "../../shared/fiscal.ts"
 
 const D = Prisma.Decimal
 const DAY = 86_400_000
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status })
 const money = z.number().min(0).max(1e12)
 
-// Lo que trae la factura en papel. Al recibir una orden, subtotal e IVA salen de lo recibido si no vienen.
+// IVA por tarifa (54A): base sin IVA de cada tarifa; el IVA, si no viene, es base × tarifa.
+// Una fila por tarifa. Exento = IVA 0.
+const taxLineSchema = z.object({
+  rate: z.enum(["RATE_13", "RATE_4", "RATE_2", "RATE_1", "EXEMPT"]),
+  base: money,
+  tax: money.optional(),
+})
+const taxLines = z
+  .array(taxLineSchema)
+  .min(1)
+  .max(5)
+  .refine((l) => new Set(l.map((x) => x.rate)).size === l.length, "Una fila por tarifa")
+  .refine((l) => l.every((x) => x.rate !== "EXEMPT" || !x.tax), "Lo exento no lleva IVA")
+export type TaxLine = z.infer<typeof taxLineSchema>
+
+// Lo que trae la factura en papel. Al recibir una orden, las tarifas salen de lo recibido si no vienen.
 export const receiveInvoiceSchema = z.object({
   number: z.string().trim().min(1, "Indica el número de la factura").max(50),
   issueDate: z.iso.date(),
   dueDate: z.iso.date().optional(),
-  subtotal: money.optional(),
-  tax: money.optional(),
+  lines: taxLines.optional(),
+  creditable: z.boolean().optional(), // por defecto da crédito fiscal
   note: z.string().trim().max(200).optional(),
 })
 export type ReceiveInvoice = z.infer<typeof receiveInvoiceSchema>
 export const invoiceSchema = receiveInvoiceSchema.extend({
   supplierId: z.uuid(),
   purchaseOrderId: z.uuid().optional(),
-  subtotal: money,
-  tax: money,
+  lines: taxLines,
 })
+
+// IVA de cada fila: el que viene o base × tarifa, a 2 decimales
+export const withTax = (lines: TaxLine[]) =>
+  lines.map((l) => {
+    const base = new D(l.base).toDecimalPlaces(2)
+    const tax = l.tax !== undefined ? new D(l.tax).toDecimalPlaces(2) : base.times(TAX_PERCENT[l.rate]).div(100).toDecimalPlaces(2)
+    return { rate: l.rate, base, tax }
+  })
 export const voidInvoiceSchema = z.object({ reason: z.string().trim().min(1, "Indica el motivo").max(200) })
 export const supplierPaymentSchema = z.object({
   supplierId: z.uuid(),
@@ -65,7 +88,7 @@ const lockSupplier = (db: Db, id: string) => db.$queryRaw`SELECT 1 FROM "Supplie
 
 // ---------- Facturas ----------
 
-type NewInvoice = z.infer<typeof receiveInvoiceSchema> & { supplierId: string; purchaseOrderId?: string | undefined; subtotal: number; tax: number }
+type NewInvoice = Omit<ReceiveInvoice, "lines"> & { supplierId: string; purchaseOrderId?: string | undefined; lines: TaxLine[] }
 
 // La usa también la recepción de órdenes, dentro de su transacción
 export async function createInvoice(tx: Db, input: NewInvoice, userId: string) {
@@ -74,8 +97,9 @@ export async function createInvoice(tx: Db, input: NewInvoice, userId: string) {
   const issueDate = dateOnly(input.issueDate)
   const dueDate = input.dueDate ? dateOnly(input.dueDate) : new Date(issueDate.getTime() + supplier.creditDays * DAY)
   if (dueDate < issueDate) throw new Error("El vencimiento no puede ser antes de la fecha de la factura")
-  const subtotal = new D(input.subtotal).toDecimalPlaces(2)
-  const tax = new D(input.tax).toDecimalPlaces(2)
+  const lines = withTax(input.lines).filter((l) => l.base.greaterThan(0) || l.tax.greaterThan(0))
+  const subtotal = lines.reduce((s, l) => s.plus(l.base), new D(0))
+  const tax = lines.reduce((s, l) => s.plus(l.tax), new D(0))
   const total = subtotal.plus(tax)
   if (!total.greaterThan(0)) throw new Error("La factura tiene que tener un monto")
   const dup = await tx.supplierInvoice.findFirst({ where: { supplierId: supplier.id, number: input.number, voidedAt: null }, select: { id: true } })
@@ -85,6 +109,8 @@ export async function createInvoice(tx: Db, input: NewInvoice, userId: string) {
     data: {
       companyId: currentCompanyId(), supplierId: supplier.id, purchaseOrderId: input.purchaseOrderId ?? null,
       number: input.number, issueDate, dueDate, subtotal, tax, total, note: input.note || null, createdById: userId,
+      creditable: input.creditable ?? true,
+      taxes: { create: lines },
     },
   })
   await logAudit(userId, "CREATE", "SupplierInvoice", invoice.id, { supplier: supplier.name, number: input.number, total: total.toNumber() }, tx)
@@ -187,7 +213,12 @@ export async function getSupplierAccount(supplierId: string) {
   if (!supplier) throw fail("Proveedor no encontrado", 404)
   const t = today()
   const [invoices, payments] = await Promise.all([
-    prisma.supplierInvoice.findMany({ where: { supplierId }, orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }], take: 100 }),
+    prisma.supplierInvoice.findMany({
+      where: { supplierId },
+      orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
+      take: 100,
+      include: { taxes: { select: { rate: true, base: true, tax: true } } },
+    }),
     prisma.supplierPayment.findMany({
       where: { supplierId },
       orderBy: { createdAt: "desc" },

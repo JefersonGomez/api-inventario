@@ -46,6 +46,28 @@ describe("Cuentas por pagar", () => {
     expect(inv).toMatchObject({ number: "FAC-100" })
     expect([Number(inv.subtotal), Number(inv.tax), Number(inv.total)]).toEqual([50000, 6500, 56500])
     expect(ymd(inv.dueDate)).toBe(daysFromToday(30))
+    // el IVA queda por tarifa (el cemento es 13 %) y da crédito fiscal
+    const taxes = await prisma.supplierInvoiceTax.findMany({ where: { invoiceId: inv.id } })
+    expect(taxes.map((t) => [t.rate, Number(t.base), Number(t.tax)])).toEqual([["RATE_13", 50000, 6500]])
+    expect(inv.creditable).toBe(true)
+  })
+
+  it("IVA por tarifa: calcula el que falta, respeta el que trae la factura y marca lo no acreditable", async () => {
+    const res = await invoice({
+      number: "MIX-1",
+      creditable: false,
+      lines: [{ rate: "RATE_13", base: 1000, tax: 131 }, { rate: "RATE_1", base: 500 }, { rate: "EXEMPT", base: 200 }],
+    })
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ creditable: false })
+    expect([Number(res.body.subtotal), Number(res.body.tax), Number(res.body.total)]).toEqual([1700, 136, 1836])
+    const taxes = await prisma.supplierInvoiceTax.findMany({ where: { invoiceId: res.body.id }, orderBy: { rate: "asc" } })
+    expect(taxes.map((t) => [t.rate, Number(t.tax)])).toEqual(expect.arrayContaining([["RATE_13", 131], ["RATE_1", 5], ["EXEMPT", 0]]))
+
+    expect((await invoice({ number: "MIX-2", lines: [{ rate: "RATE_13", base: 1 }, { rate: "RATE_13", base: 2 }] })).body.error).toBeDefined()
+    expect((await invoice({ number: "MIX-3", lines: [{ rate: "EXEMPT", base: 100, tax: 13 }] })).status).toBe(400)
+    // se anula para no mover los saldos de las pruebas de abajo
+    await request(app).post(`/payables/invoices/${res.body.id}/void`).set(admin.auth).send({ reason: "prueba" })
   })
 
   it("un número repetido del mismo proveedor deshace toda la recepción", async () => {
@@ -58,7 +80,7 @@ describe("Cuentas por pagar", () => {
   })
 
   it("factura suelta; el pago va de la que vence primero, pide referencia y no pasa del saldo", async () => {
-    const flete = await invoice({ number: "F-7", subtotal: 10000, tax: 1300, dueDate: daysFromToday(5) }, accountant)
+    const flete = await invoice({ number: "F-7", lines: [{ rate: "RATE_13", base: 10000 }], dueDate: daysFromToday(5) }, accountant)
     expect(flete.status).toBe(201)
     expect((await account()).balance).toBe(56500 + 11300)
 
@@ -73,7 +95,7 @@ describe("Cuentas por pagar", () => {
     expect((await account()).balance).toBe(56500 + 11300 - 20000)
 
     // pagar solo una factura elegida
-    const other = await invoice({ number: "F-8", subtotal: 1000, tax: 0 })
+    const other = await invoice({ number: "F-8", lines: [{ rate: "EXEMPT", base: 1000 }] })
     const only = await pay({ amount: 1000, method: "CASH", invoiceIds: [other.body.id] })
     expect(only.body.allocations).toHaveLength(1)
     expect((await pay({ amount: 1, method: "CASH", invoiceIds: [other.body.id] })).body.error).toMatch(/pagada o anulada/)
@@ -83,16 +105,16 @@ describe("Cuentas por pagar", () => {
     const paid = await prisma.supplierInvoice.findFirstOrThrow({ where: { number: "FAC-100" } })
     expect((await request(app).post(`/payables/invoices/${paid.id}/void`).set(admin.auth).send({ reason: "error" })).body.error).toMatch(/tiene pagos/)
 
-    const wrong = await invoice({ number: "F-9", subtotal: 500, tax: 65 })
+    const wrong = await invoice({ number: "F-9", lines: [{ rate: "RATE_13", base: 500 }] })
     expect((await request(app).post(`/payables/invoices/${wrong.body.id}/void`).set(admin.auth).send({ reason: "Monto mal digitado" })).status).toBe(200)
-    expect((await invoice({ number: "F-9", subtotal: 600, tax: 78 })).status).toBe(201)
+    expect((await invoice({ number: "F-9", lines: [{ rate: "RATE_13", base: 600 }] })).status).toBe(201)
     const voided = await request(app).get("/payables/invoices?status=void").set(admin.auth)
-    expect(voided.body.items.map((i: { number: string }) => i.number)).toEqual(["F-9"])
+    expect(voided.body.items.map((i: { number: string }) => i.number).sort()).toEqual(["F-9", "MIX-1"])
   })
 
   it("saldos por proveedor con antigüedad de lo vencido", async () => {
     // emitida hace 40 días, de contado (vence ese día): 40 días de atraso → tramo 31–60
-    const late = await invoice({ number: "F-OLD", subtotal: 2000, tax: 0, issueDate: daysFromToday(-40), dueDate: daysFromToday(-40) })
+    const late = await invoice({ number: "F-OLD", lines: [{ rate: "EXEMPT", base: 2000 }], issueDate: daysFromToday(-40), dueDate: daysFromToday(-40) })
     expect(late.status).toBe(201)
     const res = await request(app).get("/payables?overdue=1").set(accountant.auth)
     expect(res.status).toBe(200)
@@ -104,8 +126,8 @@ describe("Cuentas por pagar", () => {
   })
 
   it("aviso en la campanita una vez por factura que vence en 3 días o menos", async () => {
-    await invoice({ number: "F-SOON", subtotal: 3000, tax: 0, dueDate: daysFromToday(2) })
-    await invoice({ number: "F-LATER", subtotal: 3000, tax: 0, dueDate: daysFromToday(20) })
+    await invoice({ number: "F-SOON", lines: [{ rate: "EXEMPT", base: 3000 }], dueDate: daysFromToday(2) })
+    await invoice({ number: "F-LATER", lines: [{ rate: "EXEMPT", base: 3000 }], dueDate: daysFromToday(20) })
     expect(await notifyPayablesDue()).toBe(2) // F-SOON y F-OLD (la vencida no tenía aviso)
     expect(await notifyPayablesDue()).toBe(0)
     const notes = await prisma.notification.findMany({ where: { type: "payableDue" } })
@@ -115,7 +137,7 @@ describe("Cuentas por pagar", () => {
 
   it("permisos, aislamiento entre empresas y proveedor con facturas no se borra", async () => {
     expect((await request(app).get("/payables").set(employee.auth)).status).toBe(403)
-    expect((await invoice({ number: "X", subtotal: 1, tax: 0 }, employee)).status).toBe(403)
+    expect((await invoice({ number: "X", lines: [{ rate: "EXEMPT", base: 1 }] }, employee)).status).toBe(403)
 
     const other = await createUser("ADMIN")
     expect((await request(app).get(`/payables/${supplierId}`).set(other.auth)).status).toBe(404)

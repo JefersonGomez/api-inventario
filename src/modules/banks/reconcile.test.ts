@@ -44,7 +44,7 @@ describe("Conciliación bancaria", () => {
     await sell(2, "CARD", "AUT2") // tarjeta del día: 3390
 
     supplierId = (await request(app).post("/suppliers").set(admin.auth).send({ name: "Ferretera" })).body.id
-    await request(app).post("/payables/invoices").set(admin.auth).send({ supplierId, number: "F1", issueDate: local(-20), subtotal: 20000, tax: 0 })
+    await request(app).post("/payables/invoices").set(admin.auth).send({ supplierId, number: "F1", issueDate: local(-20), lines: [{ rate: "EXEMPT", base: 20000 }] })
     await request(app).post("/payables/payments").set(admin.auth).send({ supplierId, amount: 5000, method: "TRANSFER", reference: "T-9" })
     // pagado hace 10 días y nunca salió del banco
     await request(app).post("/payables/payments").set(admin.auth).send({ supplierId, amount: 700, method: "TRANSFER", reference: "T-OLD", paidAt: local(-10) })

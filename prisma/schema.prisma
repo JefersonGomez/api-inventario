@@ -1059,6 +1059,8 @@ model SupplierInvoice {
   voidedAt        DateTime?
   voidReason      String?
   notifiedAt      DateTime? // aviso de "por vencer" ya enviado
+  creditable      Boolean                     @default(true) // da derecho a crédito fiscal (no: gasto personal, factura a otro nombre…)
+  taxes           SupplierInvoiceTax[]
   createdById     String
   createdBy       User                        @relation(fields: [createdById], references: [id])
   createdAt       DateTime                    @default(now())
@@ -1100,6 +1102,19 @@ model SupplierPaymentAllocation {
   amount    Decimal         @db.Decimal(18, 2)
 
   @@index([invoiceId])
+}
+
+// IVA de una factura de proveedor por tarifa (punto 54A): base sin IVA + IVA de cada tarifa.
+// subtotal y tax de la factura son la suma de estas filas. Sin companyId: siempre por su factura.
+model SupplierInvoiceTax {
+  id        String          @id @default(uuid())
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id])
+  rate      TaxRate
+  base      Decimal         @db.Decimal(18, 2)
+  tax       Decimal         @db.Decimal(18, 2)
+
+  @@unique([invoiceId, rate])
 }
 
 // Bancos (Bloque 10, punto 53; decisiones del usuario del 25-oct-2026). Cuentas de la empresa en

@@ -12,8 +12,7 @@ import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
 import type { PurchaseOrderListQuery, ReceiveLine } from "./purchase-order.schema.ts";
-import { createInvoice, type ReceiveInvoice } from "../payables/payables.service.ts";
-import { TAX_PERCENT } from "../../shared/fiscal.ts";
+import { createInvoice, type ReceiveInvoice, type TaxLine } from "../payables/payables.service.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -227,11 +226,13 @@ export async function receivePurchaseOrder(id: string, userId: string, lines?: R
       tx
     );
 
-    // la factura del proveedor: sin montos, sale de lo que llegó (costo de la orden + IVA de cada producto)
+    // la factura del proveedor: sin tarifas, salen de lo que llegó (costo de la orden por la tarifa de cada producto;
+    // el IVA de cada tarifa lo calcula createInvoice)
     if (invoice) {
-      const subtotal = arriving.reduce((s, a) => s + a.qty * Number(a.item.unitCost), 0);
-      const tax = arriving.reduce((s, a) => s + a.qty * Number(a.item.unitCost) * TAX_PERCENT[a.item.product.taxRate] / 100, 0);
-      await createInvoice(tx, { ...invoice, supplierId: order.supplierId, purchaseOrderId: id, subtotal: invoice.subtotal ?? subtotal, tax: invoice.tax ?? tax }, userId);
+      const byRate = new Map<TaxLine["rate"], number>();
+      for (const a of arriving) byRate.set(a.item.product.taxRate, (byRate.get(a.item.product.taxRate) ?? 0) + a.qty * Number(a.item.unitCost));
+      const lines = invoice.lines ?? [...byRate].map(([rate, base]) => ({ rate, base: Math.round(base * 100) / 100 }));
+      await createInvoice(tx, { ...invoice, supplierId: order.supplierId, purchaseOrderId: id, lines }, userId);
     }
 
     await logAudit(userId, "RECEIVE", "PurchaseOrder", id, { lines: arriving.map((a) => ({ itemId: a.item.id, quantity: a.qty })), complete }, tx);

@@ -100,7 +100,7 @@ describe("Bancos", () => {
 
   it("los pagos guardan de qué cuenta salieron o a cuál entraron", async () => {
     const supplierId = (await request(app).post("/suppliers").set(admin.auth).send({ name: "Proveedor" })).body.id
-    await request(app).post("/payables/invoices").set(admin.auth).send({ supplierId, number: "F1", issueDate: "2026-10-01", subtotal: 5000, tax: 0 })
+    await request(app).post("/payables/invoices").set(admin.auth).send({ supplierId, number: "F1", issueDate: "2026-10-01", lines: [{ rate: "EXEMPT", base: 5000 }] })
     const transfer = await request(app).post("/payables/payments").set(admin.auth).send({ supplierId, amount: 1000, method: "TRANSFER", reference: "T1", bankAccountId: bnId })
     expect(transfer.status).toBe(201)
     expect(transfer.body.bankAccountId).toBe(bnId)

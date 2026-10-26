@@ -408,6 +408,19 @@ components:
         idNumber: { type: string, nullable: true }
         creditDays: { type: integer, minimum: 0, maximum: 365, description: "Días de crédito que da el proveedor (0 = contado; ausente = 0)" }
 
+    InvoiceTaxLines:
+      type: array
+      minItems: 1
+      maxItems: 5
+      description: "Una fila por tarifa; lo exento no lleva IVA"
+      items:
+        type: object
+        required: [rate, base]
+        properties:
+          rate: { type: string, enum: [RATE_13, RATE_4, RATE_2, RATE_1, EXEMPT] }
+          base: { type: number, minimum: 0, description: "Sin IVA" }
+          tax: { type: number, minimum: 0, description: "Si no viene: base × tarifa" }
+
     BankAccountInput:
       type: object
       required: [name, bankName, currency]
@@ -2846,22 +2859,22 @@ paths:
     post:
       tags: [Cuentas por pagar]
       summary: Registrar una factura suelta o de una orden ya recibida
-      description: "Montos con IVA aparte (total = subtotal + tax). Sin dueDate = issueDate + días de crédito del proveedor. El número no se repite por proveedor entre las vigentes."
+      description: "IVA por tarifa (lines): subtotal = suma de bases, tax = suma de IVA (sin tax en una fila = base × tarifa). creditable false = no da crédito fiscal. Sin dueDate = issueDate + días de crédito del proveedor. El número no se repite por proveedor entre las vigentes."
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [supplierId, number, issueDate, subtotal, tax]
+              required: [supplierId, number, issueDate, lines]
               properties:
                 supplierId: { type: string, format: uuid }
                 purchaseOrderId: { type: string, format: uuid, description: "Debe ser del mismo proveedor" }
                 number: { type: string, maxLength: 50 }
                 issueDate: { type: string, format: date }
                 dueDate: { type: string, format: date }
-                subtotal: { type: number, minimum: 0 }
-                tax: { type: number, minimum: 0 }
+                lines: { $ref: '#/components/schemas/InvoiceTaxLines' }
+                creditable: { type: boolean, default: true }
                 note: { type: string, maxLength: 200 }
       responses:
         '201': { description: Factura registrada }
@@ -3524,15 +3537,15 @@ paths:
                       quantity: { type: number, minimum: 0, description: No más de lo que falta }
                       lot: { $ref: '#/components/schemas/LotInput' }
                 invoice:
-                  description: "Factura del proveedor (Cuentas por pagar), opcional. Sin subtotal/tax se calculan con lo que llega (costo de la orden + IVA de cada producto); sin dueDate = issueDate + días de crédito del proveedor. Número repetido del proveedor = 400 y no se recibe nada."
+                  description: "Factura del proveedor (Cuentas por pagar), opcional. Sin lines se arman con lo que llega (costo de la orden por la tarifa de cada producto); sin dueDate = issueDate + días de crédito del proveedor. Número repetido del proveedor = 400 y no se recibe nada."
                   type: object
                   required: [number, issueDate]
                   properties:
                     number: { type: string, maxLength: 50 }
                     issueDate: { type: string, format: date }
                     dueDate: { type: string, format: date }
-                    subtotal: { type: number, minimum: 0 }
-                    tax: { type: number, minimum: 0 }
+                    lines: { $ref: '#/components/schemas/InvoiceTaxLines' }
+                    creditable: { type: boolean, default: true }
                     note: { type: string, maxLength: 200 }
       responses:
         '200':
