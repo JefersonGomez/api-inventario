@@ -26,8 +26,7 @@ export async function getLowStockController(req: Request, res: Response) {
 
 export async function getMovementsReportController(req: Request, res: Response) {
   try {
-    const from = req.query.from as string | undefined;
-    const to = req.query.to as string | undefined;
+    const { from, to } = res.locals.query as { from?: string; to?: string };
 
     const report = await getMovementsReport(from, to);
     res.status(200).json(report);

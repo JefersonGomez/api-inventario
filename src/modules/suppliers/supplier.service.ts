@@ -68,7 +68,16 @@ export async function updateSupplier(id: string, input: SupplierInput) {
   return updatedSupplier
 }
 
+// El borrado es físico: con productos activos los dejaría sin proveedor en silencio (FK SET NULL)
+// y con órdenes fallaría con un error genérico. Se rechaza y se dice por qué.
 export async function deleteSupplier(id: string) {
+  const [products, orders] = await Promise.all([
+    prisma.product.count({ where: { supplierId: id, deletedAt: null } }),
+    prisma.purchaseOrder.count({ where: { supplierId: id } }),
+  ])
+  if (products || orders) {
+    throw new Error(`No se puede eliminar: tiene ${products} producto(s) y ${orders} orden(es) de compra asociados`)
+  }
   const deletedSupplier = await prisma.supplier.delete({ where: { id } })
   return deletedSupplier
 }

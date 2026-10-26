@@ -2993,6 +2993,7 @@ paths:
     delete:
       tags: [Proveedores]
       summary: Eliminar proveedor (suppliers.manage)
+      description: 400 si tiene productos activos u órdenes de compra.
       responses:
         '200': { description: Eliminado }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -3418,6 +3419,7 @@ paths:
     get:
       tags: [Reportes]
       summary: Movimientos por rango de fechas (reports.view)
+      description: Días completos en la hora del servidor; to incluye todo ese día.
       parameters:
         - name: from
           in: query
@@ -3433,6 +3435,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Movement' }
+        '400': { description: Fecha con formato inválido (AAAA-MM-DD) }
 
   /reports/inventory-value:
     get:

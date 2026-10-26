@@ -16,9 +16,10 @@ const DAY = 86_400_000
 
 export const salesReportQuerySchema = z.object({ from: z.iso.date(), to: z.iso.date() })
 export const mySalesQuerySchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/, "Mes en formato AAAA-MM").optional() })
+export const movementsReportQuerySchema = salesReportQuerySchema.partial()
 
-const dayStart = (d: string) => new Date(`${d}T00:00:00`)
-const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`)
+export const dayStart = (d: string) => new Date(`${d}T00:00:00`)
+export const dayEnd = (d: string) => new Date(`${d}T23:59:59.999`)
 const dayKey = (d: Date) => d.toLocaleDateString("sv")
 const num = (v: Prisma.Decimal | number | null | undefined) => Number(new D(v ?? 0).toDecimalPlaces(2))
 

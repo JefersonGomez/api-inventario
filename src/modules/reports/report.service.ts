@@ -1,6 +1,7 @@
 import { prisma } from "../../config/database.ts"
 import { locationScope } from "../../shared/tenant.ts"
 import { lowStockProductIds, scopedStock, withScopedStock } from "../locations/stock-scope.ts"
+import { dayEnd, dayStart } from "./sales-report.service.ts"
 
 // Ubicaciones (Bloque 4): con "todas" se usa el stock total del producto; con una ubicación elegida
 // (o si la persona solo trabaja en algunas) cuentan solo el stock y los movimientos de ahí.
@@ -78,8 +79,9 @@ export async function getMovementsReport(from?: string, to?: string) {
 
   if (from || to) {
     whereClause.createdAt = {};
-    if (from) whereClause.createdAt.gte = new Date(from);
-    if (to) whereClause.createdAt.lte = new Date(to);
+    // días completos: "hasta hoy" incluye lo de hoy (antes cortaba a la medianoche y no salía nada del día)
+    if (from) whereClause.createdAt.gte = dayStart(from);
+    if (to) whereClause.createdAt.lte = dayEnd(to);
   }
 
   const movements = await prisma.stockMovement.findMany({

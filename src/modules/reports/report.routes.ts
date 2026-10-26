@@ -7,7 +7,7 @@ import {
   getDashboardController, peekDailySummaryHandler, dailySummaryHandler, summaryHistoryHandler,
   mySalesHandler, salesReportHandler, salesTodayHandler,
 } from "./report.controller.ts";
-import { mySalesQuerySchema, salesReportQuerySchema } from "./sales-report.service.ts";
+import { movementsReportQuerySchema, mySalesQuerySchema, salesReportQuerySchema } from "./sales-report.service.ts";
 import { validateQuery } from "../../middlewares/validate.middleware.ts";
 import { dailySummaryQuerySchema, summaryHistorySchema } from "./daily-summary.service.ts";
 
@@ -15,7 +15,7 @@ export const router = Router();
 
 router.get("/low-stock", Authenticated, Can("reports.view"), getLowStockController);
 router.get("/dashboard", Authenticated, getDashboardController);
-router.get("/movements", Authenticated, Can("reports.view"), getMovementsReportController);
+router.get("/movements", validateQuery(movementsReportQuerySchema), Authenticated, Can("reports.view"), getMovementsReportController);
 router.get("/inventory-value", Authenticated, Can("reports.view", "costs.view"), getInventoryValueController);
 // reports.router.ts — agregar
 router.get("/inventory-value-breakdown", Authenticated, Can("reports.view", "costs.view"), getInventoryValueBreakdownHandler);
