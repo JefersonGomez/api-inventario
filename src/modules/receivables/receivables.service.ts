@@ -15,6 +15,7 @@ import { logAudit } from "../audit/audit.service.ts"
 import { getCompany } from "../company/company.service.ts"
 import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
+import { activeAccount } from "../banks/banks.service.ts"
 
 const D = Prisma.Decimal
 const fail = (message: string, status: number, code?: string) => Object.assign(new Error(message), { status, ...(code && { code }) })
@@ -33,6 +34,7 @@ export const customerPaymentSchema = z.object({
   tendered: z.number().positive().max(1e12).optional(),
   note: z.string().trim().max(200).optional(),
   inRegister: z.boolean(), // true = en la caja abierta de quien cobra
+  bankAccountId: z.uuid().optional(), // sin caja: la cuenta donde entró (Bancos)
 })
 export const receivablesQuerySchema = z.object({ ...pageQuery, overdue: z.enum(["1", "0"]).optional() })
 
@@ -229,7 +231,9 @@ export async function registerPayment(input: z.infer<typeof customerPaymentSchem
   } else {
     if (!actor.permissions.includes("receivables.manage")) throw fail("No tienes permiso para registrar abonos fuera de la caja", 403)
     if (!input.reference) throw new Error("Fuera de la caja el abono necesita una referencia (n.º de transferencia, recibo…)")
+    if (input.bankAccountId && input.method !== "CASH") await activeAccount(input.bankAccountId)
   }
+  const bankAccountId = !input.inRegister && input.method !== "CASH" ? (input.bankAccountId ?? null) : null
   if (input.tendered !== undefined && (input.method !== "CASH" || input.tendered < input.amount)) {
     throw new Error("Lo recibido en efectivo no puede ser menor que el abono")
   }
@@ -254,7 +258,7 @@ export async function registerPayment(input: z.infer<typeof customerPaymentSchem
       data: {
         companyId: currentCompanyId(), customerId: customer.id, amount, method: input.method,
         reference: input.reference || null, tendered: input.tendered ?? null, note: input.note || null,
-        balanceBefore: balance, balanceAfter: balance.minus(amount), cashSessionId, userId: actor.id,
+        balanceBefore: balance, balanceAfter: balance.minus(amount), cashSessionId, bankAccountId, userId: actor.id,
       },
     })
     await logAudit(actor.id, "CREATE", "CustomerPayment", saved.id, { customer: customer.name, amount: input.amount, method: input.method }, tx)

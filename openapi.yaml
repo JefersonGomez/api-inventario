@@ -67,6 +67,7 @@ tags:
   - name: Punto de venta
   - name: Cuentas por cobrar
   - name: Cuentas por pagar
+  - name: Bancos
   - name: Ventas
   - name: Productos base
   - name: Solicitudes de compra
@@ -406,6 +407,18 @@ components:
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true }
         creditDays: { type: integer, minimum: 0, maximum: 365, description: "Días de crédito que da el proveedor (0 = contado; ausente = 0)" }
+
+    BankAccountInput:
+      type: object
+      required: [name, bankName, currency]
+      properties:
+        name: { type: string, maxLength: 60 }
+        bankName: { type: string, maxLength: 60 }
+        number: { type: string, maxLength: 34, description: IBAN }
+        currency: { type: string, enum: [CRC, USD] }
+        isActive: { type: boolean }
+        general: { type: boolean, description: "Recibe el SINPE general y la tarjeta de las sucursales sin cuenta propia" }
+        locationIds: { type: array, items: { type: string, format: uuid }, description: "Sucursales cuyo SINPE y tarjeta caen en esta cuenta" }
 
     Customer:
       type: object
@@ -2380,6 +2393,7 @@ paths:
                 reference: { type: string, maxLength: 60 }
                 tendered: { type: number, description: "Efectivo recibido" }
                 note: { type: string, maxLength: 200 }
+                bankAccountId: { type: string, format: uuid, description: "Sin caja y no en efectivo: la cuenta donde entró" }
                 inRegister: { type: boolean }
       responses:
         '201': { description: "Recibo: { payment (balanceBefore, amount, balanceAfter), company }" }
@@ -2890,6 +2904,7 @@ paths:
                 paidAt: { type: string, format: date, description: "Por defecto hoy" }
                 note: { type: string, maxLength: 200 }
                 invoiceIds: { type: array, items: { type: string, format: uuid } }
+                bankAccountId: { type: string, format: uuid, description: "De qué cuenta salió (no aplica en efectivo); activa y de la empresa" }
       responses:
         '201': { description: Pago registrado }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -2903,6 +2918,138 @@ paths:
       responses:
         '200': { description: "{ supplier, balance, overdue, invoices (últimas 100, con anuladas), payments (últimos 50, con allocations y user) }" }
         '404': { description: Proveedor no encontrado }
+
+  /banks/accounts:
+    get:
+      tags: [Bancos]
+      summary: Cuentas bancarias (banks.manage o cash.reconcile)
+      responses:
+        '200': { description: "[{ id, name, bankName, number, currency, isActive, general, locations [{ id, name }], pending }]; general = recibe el SINPE y la tarjeta de la empresa; pending = movimientos por revisar" }
+    post:
+      tags: [Bancos]
+      summary: Crear una cuenta (banks.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankAccountInput' }
+      responses:
+        '201': { description: Cuenta creada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /banks/accounts/{id}:
+    put:
+      tags: [Bancos]
+      summary: Editar una cuenta (banks.manage)
+      description: "Las sucursales que la tenían y ya no vienen en locationIds vuelven a la cuenta de la empresa. Inactiva = no recibe nada. Con movimientos no cambia de moneda."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankAccountInput' }
+      responses:
+        '200': { description: Cuenta guardada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Cuenta no encontrada }
+
+  /banks/accounts/{id}/import:
+    post:
+      tags: [Bancos]
+      summary: Importar el estado del banco (banks.manage)
+      description: "El navegador lee el CSV o Excel y manda las filas. amount con signo (+ entra, − sale). Lo ya importado (misma fecha, referencia, monto y descripción) no se duplica."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, rows]
+              properties:
+                fileName: { type: string }
+                rows:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: object
+                    required: [date, description, amount]
+                    properties:
+                      date: { type: string, format: date }
+                      reference: { type: string, maxLength: 60 }
+                      description: { type: string, maxLength: 300 }
+                      amount: { type: number, description: "Distinto de 0" }
+      responses:
+        '201': { description: "{ rows, inserted, duplicates, dateFrom, dateTo }" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Cuenta no encontrada o inactiva }
+
+  /banks/accounts/{id}/transactions:
+    get:
+      tags: [Bancos]
+      summary: Movimientos importados de una cuenta, lo más nuevo primero (banks.manage)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: status, in: query, schema: { type: string, enum: [pending, reviewed, all], default: pending } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: "{ items, total, page, pageSize, totals: { credits, debits } } (totales del filtro)" }
+
+  /banks/transactions/{id}:
+    patch:
+      tags: [Bancos]
+      summary: Clasificar un movimiento sin pareja en el sistema (null = quitar la clasificación)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category]
+              properties:
+                category: { type: string, nullable: true, enum: [BANK_FEE, INTEREST, OWNER_WITHDRAWAL, OWNER_CONTRIBUTION, EXPENSE, OTHER_INCOME, OTHER] }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: Movimiento clasificado }
+        '404': { description: Movimiento no encontrado }
+
+  /banks/deposits:
+    get:
+      tags: [Bancos]
+      summary: Depósitos de efectivo (banks.manage o cash.reconcile)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: bankAccountId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: "{ items: [CashDeposit + bankAccount, location, user], total, page, pageSize }" }
+    post:
+      tags: [Bancos]
+      summary: Registrar un depósito del efectivo de las cajas (banks.manage o cash.reconcile)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bankAccountId, amount, depositedAt, reference]
+              properties:
+                bankAccountId: { type: string, format: uuid }
+                locationId: { type: string, format: uuid }
+                amount: { type: number }
+                depositedAt: { type: string, format: date }
+                reference: { type: string, maxLength: 60 }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Depósito registrado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Cuenta o sucursal no encontrada }
 
   /customers:
     get:

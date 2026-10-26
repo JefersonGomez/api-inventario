@@ -25,6 +25,7 @@ export const PERMISSIONS = [
   "credit.manage", // habilitar crédito a un cliente y fijar su límite (por defecto solo el admin)
   "receivables.manage", // cuentas por cobrar: ver saldos y registrar abonos sin caja
   "payables.manage", // cuentas por pagar: facturas de proveedores, pagos y saldos
+  "banks.manage", // bancos: cuentas, importar el estado bancario, clasificar y conciliar
   "accounting.view", // contabilidad (Bloques 10 y 11)
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
@@ -43,11 +44,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MANAGER: [
     "products.manage", "costs.view", "stock.move", "purchases.request", "purchases.manage", "suppliers.manage",
     "customers.manage", "customers.delete", "reports.view", "audit.view", "sales.sell", "cash.manage",
-    "cash.reconcile", "sales.discount", "sales.void", "sales.negative", "sales.credit", "receivables.manage", "payables.manage", "accounting.view",
+    "cash.reconcile", "sales.discount", "sales.void", "sales.negative", "sales.credit", "receivables.manage", "payables.manage", "banks.manage", "accounting.view",
   ],
   EMPLOYE: ["costs.view", "stock.move", "purchases.request", "customers.manage", "reports.view"],
   CASHIER: ["purchases.request", "customers.manage", "sales.sell", "cash.manage"],
-  ACCOUNTANT: ["costs.view", "reports.view", "audit.view", "accounting.view", "receivables.manage", "payables.manage"],
+  ACCOUNTANT: ["costs.view", "reports.view", "audit.view", "accounting.view", "receivables.manage", "payables.manage", "banks.manage"],
 }
 
 // Rol + ajustes de la persona. Al ADMIN no se le puede quitar nada (nadie queda fuera de su empresa).

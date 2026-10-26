@@ -15,6 +15,7 @@ import { logAudit } from "../audit/audit.service.ts"
 import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
 import { today } from "../receivables/receivables.service.ts"
+import { activeAccount } from "../banks/banks.service.ts"
 
 const D = Prisma.Decimal
 const DAY = 86_400_000
@@ -46,6 +47,7 @@ export const supplierPaymentSchema = z.object({
   paidAt: z.iso.date().optional(),
   note: z.string().trim().max(200).optional(),
   invoiceIds: z.array(z.uuid()).min(1).optional(), // sin esto: de la que vence primero
+  bankAccountId: z.uuid().optional(), // de qué cuenta salió (Bancos); en efectivo no aplica
 })
 export const payablesQuerySchema = z.object({ ...pageQuery, overdue: z.enum(["1", "0"]).optional() })
 export const invoicesQuerySchema = z.object({
@@ -204,6 +206,8 @@ export async function registerSupplierPayment(input: z.infer<typeof supplierPaym
   if (input.method !== "CASH" && !input.reference) throw new Error("El pago necesita una referencia (n.º de transferencia, cheque…)")
   const supplier = await prisma.supplier.findFirst({ where: { id: input.supplierId }, select: { id: true, name: true } })
   if (!supplier) throw fail("Proveedor no encontrado", 404)
+  const bankAccountId = input.method !== "CASH" ? (input.bankAccountId ?? null) : null
+  if (bankAccountId) await activeAccount(bankAccountId)
 
   const payment = await prisma.$transaction(async (tx) => {
     await lockSupplier(tx, supplier.id)
@@ -220,7 +224,7 @@ export async function registerSupplierPayment(input: z.infer<typeof supplierPaym
     const saved = await tx.supplierPayment.create({
       data: {
         companyId: currentCompanyId(), supplierId: supplier.id, amount, method: input.method, reference: input.reference || null,
-        paidAt: input.paidAt ? dateOnly(input.paidAt) : today(), note: input.note || null, userId,
+        paidAt: input.paidAt ? dateOnly(input.paidAt) : today(), note: input.note || null, bankAccountId, userId,
       },
     })
     let left = amount

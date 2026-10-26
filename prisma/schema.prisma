@@ -166,6 +166,9 @@ model User {
   customerPayments       CustomerPayment[]
   supplierInvoices       SupplierInvoice[]
   supplierPayments       SupplierPayment[]
+  bankImports            BankImport[]
+  cashDeposits           CashDeposit[]
+  bankReviews            BankTransaction[]
 }
 
 model Category {
@@ -393,6 +396,8 @@ model Company {
   requirePaymentRef     Boolean            @default(true) // tarjeta y SINPE exigen la referencia (autorización / comprobante)
   sinpeNumber           String? // SINPE Móvil general (8 dígitos); cada sucursal puede tener el suyo
   sinpeName             String? // a nombre de quién está ese SINPE
+  bankAccountId         String? // cuenta donde caen el SINPE general y la tarjeta de las sucursales sin cuenta propia
+  bankAccount           BankAccount?       @relation("CompanyBankAccount", fields: [bankAccountId], references: [id])
   isDemo                Boolean            @default(false) // empresa de la demo pública: se borra y se recrea cada noche
   onboardingDismissedAt DateTime? // ocultó la guía de primeros pasos
   // datos fiscales (emisor de los comprobantes); todos opcionales hasta que la empresa facture
@@ -442,6 +447,10 @@ model Company {
   customerPayments      CustomerPayment[]
   supplierInvoices      SupplierInvoice[]
   supplierPayments      SupplierPayment[]
+  bankAccounts          BankAccount[]
+  bankTransactions      BankTransaction[]
+  bankImports           BankImport[]
+  cashDeposits          CashDeposit[]
 
   @@index([ownerId])
 }
@@ -639,6 +648,8 @@ model Location {
   address        String?
   sinpeNumber    String? // SINPE Móvil de esta sucursal (si no, el general de la empresa)
   sinpeName      String?
+  bankAccountId  String? // cuenta donde caen el SINPE y la tarjeta de esta sucursal (si no, la de la empresa)
+  bankAccount    BankAccount?    @relation(fields: [bankAccountId], references: [id])
   isActive       Boolean         @default(true)
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -651,6 +662,7 @@ model Location {
   lots           ProductLot[]
   cashRegisters  CashRegister[]
   negatives      StockNegative[]
+  cashDeposits   CashDeposit[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -1008,6 +1020,8 @@ model CustomerPayment {
   note          String?
   cashSessionId String?
   cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
+  bankAccountId String? // sin caja: la cuenta donde entró (si no, la de la empresa)
+  bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id])
   userId        String
   user          User          @relation(fields: [userId], references: [id])
   createdAt     DateTime      @default(now())
@@ -1056,20 +1070,22 @@ model SupplierInvoice {
 
 // Pago a un proveedor: puede cubrir varias facturas (allocations), de la que vence primero a la última
 model SupplierPayment {
-  id          String                      @id @default(uuid())
-  companyId   String
-  company     Company                     @relation(fields: [companyId], references: [id])
-  supplierId  String
-  supplier    Supplier                    @relation(fields: [supplierId], references: [id])
-  amount      Decimal                     @db.Decimal(18, 2)
-  method      PaymentMethod
-  reference   String?
-  paidAt      DateTime                    @db.Date
-  note        String?
-  userId      String
-  user        User                        @relation(fields: [userId], references: [id])
-  createdAt   DateTime                    @default(now())
-  allocations SupplierPaymentAllocation[]
+  id            String                      @id @default(uuid())
+  companyId     String
+  company       Company                     @relation(fields: [companyId], references: [id])
+  supplierId    String
+  supplier      Supplier                    @relation(fields: [supplierId], references: [id])
+  amount        Decimal                     @db.Decimal(18, 2)
+  method        PaymentMethod
+  reference     String?
+  paidAt        DateTime                    @db.Date
+  bankAccountId String? // de qué cuenta salió (efectivo: ninguna)
+  bankAccount   BankAccount?                @relation(fields: [bankAccountId], references: [id])
+  note          String?
+  userId        String
+  user          User                        @relation(fields: [userId], references: [id])
+  createdAt     DateTime                    @default(now())
+  allocations   SupplierPaymentAllocation[]
 
   @@index([companyId, supplierId])
 }
@@ -1084,4 +1100,105 @@ model SupplierPaymentAllocation {
   amount    Decimal         @db.Decimal(18, 2)
 
   @@index([invoiceId])
+}
+
+// Bancos (Bloque 10, punto 53; decisiones del usuario del 25-oct-2026). Cuentas de la empresa en
+// colones o dólares; cada sucursal liga la cuenta donde caen su SINPE y su tarjeta (Location.bankAccountId,
+// si no la de la empresa: Company.bankAccountId).
+model BankAccount {
+  id               String            @id @default(uuid())
+  companyId        String
+  company          Company           @relation(fields: [companyId], references: [id])
+  name             String // "BN colones", "BAC dólares"
+  bankName         String
+  number           String? // IBAN
+  currency         CurrencyCode      @default(CRC)
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  defaultFor       Company[]         @relation("CompanyBankAccount")
+  locations        Location[]
+  transactions     BankTransaction[]
+  imports          BankImport[]
+  deposits         CashDeposit[]
+  customerPayments CustomerPayment[]
+  supplierPayments SupplierPayment[]
+
+  @@index([companyId])
+}
+
+// Lo que se clasifica de un movimiento del banco que no tiene pareja en el sistema
+enum BankCategory {
+  BANK_FEE // comisión bancaria
+  INTEREST // intereses ganados
+  OWNER_WITHDRAWAL // retiro del dueño
+  OWNER_CONTRIBUTION // aporte del dueño
+  EXPENSE // gasto
+  OTHER_INCOME // otro ingreso
+  OTHER
+}
+
+// Un archivo importado del banco (CSV o Excel)
+model BankImport {
+  id            String            @id @default(uuid())
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id])
+  bankAccountId String
+  bankAccount   BankAccount       @relation(fields: [bankAccountId], references: [id])
+  fileName      String
+  rows          Int
+  inserted      Int
+  duplicates    Int
+  dateFrom      DateTime?         @db.Date
+  dateTo        DateTime?         @db.Date
+  userId        String
+  user          User              @relation(fields: [userId], references: [id])
+  createdAt     DateTime          @default(now())
+  transactions  BankTransaction[]
+
+  @@index([companyId, bankAccountId])
+}
+
+// Movimiento del estado bancario: amount con signo (+ crédito, − débito). Importar dos veces el mismo
+// rango no lo duplica (único por cuenta + fecha + referencia + monto + descripción).
+model BankTransaction {
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id])
+  bankAccountId String
+  bankAccount   BankAccount   @relation(fields: [bankAccountId], references: [id])
+  importId      String?
+  import        BankImport?   @relation(fields: [importId], references: [id])
+  date          DateTime      @db.Date
+  reference     String        @default("")
+  description   String
+  amount        Decimal       @db.Decimal(18, 2)
+  category      BankCategory?
+  note          String?
+  reviewedById  String?
+  reviewedBy    User?         @relation(fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@unique([bankAccountId, date, reference, amount, description])
+  @@index([companyId, bankAccountId, date])
+}
+
+// Depósito en el banco del efectivo de las cajas (lo registra quien lleva el efectivo al banco)
+model CashDeposit {
+  id            String      @id @default(uuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id])
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+  locationId    String?
+  location      Location?   @relation(fields: [locationId], references: [id])
+  amount        Decimal     @db.Decimal(18, 2)
+  depositedAt   DateTime    @db.Date
+  reference     String
+  note          String?
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  createdAt     DateTime    @default(now())
+
+  @@index([companyId, bankAccountId, depositedAt])
 }
