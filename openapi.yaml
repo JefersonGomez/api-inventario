@@ -3018,6 +3018,59 @@ paths:
         '200': { description: Movimiento clasificado }
         '404': { description: Movimiento no encontrado }
 
+  /banks/accounts/{id}/reconcile:
+    get:
+      tags: [Bancos]
+      summary: Sugerencias de conciliación para lo pendiente del banco (banks.manage)
+      description: |
+        Lo que el sistema espera en la cuenta: SINPE/transferencias de ventas (+) y reembolsos de devoluciones (−),
+        abonos de clientes, pagos a proveedores (−), depósitos de efectivo y la tarjeta de cada día (CARD_BATCH).
+        La cuenta de cada cobro es la de su sucursal o la de la empresa. Pareja = monto exacto y fecha ±3 días
+        (la referencia gana); tarjeta = entra 0–5 días después y hasta 10 % menos (comisión). Nada se concilia solo.
+        missing = lo del sistema en el rango que ya pasó el plazo y no tiene pareja.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: "{ transactions: [{ id, date, amount, reference, description, suggestion, candidates }], missing: [item] }; item = { type, id, date, amount (con signo), reference, label }" }
+        '404': { description: Cuenta no encontrada }
+
+  /banks/transactions/{id}/match:
+    post:
+      tags: [Bancos]
+      summary: Confirmar con qué del sistema concilia un movimiento del banco
+      description: "La suma tiene que dar exacto, salvo con lotes de tarjeta: lo que falta (hasta 10 %) queda en fee como comisión. Cada cosa del sistema se concilia una sola vez."
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [type, id]
+                    properties:
+                      type: { type: string, enum: [SALE_PAYMENT, CUSTOMER_PAYMENT, SUPPLIER_PAYMENT, CASH_DEPOSIT, CARD_BATCH] }
+                      id: { type: string, description: "Id del pago/depósito; CARD_BATCH = <cuenta>:<AAAA-MM-DD>" }
+      responses:
+        '200': { description: "Movimiento con matches y fee" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Movimiento no encontrado }
+    delete:
+      tags: [Bancos]
+      summary: Deshacer la conciliación o la clasificación (vuelve a pendiente)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Movimiento pendiente otra vez }
+        '404': { description: Movimiento no encontrado }
+
   /banks/deposits:
     get:
       tags: [Bancos]

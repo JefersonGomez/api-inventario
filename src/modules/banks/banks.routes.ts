@@ -3,8 +3,9 @@ import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import {
   classifyHandler, createAccountHandler, createDepositHandler, importHandler, listAccountsHandler, listDepositsHandler,
-  transactionsHandler, updateAccountHandler,
+  transactionsHandler, updateAccountHandler, reconcileHandler, matchHandler, undoMatchHandler,
 } from "./banks.controller.ts"
+import { matchSchema, reconcileQuerySchema } from "./reconcile.service.ts"
 import { bankAccountSchema, classifySchema, depositSchema, depositsQuerySchema, importSchema, transactionsQuerySchema } from "./banks.service.ts"
 
 // Los depósitos de efectivo los registra también la jefa de caja (cash.reconcile), que necesita ver las cuentas
@@ -21,5 +22,9 @@ router.put("/accounts/:id", validate(bankAccountSchema), Authenticated, Can("ban
 router.post("/accounts/:id/import", validate(importSchema), Authenticated, Can("banks.manage"), importHandler)
 router.get("/accounts/:id/transactions", validateQuery(transactionsQuerySchema), Authenticated, Can("banks.manage"), transactionsHandler)
 router.patch("/transactions/:id", validate(classifySchema), Authenticated, Can("banks.manage"), classifyHandler)
+// conciliación (53B): sugerencias, confirmar y deshacer
+router.get("/accounts/:id/reconcile", validateQuery(reconcileQuerySchema), Authenticated, Can("banks.manage"), reconcileHandler)
+router.post("/transactions/:id/match", validate(matchSchema), Authenticated, Can("banks.manage"), matchHandler)
+router.delete("/transactions/:id/match", Authenticated, Can("banks.manage"), undoMatchHandler)
 router.get("/deposits", validateQuery(depositsQuerySchema), Authenticated, BanksOrCash, listDepositsHandler)
 router.post("/deposits", validate(depositSchema), Authenticated, BanksOrCash, createDepositHandler)

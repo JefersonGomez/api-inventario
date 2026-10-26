@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import {
   classifyTransaction, createAccount, createDeposit, importStatement, listAccounts, listDeposits, listTransactions, updateAccount,
 } from "./banks.service.ts"
+import { confirmMatch, reconcile, undoMatch } from "./reconcile.service.ts"
 import { emit, EVERYONE } from "../../shared/realtime.ts"
 
 const TOPICS = ["banks"]
@@ -27,3 +28,6 @@ export const transactionsHandler = handle((req, res) => listTransactions(req.par
 export const classifyHandler = handle((req) => classifyTransaction(req.params.id, req.body, req.user!.id), 200, TOPICS)
 export const createDepositHandler = handle((req) => createDeposit(req.body, req.user!.id), 201, TOPICS)
 export const listDepositsHandler = handle((_req, res) => listDeposits(res.locals.query))
+export const reconcileHandler = handle((req, res) => reconcile(req.params.id, res.locals.query))
+export const matchHandler = handle((req) => confirmMatch(req.params.id, req.body, req.user!.id), 200, TOPICS)
+export const undoMatchHandler = handle((req) => undoMatch(req.params.id, req.user!.id), 200, TOPICS)

@@ -1177,6 +1177,8 @@ model BankTransaction {
   reviewedById  String?
   reviewedBy    User?         @relation(fields: [reviewedById], references: [id])
   reviewedAt    DateTime?
+  fee           Decimal?      @db.Decimal(18, 2) // conciliado con liquidaciones de tarjeta: comisión = esperado − lo que entró
+  matches       BankMatch[]
   createdAt     DateTime      @default(now())
 
   @@unique([bankAccountId, date, reference, amount, description])
@@ -1201,4 +1203,29 @@ model CashDeposit {
   createdAt     DateTime    @default(now())
 
   @@index([companyId, bankAccountId, depositedAt])
+}
+
+// Conciliación (53B): qué hay en el sistema detrás de un movimiento del banco. Cada cosa del sistema se
+// concilia una sola vez (único por tipo + id). CARD_BATCH = lo cobrado con tarjeta en un día en las
+// sucursales de esa cuenta; sourceId = "<cuenta>:<AAAA-MM-DD>".
+enum BankMatchType {
+  SALE_PAYMENT // pago de una venta o reembolso de una devolución (SINPE o transferencia)
+  CUSTOMER_PAYMENT // abono de un cliente
+  SUPPLIER_PAYMENT // pago a un proveedor
+  CASH_DEPOSIT // depósito del efectivo de las cajas
+  CARD_BATCH // liquidación de tarjeta de un día
+}
+
+// Sin companyId: se crea y se lee siempre a través de su movimiento del banco
+model BankMatch {
+  id                String          @id @default(uuid())
+  bankTransactionId String
+  transaction       BankTransaction @relation(fields: [bankTransactionId], references: [id])
+  sourceType        BankMatchType
+  sourceId          String
+  amount            Decimal         @db.Decimal(18, 2) // con signo, lo que dice el sistema
+  label             String // para mostrarlo sin volver a buscarlo ("Tiquete 00100001040000000123")
+
+  @@unique([sourceType, sourceId])
+  @@index([bankTransactionId])
 }

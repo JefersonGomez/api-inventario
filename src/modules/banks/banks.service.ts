@@ -163,7 +163,7 @@ export async function listTransactions(accountId: string, f: z.infer<typeof tran
     prisma.bankTransaction.findMany({
       where,
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-      include: { reviewedBy: { select: { id: true, name: true } } },
+      include: { reviewedBy: { select: { id: true, name: true } }, matches: { select: { sourceType: true, sourceId: true, amount: true, label: true } } },
       ...pageArgs(f),
     }),
     Promise.all([
@@ -177,8 +177,9 @@ export async function listTransactions(accountId: string, f: z.infer<typeof tran
 
 // Clasificar (o quitar la clasificación) un movimiento sin pareja en el sistema
 export async function classifyTransaction(id: string, input: z.infer<typeof classifySchema>, userId: string) {
-  const t = await prisma.bankTransaction.findFirst({ where: { id } })
+  const t = await prisma.bankTransaction.findFirst({ where: { id }, include: { _count: { select: { matches: true } } } })
   if (!t) throw fail("Movimiento no encontrado", 404)
+  if (t._count.matches) throw new Error("El movimiento está conciliado: deshacé la conciliación antes de clasificarlo")
   const reviewed = input.category !== null
   const saved = await prisma.bankTransaction.update({
     where: { id },
