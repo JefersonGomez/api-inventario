@@ -3031,9 +3031,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Id'
         - { name: from, in: query, required: true, schema: { type: string, format: date } }
-        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date }, description: "Rango de hasta 3 meses" }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
       responses:
-        '200': { description: "{ transactions: [{ id, date, amount, reference, description, suggestion, candidates }], missing: [item] }; item = { type, id, date, amount (con signo), reference, label }" }
+        '200': { description: "{ items: [{ id, date, amount, reference, description, suggestion, candidates }] (una página), total, page, pageSize, pageCount, suggested (con pareja sugerida en todo el rango), missing: [item] }; item = { type, id, date, amount (con signo), reference, label }" }
         '404': { description: Cuenta no encontrada }
 
   /banks/transactions/{id}/match:

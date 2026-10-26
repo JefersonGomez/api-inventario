@@ -17,7 +17,7 @@ describe("Conciliación bancaria", () => {
   const rows = new Map<string, string>() // referencia del banco → id del movimiento
 
   const reconcile = async (who: User = admin) =>
-    (await request(app).get(`/banks/accounts/${accountId}/reconcile?from=${local(-12)}&to=${local(1)}`).set(who.auth)).body as { transactions: Row[]; missing: Suggestion[] }
+    (await request(app).get(`/banks/accounts/${accountId}/reconcile?from=${local(-12)}&to=${local(1)}`).set(who.auth)).body as { items: Row[]; missing: Suggestion[]; total: number; suggested: number }
   const match = (ref: string, items: object[], who: User = admin) =>
     request(app).post(`/banks/transactions/${rows.get(ref)}/match`).set(who.auth).send({ items })
 
@@ -70,7 +70,7 @@ describe("Conciliación bancaria", () => {
 
   it("sugiere parejas: la referencia gana, la tarjeta del día con su comisión, pagos y depósitos", async () => {
     const r = await reconcile()
-    const by = new Map(r.transactions.map((t) => [t.reference, t]))
+    const by = new Map(r.items.map((t) => [t.reference, t]))
     expect(by.get("51604453")!.suggestion).toMatchObject({ type: "SALE_PAYMENT", amount: 1130 })
     expect(by.get("999")!.suggestion).toBeNull() // el mismo monto, pero la venta ya es del otro
     expect(by.get("999")!.candidates).toHaveLength(1)
@@ -78,13 +78,14 @@ describe("Conciliación bancaria", () => {
     expect(by.get("123")!.suggestion).toMatchObject({ type: "SUPPLIER_PAYMENT", amount: -5000 })
     expect(by.get("4")!.suggestion).toMatchObject({ type: "CASH_DEPOSIT", amount: 10000 })
     expect(by.get("5")!.suggestion).toBeNull()
+    expect(r).toMatchObject({ total: 6, suggested: 4 })
     // en el sistema y no en el banco: el pago de hace 10 días
     expect(r.missing).toEqual([expect.objectContaining({ type: "SUPPLIER_PAYMENT", amount: -700 })])
   })
 
   it("confirmar: cada cosa del sistema se concilia una vez; la tarjeta guarda la comisión", async () => {
     const r = await reconcile()
-    const s = (ref: string) => r.transactions.find((t) => t.reference === ref)!.suggestion!
+    const s = (ref: string) => r.items.find((t) => t.reference === ref)!.suggestion!
     expect((await match("51604453", [s("51604453")])).status).toBe(200)
     expect((await match("999", [s("51604453")])).body.error).toMatch(/ya está conciliado/)
 
@@ -105,8 +106,18 @@ describe("Conciliación bancaria", () => {
   it("deshacer devuelve el movimiento a pendiente y libera lo del sistema", async () => {
     expect((await request(app).delete(`/banks/transactions/${rows.get("51604453")}/match`).set(admin.auth)).status).toBe(200)
     const r = await reconcile()
-    expect(r.transactions.find((t) => t.reference === "51604453")!.suggestion).toMatchObject({ type: "SALE_PAYMENT" })
-    expect(await prisma.bankMatch.count({ where: { bankTransactionId: rows.get("51604453") } })).toBe(0)
+    expect(r.items.find((t) => t.reference === "51604453")!.suggestion).toMatchObject({ type: "SALE_PAYMENT" })
+    expect(await prisma.bankMatch.count({ where: { bankTransactionId: rows.get("51604453")! } })).toBe(0)
+  })
+
+  it("pagina sin repetir parejas y limita el rango a 3 meses", async () => {
+    const page = (n: number) => request(app).get(`/banks/accounts/${accountId}/reconcile?from=${local(-12)}&to=${local(1)}&page=${n}&pageSize=2`).set(admin.auth)
+    const [a, b] = [(await page(1)).body, (await page(2)).body]
+    expect(a).toMatchObject({ total: 4, pageCount: 2, page: 1 }) // 2 ya conciliados arriba
+    expect(a.items).toHaveLength(2)
+    const ids = [...a.items, ...b.items].map((t: Row) => t.id)
+    expect(new Set(ids).size).toBe(4)
+    expect((await request(app).get(`/banks/accounts/${accountId}/reconcile?from=2026-01-01&to=2026-06-01`).set(admin.auth)).body.error).toMatch(/3 meses/)
   })
 
   it("permisos y aislamiento", async () => {

@@ -12,6 +12,7 @@ import { prisma } from "../../config/database.ts"
 import type { BankMatchType } from "../../generated/prisma/enums.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
 import { logAudit } from "../audit/audit.service.ts"
+import { pageQuery, pageResult } from "../../shared/pagination.ts"
 
 const DAY = 86_400_000
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status })
@@ -25,7 +26,8 @@ const SALE_DAYS = 3 // ± días entre el sistema y el banco
 const CARD_DAYS = 5 // la tarjeta se liquida hasta 5 días después
 const CARD_FEE = 0.1 // y puede llegar hasta 10 % menos (comisión)
 
-export const reconcileQuerySchema = z.object({ from: z.iso.date(), to: z.iso.date() })
+const MAX_DAYS = 92 // rango máximo: arma lo esperado de todo el rango en memoria
+export const reconcileQuerySchema = z.object({ page: pageQuery.page, pageSize: pageQuery.pageSize, from: z.iso.date(), to: z.iso.date() })
 export const matchSchema = z.object({
   items: z.array(z.object({
     type: z.enum(["SALE_PAYMENT", "CUSTOMER_PAYMENT", "SUPPLIER_PAYMENT", "CASH_DEPOSIT", "CARD_BATCH"]),
@@ -140,6 +142,7 @@ export async function reconcile(accountId: string, q: z.infer<typeof reconcileQu
   const from = dateOnly(q.from)
   const to = dateOnly(q.to)
   if (to < from) throw new Error("La fecha final es anterior a la inicial")
+  if ((to.getTime() - from.getTime()) / DAY > MAX_DAYS) throw new Error("Elegí un rango de hasta 3 meses")
   const [pending, items] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: { bankAccountId: accountId, reviewedAt: null, date: { gte: from, lte: to } },
@@ -169,12 +172,16 @@ export async function reconcile(accountId: string, q: z.infer<typeof reconcileQu
   const missing = items.filter(
     (i) => i.date >= q.from && i.date <= q.to && !usedI.has(key(i)) && days(today, i.date) > (i.type === "CARD_BATCH" ? CARD_DAYS : SALE_DAYS)
   )
+  // las sugerencias se calculan con todo el rango (cada pareja una sola vez); se devuelve una página
+  const page = pending.slice((q.page - 1) * q.pageSize, q.page * q.pageSize)
   return {
-    transactions: pending.map((t) => ({
-      ...t,
-      suggestion: suggested.get(t.id) ?? null,
-      candidates: candidatesOf(t.id),
-    })),
+    ...pageResult(
+      page.map((t) => ({ ...t, suggestion: suggested.get(t.id) ?? null, candidates: candidatesOf(t.id) })),
+      pending.length,
+      q
+    ),
+    suggested: suggested.size,
+    // ponytail: lo que falta en el banco va completo (suele ser poco); paginarlo si crece
     missing: missing.sort((a, b) => a.date.localeCompare(b.date)),
   }
 }
