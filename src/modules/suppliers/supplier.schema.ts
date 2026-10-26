@@ -8,6 +8,7 @@ export const supplierSchema = z
     email: z.email("Email inválido").optional().or(z.literal("")),
     phone: z.string().optional(),
     address: z.string().optional(),
+    creditDays: z.number().int().min(0).max(365).optional(), // plazo que nos da (0 = contado)
     ...fiscalIdFields,
   })
   .superRefine(checkFiscalId)

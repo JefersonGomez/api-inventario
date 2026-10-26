@@ -58,8 +58,8 @@ export async function receivePurchaseOrderHandler(
       res.status(400).json({ error: "id inválido" });
       return;
     }
-    const order = await service.receivePurchaseOrder(id, req.user!.id, req.body?.items);
-    emit(EVERYONE, ["purchase-orders", ...STOCK_TOPICS]);
+    const order = await service.receivePurchaseOrder(id, req.user!.id, req.body?.items, req.body?.invoice);
+    emit(EVERYONE, ["purchase-orders", "payables", ...STOCK_TOPICS]);
     res.json(order);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });

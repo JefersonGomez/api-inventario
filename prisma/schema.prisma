@@ -123,47 +123,49 @@ enum PurchaseOrderStatus {
 }
 
 model User {
-  id                 String            @id @default(uuid())
-  name               String
-  email              String            @unique
-  passwordHash       String
-  createdAt          DateTime          @default(now()) // Corregido: createAt -> createdAt
-  termsAcceptedAt    DateTime? // cuándo aceptó los términos y la política de privacidad
-  termsVersion       String? // versión que aceptó (src/config/legal.ts)
-  isPlatformOwner    Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
-  avatarUrl          String?
-  phone              String?
-  company            String?
-  isActive           Boolean           @default(true) // cuenta suspendida a nivel plataforma
-  plan               PlanCode          @default(BASIC)
-  isDemo             Boolean           @default(false) // cuenta de la demo pública: no cambia correo, contraseña ni código
-  lastCompanyId      String? // empresa que se abre al iniciar sesión
-  memberships        Membership[]
-  invitationsSent    Invitation[]
-  ownedCompanies     Company[]         @relation("CompanyOwner")
-  movements          StockMovement[]
-  purchaseRequests   PurchaseRequest[]
-  purchaseOrders     PurchaseOrder[]
-  transfersSent      StockTransfer[]   @relation("TransferSentBy")
-  countsCreated      StockCount[]      @relation("CountCreatedBy")
-  countsClosed       StockCount[]      @relation("CountClosedBy")
-  transfersReceived  StockTransfer[]   @relation("TransferReceivedBy")
-  auditLogs          AuditLog[]
-  refreshTokens      RefreshToken[]
-  notifications      Notification[]
-  comments           Comment[]
-  documents          Document[]
-  cashSessionsOpened CashSession[]     @relation("SessionOpenedBy")
-  cashSessionsClosed CashSession[]     @relation("SessionClosedBy")
-  cashSessionsReconciled CashSession[] @relation("SessionReconciledBy")
-  cashMovements      CashMovement[]
-  negativesReported  StockNegative[] @relation("NegativeReportedBy")
-  negativesAuthorized StockNegative[] @relation("NegativeAuthorizedBy")
-  negativesResolved  StockNegative[] @relation("NegativeResolvedBy")
-  discountsAuthorized Document[]     @relation("DiscountAuthorizedBy")
-  creditsAuthorized   Document[]     @relation("CreditAuthorizedBy")
-  returnsAuthorized   Document[]     @relation("ReturnAuthorizedBy")
-  customerPayments    CustomerPayment[]
+  id                     String            @id @default(uuid())
+  name                   String
+  email                  String            @unique
+  passwordHash           String
+  createdAt              DateTime          @default(now()) // Corregido: createAt -> createdAt
+  termsAcceptedAt        DateTime? // cuándo aceptó los términos y la política de privacidad
+  termsVersion           String? // versión que aceptó (src/config/legal.ts)
+  isPlatformOwner        Boolean           @default(false) // dueño de la plataforma; solo se activa con scripts/make-platform-owner.ts
+  avatarUrl              String?
+  phone                  String?
+  company                String?
+  isActive               Boolean           @default(true) // cuenta suspendida a nivel plataforma
+  plan                   PlanCode          @default(BASIC)
+  isDemo                 Boolean           @default(false) // cuenta de la demo pública: no cambia correo, contraseña ni código
+  lastCompanyId          String? // empresa que se abre al iniciar sesión
+  memberships            Membership[]
+  invitationsSent        Invitation[]
+  ownedCompanies         Company[]         @relation("CompanyOwner")
+  movements              StockMovement[]
+  purchaseRequests       PurchaseRequest[]
+  purchaseOrders         PurchaseOrder[]
+  transfersSent          StockTransfer[]   @relation("TransferSentBy")
+  countsCreated          StockCount[]      @relation("CountCreatedBy")
+  countsClosed           StockCount[]      @relation("CountClosedBy")
+  transfersReceived      StockTransfer[]   @relation("TransferReceivedBy")
+  auditLogs              AuditLog[]
+  refreshTokens          RefreshToken[]
+  notifications          Notification[]
+  comments               Comment[]
+  documents              Document[]
+  cashSessionsOpened     CashSession[]     @relation("SessionOpenedBy")
+  cashSessionsClosed     CashSession[]     @relation("SessionClosedBy")
+  cashSessionsReconciled CashSession[]     @relation("SessionReconciledBy")
+  cashMovements          CashMovement[]
+  negativesReported      StockNegative[]   @relation("NegativeReportedBy")
+  negativesAuthorized    StockNegative[]   @relation("NegativeAuthorizedBy")
+  negativesResolved      StockNegative[]   @relation("NegativeResolvedBy")
+  discountsAuthorized    Document[]        @relation("DiscountAuthorizedBy")
+  creditsAuthorized      Document[]        @relation("CreditAuthorizedBy")
+  returnsAuthorized      Document[]        @relation("ReturnAuthorizedBy")
+  customerPayments       CustomerPayment[]
+  supplierInvoices       SupplierInvoice[]
+  supplierPayments       SupplierPayment[]
 }
 
 model Category {
@@ -180,18 +182,21 @@ model Category {
 }
 
 model Supplier {
-  id             String          @id @default(uuid())
+  id             String            @id @default(uuid())
   companyId      String
-  company        Company         @relation(fields: [companyId], references: [id])
+  company        Company           @relation(fields: [companyId], references: [id])
   name           String
   email          String?
   phone          String?
   address        String?
   idType         IdType?
   idNumber       String? // cédula/DIMEX/NITE sin guiones
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime          @default(now())
+  creditDays     Int               @default(0) // plazo que nos da: fecha de la factura + días = vencimiento (0 = contado)
   products       Product[]
   purchaseOrders PurchaseOrder[]
+  invoices       SupplierInvoice[]
+  payments       SupplierPayment[]
 
   @@unique([companyId, name])
 }
@@ -300,6 +305,7 @@ model PurchaseOrder {
   items             PurchaseOrderItem[]
   fulfilledRequests PurchaseRequest[]
   comments          Comment[]
+  invoices          SupplierInvoice[]
 
   @@index([companyId])
 }
@@ -434,6 +440,8 @@ model Company {
   discountTypes         DiscountType[]
   installments          Installment[]
   customerPayments      CustomerPayment[]
+  supplierInvoices      SupplierInvoice[]
+  supplierPayments      SupplierPayment[]
 
   @@index([ownerId])
 }
@@ -455,9 +463,9 @@ model ProductGroup {
 
 // Cliente de la empresa (venta a su nombre, factura, crédito)
 model Customer {
-  id               String     @id @default(uuid())
+  id               String            @id @default(uuid())
   companyId        String
-  company          Company    @relation(fields: [companyId], references: [id])
+  company          Company           @relation(fields: [companyId], references: [id])
   name             String
   idType           IdType?
   idNumber         String? // sin guiones; único por empresa entre los activos (índice parcial)
@@ -465,11 +473,11 @@ model Customer {
   phone            String?
   address          String?
   economicActivity String?
-  creditLimit      Decimal?   @db.Decimal(14, 2) // null = sin crédito
+  creditLimit      Decimal?          @db.Decimal(14, 2) // null = sin crédito
   creditDays       Int? // plazo de crédito
   deletedAt        DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   documents        Document[]
   installments     Installment[]
   payments         CustomerPayment[]
@@ -481,44 +489,44 @@ model Customer {
 // borrarlo; se corrige con una nota de crédito/débito que lo referencia. Los montos de las líneas van
 // SIN IVA (el precio del producto lo incluye y se separa al emitir).
 model Document {
-  id                  String            @id @default(uuid())
-  companyId           String
-  company             Company           @relation(fields: [companyId], references: [id])
-  type                DocumentType
-  branchCode          String            @default("001") // sucursal (3 dígitos) — Bloque 4
-  terminalCode        String            @default("00001") // caja/terminal (5 dígitos) — Bloque 7
-  number              Int // consecutivo por empresa + tipo + sucursal + terminal
-  consecutive         String // formato Hacienda de 20 dígitos: sucursal + terminal + tipo + número
-  customerId          String?
-  customer            Customer?         @relation(fields: [customerId], references: [id])
-  saleCondition       SaleCondition     @default(CASH)
-  creditDays          Int?
-  currency            CurrencyCode
-  subtotal            Decimal           @db.Decimal(18, 5) // sin IVA, después de descuentos
-  discountTotal       Decimal           @db.Decimal(18, 5)
-  taxTotal            Decimal           @db.Decimal(18, 5)
-  total               Decimal           @db.Decimal(18, 5)
-  referenceDocumentId String? // nota de crédito/débito → documento que corrige
-  referenceDocument   Document?         @relation("DocumentReference", fields: [referenceDocumentId], references: [id])
-  referencedBy        Document[]        @relation("DocumentReference")
-  referenceReason     String?
-  notes               String?
-  createdById         String
-  createdBy           User              @relation(fields: [createdById], references: [id])
+  id                     String            @id @default(uuid())
+  companyId              String
+  company                Company           @relation(fields: [companyId], references: [id])
+  type                   DocumentType
+  branchCode             String            @default("001") // sucursal (3 dígitos) — Bloque 4
+  terminalCode           String            @default("00001") // caja/terminal (5 dígitos) — Bloque 7
+  number                 Int // consecutivo por empresa + tipo + sucursal + terminal
+  consecutive            String // formato Hacienda de 20 dígitos: sucursal + terminal + tipo + número
+  customerId             String?
+  customer               Customer?         @relation(fields: [customerId], references: [id])
+  saleCondition          SaleCondition     @default(CASH)
+  creditDays             Int?
+  currency               CurrencyCode
+  subtotal               Decimal           @db.Decimal(18, 5) // sin IVA, después de descuentos
+  discountTotal          Decimal           @db.Decimal(18, 5)
+  taxTotal               Decimal           @db.Decimal(18, 5)
+  total                  Decimal           @db.Decimal(18, 5)
+  referenceDocumentId    String? // nota de crédito/débito → documento que corrige
+  referenceDocument      Document?         @relation("DocumentReference", fields: [referenceDocumentId], references: [id])
+  referencedBy           Document[]        @relation("DocumentReference")
+  referenceReason        String?
+  notes                  String?
+  createdById            String
+  createdBy              User              @relation(fields: [createdById], references: [id])
   discountAuthorizedById String? // encargado que autorizó los descuentos (POS, con su código)
-  discountAuthorizedBy   User?          @relation("DiscountAuthorizedBy", fields: [discountAuthorizedById], references: [id])
+  discountAuthorizedBy   User?             @relation("DiscountAuthorizedBy", fields: [discountAuthorizedById], references: [id])
   creditAuthorizedById   String? // encargado que autorizó la venta a crédito (POS, con su código)
-  creditAuthorizedBy     User?          @relation("CreditAuthorizedBy", fields: [creditAuthorizedById], references: [id])
+  creditAuthorizedBy     User?             @relation("CreditAuthorizedBy", fields: [creditAuthorizedById], references: [id])
   returnAuthorizedById   String? // nota de crédito: encargado que autorizó la devolución (con su código)
-  returnAuthorizedBy     User?          @relation("ReturnAuthorizedBy", fields: [returnAuthorizedById], references: [id])
+  returnAuthorizedBy     User?             @relation("ReturnAuthorizedBy", fields: [returnAuthorizedById], references: [id])
   installments           Installment[]
-  issuedAt            DateTime          @default(now())
-  cashSessionId       String? // turno de caja donde se vendió (POS)
-  clientSaleId        String? // id que generó la caja (8B): si la venta llega dos veces, no se duplica
-  cashSession         CashSession?      @relation(fields: [cashSessionId], references: [id])
-  lines               DocumentLine[]
-  negatives           StockNegative[]
-  payments            DocumentPayment[]
+  issuedAt               DateTime          @default(now())
+  cashSessionId          String? // turno de caja donde se vendió (POS)
+  clientSaleId           String? // id que generó la caja (8B): si la venta llega dos veces, no se duplica
+  cashSession            CashSession?      @relation(fields: [cashSessionId], references: [id])
+  lines                  DocumentLine[]
+  negatives              StockNegative[]
+  payments               DocumentPayment[]
 
   @@unique([companyId, type, branchCode, terminalCode, number])
   @@unique([companyId, clientSaleId])
@@ -526,29 +534,29 @@ model Document {
 }
 
 model DocumentLine {
-  id          String        @id @default(uuid())
-  documentId  String
-  document    Document      @relation(fields: [documentId], references: [id])
-  lineNumber  Int
-  productId   String?
-  product     Product?      @relation(fields: [productId], references: [id])
-  description String
-  cabys       String?
-  unit        UnitOfMeasure
-  quantity    Decimal       @db.Decimal(14, 3)
-  unitPrice   Decimal       @db.Decimal(18, 5) // sin IVA
-  discount    Decimal       @db.Decimal(18, 5) // monto, sin IVA
-  discountLabel String? // naturaleza del descuento (Hacienda): el tipo de descuento usado
-  unitCost      Decimal?      @db.Decimal(12, 4) // costo promedio del producto al vender (para la ganancia); null = sin costo conocido
+  id              String           @id @default(uuid())
+  documentId      String
+  document        Document         @relation(fields: [documentId], references: [id])
+  lineNumber      Int
+  productId       String?
+  product         Product?         @relation(fields: [productId], references: [id])
+  description     String
+  cabys           String?
+  unit            UnitOfMeasure
+  quantity        Decimal          @db.Decimal(14, 3)
+  unitPrice       Decimal          @db.Decimal(18, 5) // sin IVA
+  discount        Decimal          @db.Decimal(18, 5) // monto, sin IVA
+  discountLabel   String? // naturaleza del descuento (Hacienda): el tipo de descuento usado
+  unitCost        Decimal?         @db.Decimal(12, 4) // costo promedio del producto al vender (para la ganancia); null = sin costo conocido
   // nota de crédito: la línea de la venta que se devuelve y en qué estado volvió el producto
   sourceLineId    String?
   sourceLine      DocumentLine?    @relation("LineReturns", fields: [sourceLineId], references: [id])
   returns         DocumentLine[]   @relation("LineReturns")
   returnCondition ReturnCondition?
-  taxRate     TaxRate
-  taxAmount   Decimal       @db.Decimal(18, 5)
-  subtotal    Decimal       @db.Decimal(18, 5) // quantity × unitPrice − discount
-  total       Decimal       @db.Decimal(18, 5) // subtotal + taxAmount
+  taxRate         TaxRate
+  taxAmount       Decimal          @db.Decimal(18, 5)
+  subtotal        Decimal          @db.Decimal(18, 5) // quantity × unitPrice − discount
+  total           Decimal          @db.Decimal(18, 5) // subtotal + taxAmount
 
   @@unique([documentId, lineNumber])
 }
@@ -814,19 +822,19 @@ model DailySummary {
 
 // Caja (terminal) de una sucursal (Bloque 7). El terminalCode (5 dígitos) va en el consecutivo de sus tiquetes.
 model CashRegister {
-  id           String        @id @default(uuid())
-  companyId    String
-  company      Company       @relation(fields: [companyId], references: [id])
-  locationId   String
-  location     Location      @relation(fields: [locationId], references: [id])
-  name         String
-  terminalCode String // "00001", único por sucursal
-  ticketWidth  Int           @default(80) // tiquete térmico: 80 o 58 mm
-  customerDisplay Boolean      @default(false) // segunda pantalla mirando al cliente
-  isActive     Boolean       @default(true)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  sessions     CashSession[]
+  id              String        @id @default(uuid())
+  companyId       String
+  company         Company       @relation(fields: [companyId], references: [id])
+  locationId      String
+  location        Location      @relation(fields: [locationId], references: [id])
+  name            String
+  terminalCode    String // "00001", único por sucursal
+  ticketWidth     Int           @default(80) // tiquete térmico: 80 o 58 mm
+  customerDisplay Boolean       @default(false) // segunda pantalla mirando al cliente
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  sessions        CashSession[]
 
   @@unique([locationId, terminalCode])
   @@index([companyId])
@@ -840,33 +848,33 @@ enum CashSessionStatus {
 // Turno de caja: se abre con el código del cajero y un monto inicial y se cierra con arqueo.
 // Una abierta por caja y una por persona a la vez (índices únicos parciales en la migración).
 model CashSession {
-  id            String            @id @default(uuid())
-  companyId     String
-  company       Company           @relation(fields: [companyId], references: [id])
-  registerId    String
-  register      CashRegister      @relation(fields: [registerId], references: [id])
-  openedById    String
-  openedBy      User              @relation("SessionOpenedBy", fields: [openedById], references: [id])
-  openingAmount Decimal           @db.Decimal(18, 2)
-  status        CashSessionStatus @default(OPEN)
-  openedAt      DateTime          @default(now())
-  closedById    String?
-  closedBy      User?             @relation("SessionClosedBy", fields: [closedById], references: [id])
-  closedAt      DateTime?
-  expectedCash  Decimal?          @db.Decimal(18, 2) // al cerrar: inicial + ventas en efectivo + entradas − retiros − devoluciones
-  countedCash   Decimal?          @db.Decimal(18, 2)
-  difference    Decimal?          @db.Decimal(18, 2) // contado − esperado (negativo = faltante)
-  denominations Json? // conteo por denominación { "20000": 3, ... }
-  closingNote   String?
+  id               String            @id @default(uuid())
+  companyId        String
+  company          Company           @relation(fields: [companyId], references: [id])
+  registerId       String
+  register         CashRegister      @relation(fields: [registerId], references: [id])
+  openedById       String
+  openedBy         User              @relation("SessionOpenedBy", fields: [openedById], references: [id])
+  openingAmount    Decimal           @db.Decimal(18, 2)
+  status           CashSessionStatus @default(OPEN)
+  openedAt         DateTime          @default(now())
+  closedById       String?
+  closedBy         User?             @relation("SessionClosedBy", fields: [closedById], references: [id])
+  closedAt         DateTime?
+  expectedCash     Decimal?          @db.Decimal(18, 2) // al cerrar: inicial + ventas en efectivo + entradas − retiros − devoluciones
+  countedCash      Decimal?          @db.Decimal(18, 2)
+  difference       Decimal?          @db.Decimal(18, 2) // contado − esperado (negativo = faltante)
+  denominations    Json? // conteo por denominación { "20000": 3, ... }
+  closingNote      String?
   // arqueo (segundo paso, la jefa de caja con el cajero): cierre ciego, el cajero no ve el esperado
-  reconciledById String?
-  reconciledBy   User?             @relation("SessionReconciledBy", fields: [reconciledById], references: [id])
-  reconciledAt   DateTime?
-  cardDeclared   Decimal?          @db.Decimal(18, 2) // total del cierre en papel del datáfono (opcional, para comparar)
-  sinpeDeclared  Decimal?          @db.Decimal(18, 2) // total de SINPE que entró según la app del banco (opcional, para comparar)
-  reconcileNote  String?
-  documents     Document[]
-  movements     CashMovement[]
+  reconciledById   String?
+  reconciledBy     User?             @relation("SessionReconciledBy", fields: [reconciledById], references: [id])
+  reconciledAt     DateTime?
+  cardDeclared     Decimal?          @db.Decimal(18, 2) // total del cierre en papel del datáfono (opcional, para comparar)
+  sinpeDeclared    Decimal?          @db.Decimal(18, 2) // total de SINPE que entró según la app del banco (opcional, para comparar)
+  reconcileNote    String?
+  documents        Document[]
+  movements        CashMovement[]
   customerPayments CustomerPayment[]
 
   @@index([companyId, status])
@@ -930,29 +938,29 @@ enum NegativeStatus {
 // Negativa: venta de un producto que el sistema tenía sin stock suficiente (descuadre de inventario).
 // La autoriza un encargado con su código en la caja; inventario la revisa y la resuelve (conteo/ajuste).
 model StockNegative {
-  id               String         @id @default(uuid())
-  companyId        String
-  company          Company        @relation(fields: [companyId], references: [id])
-  productId        String
-  product          Product        @relation(fields: [productId], references: [id])
-  locationId       String
-  location         Location       @relation(fields: [locationId], references: [id])
-  documentId       String
-  document         Document       @relation(fields: [documentId], references: [id])
-  quantity         Decimal        @db.Decimal(14, 3) // lo vendido de más (lo que quedó en negativo)
-  stockBefore      Decimal        @db.Decimal(14, 3) // lo que decía el sistema antes de la venta
-  reportedById     String // el cajero
-  reportedBy       User           @relation("NegativeReportedBy", fields: [reportedById], references: [id])
-  authorizedById   String? // el encargado que dio su código (null = venta sin conexión, sin código)
-  authorizedBy     User?          @relation("NegativeAuthorizedBy", fields: [authorizedById], references: [id])
-  offline          Boolean        @default(false) // vendida sin conexión: nadie la autorizó, se revisa después
-  status           NegativeStatus @default(OPEN)
-  resolvedById     String?
-  resolvedBy       User?          @relation("NegativeResolvedBy", fields: [resolvedById], references: [id])
-  resolvedAt       DateTime?
-  resolution       String? // qué se encontró / qué se hizo
-  countedQuantity  Decimal?       @db.Decimal(14, 3) // si al resolver se contó: cantidad real en la sucursal
-  createdAt        DateTime       @default(now())
+  id              String         @id @default(uuid())
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id])
+  productId       String
+  product         Product        @relation(fields: [productId], references: [id])
+  locationId      String
+  location        Location       @relation(fields: [locationId], references: [id])
+  documentId      String
+  document        Document       @relation(fields: [documentId], references: [id])
+  quantity        Decimal        @db.Decimal(14, 3) // lo vendido de más (lo que quedó en negativo)
+  stockBefore     Decimal        @db.Decimal(14, 3) // lo que decía el sistema antes de la venta
+  reportedById    String // el cajero
+  reportedBy      User           @relation("NegativeReportedBy", fields: [reportedById], references: [id])
+  authorizedById  String? // el encargado que dio su código (null = venta sin conexión, sin código)
+  authorizedBy    User?          @relation("NegativeAuthorizedBy", fields: [authorizedById], references: [id])
+  offline         Boolean        @default(false) // vendida sin conexión: nadie la autorizó, se revisa después
+  status          NegativeStatus @default(OPEN)
+  resolvedById    String?
+  resolvedBy      User?          @relation("NegativeResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt      DateTime?
+  resolution      String? // qué se encontró / qué se hizo
+  countedQuantity Decimal?       @db.Decimal(14, 3) // si al resolver se contó: cantidad real en la sucursal
+  createdAt       DateTime       @default(now())
 
   @@index([companyId, status])
 }
@@ -1012,4 +1020,68 @@ model CustomerPayment {
 enum ReturnCondition {
   GOOD
   DAMAGED
+}
+
+// Cuentas por pagar (Bloque 10, punto 52). Factura del proveedor: se registra al recibir una orden
+// (purchaseOrderId) o suelta (fletes, servicios). Montos con IVA como vienen en la factura; el IVA queda
+// aparte para el crédito fiscal (punto 54). El número no se repite por proveedor entre las vigentes
+// (índice único parcial en la migración). Anular solo sin pagos.
+model SupplierInvoice {
+  id              String                      @id @default(uuid())
+  companyId       String
+  company         Company                     @relation(fields: [companyId], references: [id])
+  supplierId      String
+  supplier        Supplier                    @relation(fields: [supplierId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder?              @relation(fields: [purchaseOrderId], references: [id])
+  number          String
+  issueDate       DateTime                    @db.Date
+  dueDate         DateTime                    @db.Date
+  subtotal        Decimal                     @db.Decimal(18, 2)
+  tax             Decimal                     @db.Decimal(18, 2)
+  total           Decimal                     @db.Decimal(18, 2)
+  paid            Decimal                     @default(0) @db.Decimal(18, 2)
+  note            String?
+  voidedAt        DateTime?
+  voidReason      String?
+  notifiedAt      DateTime? // aviso de "por vencer" ya enviado
+  createdById     String
+  createdBy       User                        @relation(fields: [createdById], references: [id])
+  createdAt       DateTime                    @default(now())
+  allocations     SupplierPaymentAllocation[]
+
+  @@index([companyId, supplierId, dueDate])
+  @@index([purchaseOrderId])
+}
+
+// Pago a un proveedor: puede cubrir varias facturas (allocations), de la que vence primero a la última
+model SupplierPayment {
+  id          String                      @id @default(uuid())
+  companyId   String
+  company     Company                     @relation(fields: [companyId], references: [id])
+  supplierId  String
+  supplier    Supplier                    @relation(fields: [supplierId], references: [id])
+  amount      Decimal                     @db.Decimal(18, 2)
+  method      PaymentMethod
+  reference   String?
+  paidAt      DateTime                    @db.Date
+  note        String?
+  userId      String
+  user        User                        @relation(fields: [userId], references: [id])
+  createdAt   DateTime                    @default(now())
+  allocations SupplierPaymentAllocation[]
+
+  @@index([companyId, supplierId])
+}
+
+// Sin companyId: se crean y leen siempre a través de su pago
+model SupplierPaymentAllocation {
+  id        String          @id @default(uuid())
+  paymentId String
+  payment   SupplierPayment @relation(fields: [paymentId], references: [id])
+  invoiceId String
+  invoice   SupplierInvoice @relation(fields: [invoiceId], references: [id])
+  amount    Decimal         @db.Decimal(18, 2)
+
+  @@index([invoiceId])
 }

@@ -1,6 +1,7 @@
 // purchase-order.schema.ts
 import { z } from "zod";
 import { pageQuery } from "../../shared/pagination.ts";
+import { receiveInvoiceSchema } from "../payables/payables.service.ts";
 
 // GET /purchase-orders: más recientes primero. q busca por proveedor o por el N.º de orden (inicio del id)
 export const purchaseOrderListQuerySchema = z.object({
@@ -28,9 +29,13 @@ export const createPurchaseOrderSchema = z.object({
     locationId: z.uuid().optional(), // a dónde entra la mercadería al recibirla
 });
 
-// Recepción en partes: lo que llegó de cada línea. Sin cuerpo = todo lo pendiente.
+// Recepción en partes: lo que llegó de cada línea. Sin items = todo lo pendiente.
+// invoice: la factura del proveedor que vino con la mercadería (Cuentas por pagar); opcional.
 export const receivePurchaseOrderSchema = z
-  .object({ items: z.array(z.object({ itemId: z.uuid(), quantity: z.number().min(0), lot: lotSchema.optional() })).min(1) })
+  .object({
+    items: z.array(z.object({ itemId: z.uuid(), quantity: z.number().min(0), lot: lotSchema.optional() })).min(1).optional(),
+    invoice: receiveInvoiceSchema.optional(),
+  })
   .optional();
 export const cancelPurchaseOrderSchema = z.object({ reason: z.string().trim().min(1, "Indica el motivo").max(300) });
 export const closePurchaseOrderSchema = z.object({ reason: z.string().trim().max(300).optional() }).optional();

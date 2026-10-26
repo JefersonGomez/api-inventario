@@ -4,6 +4,7 @@ import { assertEnv } from "./config/env.ts"
 import app from "./app.js"
 import { initRealtime } from "./shared/realtime.ts"
 import { notifyOverdue } from "./modules/receivables/receivables.service.ts"
+import { notifyPayablesDue } from "./modules/payables/payables.service.ts"
 
 // falla al arrancar (con un mensaje claro) si falta algo crítico
 assertEnv()
@@ -20,3 +21,7 @@ httpServer.listen(port, () => {
 const overdue = () => notifyOverdue().catch((e) => console.error("avisos de cuotas vencidas:", e))
 overdue()
 setInterval(overdue, 3_600_000).unref()
+// facturas de proveedores por vencer: igual
+const payablesDue = () => notifyPayablesDue().catch((e) => console.error("avisos de facturas por vencer:", e))
+payablesDue()
+setInterval(payablesDue, 3_600_000).unref()

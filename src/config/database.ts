@@ -22,7 +22,7 @@ const TENANT_MODELS = new Set([
   "ProductGroup", "Customer", "Document", "DocumentSequence",
   "Location", "ProductStock", "StockTransfer", "StockCount", "ProductLot", "DailySummary",
   "CashRegister", "CashSession", "CashMovement", "StockNegative", "DiscountType",
-  "Installment", "CustomerPayment",
+  "Installment", "CustomerPayment", "SupplierInvoice", "SupplierPayment",
   // DocumentLine y DocumentPayment no tienen companyId: se crean y leen siempre a través de su Document
 ])
 

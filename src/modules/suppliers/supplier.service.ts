@@ -5,8 +5,9 @@ import { catalogResult, contains, type CatalogQuery } from "../../shared/paginat
 import type { Prisma } from "../../generated/prisma/client.ts";
 
 // crear y editar mandan el proveedor completo ("" o ausente = sin dato)
-const toData = ({ name, email, phone, address, idType, idNumber }: SupplierInput) => ({
+const toData = ({ name, email, phone, address, idType, idNumber, creditDays }: SupplierInput) => ({
   name,
+  creditDays: creditDays ?? 0,
   email: email || null,
   phone: phone || null,
   address: address || null,
@@ -71,12 +72,13 @@ export async function updateSupplier(id: string, input: SupplierInput) {
 // El borrado es físico: con productos activos los dejaría sin proveedor en silencio (FK SET NULL)
 // y con órdenes fallaría con un error genérico. Se rechaza y se dice por qué.
 export async function deleteSupplier(id: string) {
-  const [products, orders] = await Promise.all([
+  const [products, orders, invoices] = await Promise.all([
     prisma.product.count({ where: { supplierId: id, deletedAt: null } }),
     prisma.purchaseOrder.count({ where: { supplierId: id } }),
+    prisma.supplierInvoice.count({ where: { supplierId: id } }),
   ])
-  if (products || orders) {
-    throw new Error(`No se puede eliminar: tiene ${products} producto(s) y ${orders} orden(es) de compra asociados`)
+  if (products || orders || invoices) {
+    throw new Error(`No se puede eliminar: tiene ${products} producto(s), ${orders} orden(es) de compra y ${invoices} factura(s) asociados`)
   }
   const deletedSupplier = await prisma.supplier.delete({ where: { id } })
   return deletedSupplier

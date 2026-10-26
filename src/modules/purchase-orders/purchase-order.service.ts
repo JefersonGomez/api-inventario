@@ -12,6 +12,8 @@ import { assertQuantityForUnit, formatQuantity } from "../../shared/units.ts";
 import { contains, pageArgs, pageResult } from "../../shared/pagination.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
 import type { PurchaseOrderListQuery, ReceiveLine } from "./purchase-order.schema.ts";
+import { createInvoice, type ReceiveInvoice } from "../payables/payables.service.ts";
+import { TAX_PERCENT } from "../../shared/fiscal.ts";
 
 export async function createPurchaseOrder(
   supplierId: string,
@@ -141,11 +143,11 @@ const ORDER_INCLUDE = {
 // Recepción (en partes, decisión del usuario del 16-oct-2026): cada recepción anota lo que llegó por
 // línea (sin items = todo lo pendiente). La orden queda PARTIAL hasta completarse (RECEIVED). Cada parte
 // entra a la ubicación de la orden con su movimiento y recalcula el costo promedio con lo que llegó.
-export async function receivePurchaseOrder(id: string, userId: string, lines?: ReceiveLine[]) {
+export async function receivePurchaseOrder(id: string, userId: string, lines?: ReceiveLine[], invoice?: ReceiveInvoice) {
   await prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
       where: { id },
-      include: { items: { include: { product: { select: { name: true, unit: true } } } } },
+      include: { items: { include: { product: { select: { name: true, unit: true, taxRate: true } } } } },
     });
 
     if (!order) {
@@ -224,6 +226,13 @@ export async function receivePurchaseOrder(id: string, userId: string, lines?: R
       })),
       tx
     );
+
+    // la factura del proveedor: sin montos, sale de lo que llegó (costo de la orden + IVA de cada producto)
+    if (invoice) {
+      const subtotal = arriving.reduce((s, a) => s + a.qty * Number(a.item.unitCost), 0);
+      const tax = arriving.reduce((s, a) => s + a.qty * Number(a.item.unitCost) * TAX_PERCENT[a.item.product.taxRate] / 100, 0);
+      await createInvoice(tx, { ...invoice, supplierId: order.supplierId, purchaseOrderId: id, subtotal: invoice.subtotal ?? subtotal, tax: invoice.tax ?? tax }, userId);
+    }
 
     await logAudit(userId, "RECEIVE", "PurchaseOrder", id, { lines: arriving.map((a) => ({ itemId: a.item.id, quantity: a.qty })), complete }, tx);
   });

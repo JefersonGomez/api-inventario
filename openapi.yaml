@@ -66,6 +66,7 @@ tags:
   - name: Clientes
   - name: Punto de venta
   - name: Cuentas por cobrar
+  - name: Cuentas por pagar
   - name: Ventas
   - name: Productos base
   - name: Solicitudes de compra
@@ -391,6 +392,7 @@ components:
         address: { type: string, nullable: true }
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true }
+        creditDays: { type: integer }
         createdAt: { type: string, format: date-time }
 
     SupplierInput:
@@ -403,6 +405,7 @@ components:
         address: { type: string }
         idType: { $ref: '#/components/schemas/IdType' }
         idNumber: { type: string, nullable: true }
+        creditDays: { type: integer, minimum: 0, maximum: 365, description: "Días de crédito que da el proveedor (0 = contado; ausente = 0)" }
 
     Customer:
       type: object
@@ -2800,6 +2803,107 @@ paths:
         "200": { description: Últimas 100 acciones }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /payables:
+    get:
+      tags: [Cuentas por pagar]
+      summary: Proveedores con saldo, lo vencido primero (payables.manage, paginado)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: overdue, in: query, schema: { type: string, enum: ['1', '0'] }, description: "1 = solo con facturas vencidas" }
+      responses:
+        '200': { description: "{ items: [{ supplier, balance, overdue, invoices, nextDue, aging }], total, page, pageSize, totals: { balance, overdue, aging } }; aging = { current, d30, d60, d90, over90 } por días de atraso" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /payables/invoices:
+    get:
+      tags: [Cuentas por pagar]
+      summary: Facturas de proveedores (abiertas por defecto, las que vencen primero arriba)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Q'
+        - { name: status, in: query, schema: { type: string, enum: [open, overdue, paid, void], default: open } }
+        - { name: supplierId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: "{ items: [SupplierInvoice + supplier { id, name }], total, page, pageSize }" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Cuentas por pagar]
+      summary: Registrar una factura suelta o de una orden ya recibida
+      description: "Montos con IVA aparte (total = subtotal + tax). Sin dueDate = issueDate + días de crédito del proveedor. El número no se repite por proveedor entre las vigentes."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplierId, number, issueDate, subtotal, tax]
+              properties:
+                supplierId: { type: string, format: uuid }
+                purchaseOrderId: { type: string, format: uuid, description: "Debe ser del mismo proveedor" }
+                number: { type: string, maxLength: 50 }
+                issueDate: { type: string, format: date }
+                dueDate: { type: string, format: date }
+                subtotal: { type: number, minimum: 0 }
+                tax: { type: number, minimum: 0 }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Factura registrada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Proveedor u orden no encontrados }
+
+  /payables/invoices/{id}/void:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Anular una factura mal registrada (solo sin pagos; libera el número)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 200 } } }
+      responses:
+        '200': { description: Factura anulada }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Factura no encontrada }
+
+  /payables/payments:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Registrar un pago a un proveedor
+      description: "Se aplica a las facturas abiertas de la que vence primero a la última (o solo a invoiceIds). reference obligatoria salvo en efectivo; no puede superar el saldo. No toca la caja. Devuelve el pago con allocations [{ amount, invoice { id, number } }]."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplierId, amount, method]
+              properties:
+                supplierId: { type: string, format: uuid }
+                amount: { type: number }
+                method: { type: string, enum: [CASH, CARD, SINPE, TRANSFER, OTHER] }
+                reference: { type: string, maxLength: 60 }
+                paidAt: { type: string, format: date, description: "Por defecto hoy" }
+                note: { type: string, maxLength: 200 }
+                invoiceIds: { type: array, items: { type: string, format: uuid } }
+      responses:
+        '201': { description: Pago registrado }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { description: Proveedor no encontrado }
+
+  /payables/{id}:
+    get:
+      tags: [Cuentas por pagar]
+      summary: Estado de cuenta con un proveedor (id del proveedor)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: "{ supplier, balance, overdue, invoices (últimas 100, con anuladas), payments (últimos 50, con allocations y user) }" }
+        '404': { description: Proveedor no encontrado }
+
   /customers:
     get:
       tags: [Clientes]
@@ -3217,6 +3321,17 @@ paths:
                       itemId: { type: string, format: uuid }
                       quantity: { type: number, minimum: 0, description: No más de lo que falta }
                       lot: { $ref: '#/components/schemas/LotInput' }
+                invoice:
+                  description: "Factura del proveedor (Cuentas por pagar), opcional. Sin subtotal/tax se calculan con lo que llega (costo de la orden + IVA de cada producto); sin dueDate = issueDate + días de crédito del proveedor. Número repetido del proveedor = 400 y no se recibe nada."
+                  type: object
+                  required: [number, issueDate]
+                  properties:
+                    number: { type: string, maxLength: 50 }
+                    issueDate: { type: string, format: date }
+                    dueDate: { type: string, format: date }
+                    subtotal: { type: number, minimum: 0 }
+                    tax: { type: number, minimum: 0 }
+                    note: { type: string, maxLength: 200 }
       responses:
         '200':
           description: Orden con lo recibido
