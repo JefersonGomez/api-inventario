@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { getLowStockReport, getMovementsReport, getInventoryValueReport,getInventoryValueBreakdown,getStockForecast, getDashboardSummary } from "./report.service.ts";
 import { getDailySummary, peekDailySummary, summaryHistory } from "./daily-summary.service.ts";
 import { getMySales, getSalesReport, getSalesToday } from "./sales-report.service.ts";
+import { getVatReport, saveVatPeriod } from "./vat-report.service.ts";
 
 export async function getDashboardController(req: Request, res: Response) {
   try {
@@ -118,3 +119,6 @@ const reply = (fn: (req: Request, res: Response) => Promise<unknown>) => async (
 export const salesReportHandler = reply((req, res) => getSalesReport(res.locals.query, req.user!));
 export const salesTodayHandler = reply(() => getSalesToday());
 export const mySalesHandler = reply((req, res) => getMySales(res.locals.query, req.user!.id));
+// IVA del mes (54B)
+export const vatReportHandler = reply((_req, res) => getVatReport(res.locals.query));
+export const saveVatPeriodHandler = reply((req, res) => saveVatPeriod(res.locals.query.month, req.body, req.user!.id));

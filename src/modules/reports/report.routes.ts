@@ -5,10 +5,11 @@ import {
   getMovementsReportController,
   getInventoryValueController,getInventoryValueBreakdownHandler,getStockForecastHandler,
   getDashboardController, peekDailySummaryHandler, dailySummaryHandler, summaryHistoryHandler,
-  mySalesHandler, salesReportHandler, salesTodayHandler,
+  mySalesHandler, salesReportHandler, salesTodayHandler, vatReportHandler, saveVatPeriodHandler,
 } from "./report.controller.ts";
 import { movementsReportQuerySchema, mySalesQuerySchema, salesReportQuerySchema } from "./sales-report.service.ts";
-import { validateQuery } from "../../middlewares/validate.middleware.ts";
+import { vatPeriodSchema, vatReportQuerySchema } from "./vat-report.service.ts";
+import { validate, validateQuery } from "../../middlewares/validate.middleware.ts";
 import { dailySummaryQuerySchema, summaryHistorySchema } from "./daily-summary.service.ts";
 
 export const router = Router();
@@ -29,3 +30,6 @@ router.get("/daily-summaries", validateQuery(summaryHistorySchema), Authenticate
 router.get("/sales", validateQuery(salesReportQuerySchema), Authenticated, Can("reports.view"), salesReportHandler);
 router.get("/sales-today", Authenticated, Can("reports.view"), salesTodayHandler);
 router.get("/my-sales", validateQuery(mySalesQuerySchema), Authenticated, Can("sales.sell"), mySalesHandler);
+// IVA del mes (54B): ?month=AAAA-MM; PUT guarda la prorrata y la retención de tarjeta de ese mes
+router.get("/vat", validateQuery(vatReportQuerySchema), Authenticated, Can("accounting.view"), vatReportHandler);
+router.put("/vat", validateQuery(vatReportQuerySchema), validate(vatPeriodSchema), Authenticated, Can("accounting.view"), saveVatPeriodHandler);

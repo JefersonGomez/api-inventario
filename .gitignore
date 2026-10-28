@@ -5,3 +5,6 @@ dist
 uploads/avatars/*
 !uploads/avatars/.gitkeep
 .env.test
+
+# respaldos de la base (pg_dump): datos reales, nunca al repo
+backups/

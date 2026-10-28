@@ -2746,6 +2746,45 @@ paths:
         '200': { description: "{ month, gross, returns, net, tickets, returnsCount, byDay }" }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /reports/vat:
+    get:
+      tags: [Reportes]
+      summary: IVA del mes, Formulario 150 (accounting.view)
+      description: |
+        Guía para el contador, de toda la empresa. I. Ventas por tarifa (tiquetes, facturas y notas de débito menos las
+        notas de crédito; base sin IVA). II. Compras por tarifa de las facturas de proveedor del mes (por fecha de la
+        factura, sin anuladas), separadas en acreditables y no acreditables. III. Liquidación: débito fiscal − crédito fiscal
+        (IVA acreditable × prorrata) − retenciones de IVA por tarjeta. La prorrata de un mes sin anotar se hereda del
+        último mes que la tenga. Respuesta { month, sales: { rows, totals }, purchases: { creditable, nonCreditable, invoices },
+        prorata: { value, source: month|inherited|none, inheritedFrom?, applies, suggestedMonth, suggestedLastYear },
+        liquidation: { debit, creditableTax, credit, cardWithholding, balance, toPay, inFavor }, period }.
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, description: "AAAA-MM" }
+      responses:
+        '200': { description: Reporte del mes }
+        '400': { description: Mes inválido }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Reportes]
+      summary: Anotar la prorrata y la retención de tarjeta del mes (accounting.view)
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, description: "AAAA-MM" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prorata, cardWithholding]
+              properties:
+                prorata: { type: number, nullable: true, minimum: 0, maximum: 100, description: "% de crédito fiscal usable; null = no aplica (100 %)" }
+                cardWithholding: { type: number, minimum: 0, description: Retenciones de IVA por ventas con tarjeta }
+                note: { type: string, nullable: true, maxLength: 500 }
+      responses:
+        '200': { description: Lo guardado (VatPeriod) }
+        '400': { description: Datos inválidos }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /reports/daily-summaries:
     get:
       tags: [Reportes]

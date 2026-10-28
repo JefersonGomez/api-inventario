@@ -168,6 +168,7 @@ model User {
   supplierPayments       SupplierPayment[]
   bankImports            BankImport[]
   cashDeposits           CashDeposit[]
+  vatPeriods             VatPeriod[]
   bankReviews            BankTransaction[]
 }
 
@@ -451,6 +452,7 @@ model Company {
   bankTransactions      BankTransaction[]
   bankImports           BankImport[]
   cashDeposits          CashDeposit[]
+  vatPeriods            VatPeriod[]
 
   @@index([ownerId])
 }
@@ -1115,6 +1117,24 @@ model SupplierInvoiceTax {
   tax       Decimal         @db.Decimal(18, 2)
 
   @@unique([invoiceId, rate])
+}
+
+// IVA del mes (punto 54B, Formulario 150): lo que el sistema no sabe y se anota a mano por mes.
+// prorrata: % del crédito fiscal que se puede usar si hay ventas gravadas y exentas (anual, la fija el contador);
+// null = no aplica (100 %). Un mes sin fila hereda la prorrata del último mes guardado.
+model VatPeriod {
+  id              String   @id @default(uuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id])
+  period          String // AAAA-MM
+  prorata         Decimal? @db.Decimal(5, 2)
+  cardWithholding Decimal  @default(0) @db.Decimal(18, 2) // retenciones de IVA por ventas con tarjeta (del estado del datáfono)
+  note            String?
+  updatedById     String
+  updatedBy       User     @relation(fields: [updatedById], references: [id])
+  updatedAt       DateTime @updatedAt
+
+  @@unique([companyId, period])
 }
 
 // Bancos (Bloque 10, punto 53; decisiones del usuario del 25-oct-2026). Cuentas de la empresa en
