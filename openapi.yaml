@@ -2785,6 +2785,23 @@ paths:
         '400': { description: Datos inválidos }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /reports/accountant-package:
+    get:
+      tags: [Reportes]
+      summary: Paquete para el contador del mes (accounting.view)
+      description: |
+        Todo el mes para que el frontend lo descargue en un Excel. Respuesta { month, company, vat (lo mismo que
+        GET /reports/vat), sales: { documents, totals }, banks }. Ventas: un renglón por comprobante (tiquetes, facturas,
+        notas) con base e IVA por tarifa y medios de pago; las notas de crédito en negativo y con el consecutivo que
+        corrigen. Bancos: por cuenta, los movimientos del mes con status MATCHED (y con qué), CLASSIFIED (category)
+        o PENDING, más créditos, débitos y pendientes.
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, description: "AAAA-MM" }
+      responses:
+        '200': { description: Paquete del mes }
+        '400': { description: Mes inválido }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /reports/daily-summaries:
     get:
       tags: [Reportes]

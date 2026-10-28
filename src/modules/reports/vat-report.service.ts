@@ -27,7 +27,7 @@ export const vatPeriodSchema = z.object({
 
 // Inicio del mes y del siguiente: en hora de Costa Rica para los comprobantes (issuedAt) y en UTC para las
 // fechas puras (@db.Date de las facturas de proveedor)
-function monthRange(m: string) {
+export function monthRange(m: string) {
   const [y, mo] = m.split("-").map(Number) as [number, number]
   const next = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`
   return {

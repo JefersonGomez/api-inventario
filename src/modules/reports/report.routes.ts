@@ -5,7 +5,7 @@ import {
   getMovementsReportController,
   getInventoryValueController,getInventoryValueBreakdownHandler,getStockForecastHandler,
   getDashboardController, peekDailySummaryHandler, dailySummaryHandler, summaryHistoryHandler,
-  mySalesHandler, salesReportHandler, salesTodayHandler, vatReportHandler, saveVatPeriodHandler,
+  mySalesHandler, salesReportHandler, salesTodayHandler, vatReportHandler, saveVatPeriodHandler, accountantPackageHandler,
 } from "./report.controller.ts";
 import { movementsReportQuerySchema, mySalesQuerySchema, salesReportQuerySchema } from "./sales-report.service.ts";
 import { vatPeriodSchema, vatReportQuerySchema } from "./vat-report.service.ts";
@@ -33,3 +33,5 @@ router.get("/my-sales", validateQuery(mySalesQuerySchema), Authenticated, Can("s
 // IVA del mes (54B): ?month=AAAA-MM; PUT guarda la prorrata y la retención de tarjeta de ese mes
 router.get("/vat", validateQuery(vatReportQuerySchema), Authenticated, Can("accounting.view"), vatReportHandler);
 router.put("/vat", validateQuery(vatReportQuerySchema), validate(vatPeriodSchema), Authenticated, Can("accounting.view"), saveVatPeriodHandler);
+// Paquete para el contador: todo el mes en un JSON que el frontend baja como Excel
+router.get("/accountant-package", validateQuery(vatReportQuerySchema), Authenticated, Can("accounting.view"), accountantPackageHandler);
