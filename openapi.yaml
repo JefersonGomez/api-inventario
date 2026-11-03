@@ -1635,6 +1635,10 @@ paths:
           in: query
           description: "stock <= stock mínimo"
           schema: { type: string, enum: ['1', 'true'] }
+        - name: topSelling
+          in: query
+          description: "Solo view=flat. Los más vendidos (filtro del POS): los que aparecen en más tiquetes y facturas de los últimos 30 días en la ubicación activa, del más vendido al menos (hasta 24). Sin ventas todavía, la lista normal."
+          schema: { type: string, enum: ['1', 'true'] }
       responses:
         '200':
           description: Página de productos
@@ -2553,7 +2557,7 @@ paths:
       summary: Catálogo de la caja para vender sin conexión (sales.sell, con caja abierta)
       description: "Todos los productos activos con el stock de la sucursal de la caja, y las categorías. La caja lo guarda en el navegador (IndexedDB) y lo vuelve a pedir cada 5 minutos."
       responses:
-        '200': { description: "{ sessionId, products: [{ id, name, sku, barcode, price, minStock, taxRate, unit, tracksLots, categoryId, stock }], categories: [{ id, name }], at }" }
+        '200': { description: "{ sessionId, products: [{ id, name, sku, barcode, price, minStock, taxRate, unit, tracksLots, categoryId, stock }], categories: [{ id, name }], topSellers: [productId] (los más vendidos de la sucursal, en orden), at }" }
         '409': { description: NO_SESSION }
 
   /pos/offline-failures:

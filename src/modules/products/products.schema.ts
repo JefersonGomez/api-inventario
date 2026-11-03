@@ -99,5 +99,6 @@ export const productListQuerySchema = z.object({
   groupId: z.string().uuid().optional(),
   pending: queryFlag, // importados "Por completar"
   lowStock: queryFlag, // stock <= mínimo
+  topSelling: queryFlag, // los más vendidos (POS), en orden; sin ventas todavía, la lista normal
 });
 export type ProductListQuery = z.infer<typeof productListQuerySchema>;

@@ -118,6 +118,28 @@ function productWhere(f: ProductListQuery, lowIds: string[] | null = null): Pris
   };
 }
 
+// Más vendidos (filtro del POS, fase 3 de mejoras del 3-nov-2026): los productos que aparecen en más ventas
+// (tiquetes y facturas) de los últimos 30 días, en esas ubicaciones (null = toda la empresa). Cuenta ventas, no
+// unidades: si no, el cable por metro le ganaría a todo. Sin el filtro de borrados (lo aplica quien la usa).
+export async function topSellingProductIds(locationIds: string[] | null, limit = 24): Promise<string[]> {
+  const rows = await prisma.documentLine.groupBy({
+    by: ["productId"],
+    where: {
+      productId: { not: null },
+      document: {
+        companyId: currentCompanyId(), // DocumentLine no es modelo de empresa: se filtra por su comprobante
+        type: { in: ["TICKET", "INVOICE"] },
+        issuedAt: { gte: new Date(Date.now() - 30 * 86_400_000) },
+        ...(locationIds && { cashSession: { register: { locationId: { in: locationIds } } } }),
+      },
+    },
+    _count: { productId: true },
+    orderBy: [{ _count: { productId: "desc" } }, { productId: "asc" }],
+    take: limit,
+  });
+  return rows.map((r) => r.productId!);
+}
+
 const hasFilters = (f: ProductListQuery) =>
   Boolean(f.q || f.categoryId || f.supplierId || f.pending !== undefined || f.lowStock);
 
@@ -126,11 +148,14 @@ export async function listProducts(f: ProductListQuery) {
   const scope = locationScope();
   const lowIds = f.lowStock && scope ? await lowStockProductIds(scope) : null;
   if (f.view === "grouped" && !f.groupId) return listProductsGrouped(f, scope, lowIds);
-  const where = productWhere(f, lowIds);
+  const top = f.topSelling ? await topSellingProductIds(scope) : [];
+  const where = { ...productWhere(f, lowIds), ...(top.length && { id: { in: top } }) };
   const [total, items] = await Promise.all([
     prisma.product.count({ where }),
     prisma.product.findMany({ where, include: withSupplier, orderBy: [{ name: "asc" }, { sku: "asc" }], ...pageArgs(f) }),
   ]);
+  // los más vendidos, del más vendido al menos
+  if (top.length) items.sort((a, b) => top.indexOf(a.id) - top.indexOf(b.id));
   return pageResult(await withScopedStock(items, scope), total, f);
 }
 

@@ -23,6 +23,7 @@ import { authorizeWithPin, CodeExpiredError, renewWithManagerPin, verifyOwnPin }
 import { createNotifications } from "../notifications/notifications.persist.ts"
 import { memberIdsWith } from "../userGestion/userGestion.service.ts"
 import { assertCreditAllowed, createCreditInstallments, creditPlanSchema, dueDates, today } from "../receivables/receivables.service.ts"
+import { topSellingProductIds } from "../products/products.service.ts"
 
 const D = Prisma.Decimal
 type Actor = { id: string; permissions: string[] }
@@ -704,7 +705,7 @@ export async function reportOfflineFailure(input: z.infer<typeof offlineFailureS
 // ponytail: se manda completo cada vez; con decenas de miles de productos, pedir solo lo cambiado (updatedAt)
 export async function posCatalog(actor: Actor) {
   const session = await requireMyOpenSession(actor.id)
-  const [products, categories] = await Promise.all([
+  const [products, categories, topSellers] = await Promise.all([
     prisma.product.findMany({
       where: { deletedAt: null },
       select: {
@@ -714,11 +715,13 @@ export async function posCatalog(actor: Actor) {
       orderBy: [{ name: "asc" }, { sku: "asc" }],
     }),
     prisma.category.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    topSellingProductIds([session.register.locationId]),
   ])
   return {
     sessionId: session.id,
     products: products.map(({ stocks, ...p }) => ({ ...p, stock: Number(stocks[0]?.quantity ?? 0) })),
     categories,
+    topSellers, // filtro "Más vendidos" sin conexión
     at: new Date(),
   }
 }
