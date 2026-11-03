@@ -3,7 +3,7 @@ info:
   title: "Inventario API"
   version: "3.6.0"
   description: |
-    API REST del sistema de inventario (Stockly): productos, categorías, movimientos de stock,
+    API REST del sistema de inventario (Cubivo): productos, categorías, movimientos de stock,
     proveedores, solicitudes y órdenes de compra, reportes, auditoría, notificaciones,
     comentarios, asistente IA y datos de la empresa.
 
