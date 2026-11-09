@@ -250,6 +250,7 @@ components:
         posShowStock: { type: boolean }
         returnDays: { type: integer, minimum: 1, maximum: 365, description: Días para devolver una venta (30 por defecto) }
         requirePaymentRef: { type: boolean, description: "Tarjeta y SINPE exigen la referencia (true por defecto)" }
+        cashLimit: { type: integer, nullable: true, description: "Tope de efectivo en una caja (800000 por defecto); al pasarlo se avisa a quien hace arqueos. null = sin aviso" }
         sinpeNumber: { type: string, nullable: true, description: "SINPE Móvil general, 8 dígitos (cada sucursal puede tener el suyo)" }
         sinpeName: { type: string, nullable: true }
         legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
@@ -1295,6 +1296,7 @@ paths:
                 posShowStock: { type: boolean, description: "El POS muestra la cantidad en stock (si no: disponible/agotado)" }
                 returnDays: { type: integer, minimum: 1, maximum: 365, description: "Plazo para devolver una venta" }
                 requirePaymentRef: { type: boolean, description: "Tarjeta y SINPE exigen la referencia (autorización / comprobante)" }
+                cashLimit: { type: integer, nullable: true, minimum: 1000, description: "Tope de efectivo en una caja (avisa a quien hace arqueos, una vez hasta que un retiro la baje); null = sin aviso" }
                 sinpeNumber: { type: string, nullable: true, description: "8 dígitos; se aceptan guiones y espacios; vacío o null = borrar" }
                 sinpeName: { type: string, nullable: true, maxLength: 80 }
                 legalName: { type: string, nullable: true, description: Razón social o nombre de la persona física }
@@ -2228,6 +2230,23 @@ paths:
         '201': { description: Movimiento }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /pos/session/cash-advice:
+    post:
+      tags: [Punto de venta]
+      summary: Efectivo de la caja y retiro sugerido
+      description: "Sugiere retirar (efectivo − monto inicial) redondeado hacia abajo a 5000 (CRC) o 10 (USD), así queda el fondo y un poco más. Quien tiene cash.reconcile lo ve directo; si no, con managerPin de un encargado con cash.reconcile (sin él 409 ADVICE_NEEDS_AUTH; código que no sirve 403 ADVICE_PIN; la autorización queda en la auditoría). El cierre sigue siendo ciego."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                managerPin: { type: string, pattern: '^\d{4,6}$' }
+      responses:
+        '200': { description: "{ expectedCash, openingAmount, cashLimit, suggested, remaining, step, authorizedBy }" }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: ADVICE_NEEDS_AUTH o NO_SESSION }
 
   /pos/sessions/{id}/close:
     post:

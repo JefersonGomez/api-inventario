@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import {
-  addCashMovement, closeSession, createRegister, currentSession, getSessionReport, getTicket, listCashMovements, listRegisters,
+  addCashMovement, cashAdvice, closeSession, createRegister, currentSession, getSessionReport, getTicket, listCashMovements, listRegisters,
   listDiscountTypes, listSessions, openSession, posCatalog, reportOfflineFailure, reconcileSession, renewCodeWithManager, saveDiscountType, sell, updateRegister,
 } from "./pos.service.ts"
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts"
@@ -30,7 +30,8 @@ export const updateRegisterHandler = handle((req) => updateRegister(req.params.i
 export const currentSessionHandler = handle((req) => currentSession(req.user!))
 export const openSessionHandler = handle((req) => openSession(req.body, req.user!), 201, TOPICS)
 export const renewCodeHandler = handle((req) => renewCodeWithManager(req.body, req.user!))
-export const addCashMovementHandler = handle((req) => addCashMovement(req.body, req.user!), 201, TOPICS)
+export const addCashMovementHandler = handle((req) => addCashMovement(req.body, req.user!), 201, [...TOPICS, "notifications"])
+export const cashAdviceHandler = handle((req) => cashAdvice(req.body, req.user!))
 export const listCashMovementsHandler = handle((req) => listCashMovements(req.user!.id))
 export const closeSessionHandler = handle((req) => closeSession(req.params.id, req.body, req.user!), 200, [...TOPICS, "cash-sessions"])
 export const listSessionsHandler = handle((_req, res) => listSessions(res.locals.query))

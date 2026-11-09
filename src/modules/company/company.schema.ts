@@ -29,6 +29,8 @@ export const updateCompanySchema = z
     posShowStock: z.boolean().optional(), // el POS muestra la cantidad en stock
     returnDays: z.number().int().min(1, "Mínimo 1 día").max(365, "Máximo 365 días").optional(), // plazo para devolver una venta
     requirePaymentRef: z.boolean().optional(), // tarjeta y SINPE exigen la referencia
+    // tope de efectivo en una caja (avisa a quien hace arqueos); null = sin aviso
+    cashLimit: z.number().int().min(1000, "Mínimo 1000").max(1_000_000_000).nullable().optional(),
     ...sinpeFields,
     ...fiscalFields,
   })

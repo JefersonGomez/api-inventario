@@ -50,6 +50,8 @@ export const cashMovementSchema = z.object({
   amount: money.positive(),
   reason: z.string().trim().min(1, "Indica el motivo").max(200),
 })
+// "¿Cuánto retirar?": quien no hace arqueos necesita el código del encargado (el cierre sigue ciego)
+export const cashAdviceSchema = z.object({ managerPin: pin.optional() })
 // cierre del cajero: ciego, sin contar (el arqueo lo hace después la jefa de caja con él)
 export const closeSessionSchema = z.object({ note: z.string().trim().max(500).optional() }).optional()
 export const reconcileSchema = z.object({
@@ -363,7 +365,66 @@ export async function addCashMovement(input: z.infer<typeof cashMovementSchema>,
     data: { companyId: currentCompanyId(), sessionId: session.id, type: input.type, amount: input.amount, reason: input.reason, userId: actor.id },
   })
   await logAudit(actor.id, "CREATE", "CashMovement", movement.id, input)
+  await checkCashLimit(session.id).catch((e) => console.error("checkCashLimit", e)) // el movimiento ya quedó guardado
   return movement
+}
+
+// Retiro sugerido (Fase 4, decisión del usuario del 8-nov-2026): que en la caja quede el monto inicial
+// y "un poco más": se sugiere (efectivo − inicial) redondeado hacia abajo a ₡5 000 / $10.
+const ADVICE_STEP = { CRC: 5000, USD: 10 } as const
+export function suggestedWithdrawal(expectedCash: number, openingAmount: number, currency: keyof typeof ADVICE_STEP) {
+  const step = ADVICE_STEP[currency] ?? 5000
+  const suggested = Math.max(0, Math.floor((expectedCash - openingAmount) / step) * step)
+  return { suggested, remaining: Number(new D(expectedCash).minus(suggested).toFixed(2)), step }
+}
+
+// Muestra el efectivo de la caja y el retiro sugerido. Sin cash.reconcile, con el código del encargado
+// (queda en la auditoría como autorización), así el cajero no ve el esperado por su cuenta.
+export async function cashAdvice(input: z.infer<typeof cashAdviceSchema>, actor: Actor) {
+  const session = await requireMyOpenSession(actor.id)
+  let authorizedBy: { id: string; name: string } | null = null
+  if (!actor.permissions.includes("cash.reconcile")) {
+    if (!input.managerPin) throw fail("Para ver el efectivo de la caja, pide el código del encargado", 409, "ADVICE_NEEDS_AUTH")
+    const auth = await authorizeWithPin(actor.id, input.managerPin, "cash.reconcile", `Ver efectivo para retiro (${session.register.name})`)
+    if (!auth) throw fail("Ese código no sirve (tiene que ser de un encargado de caja, vigente)", 403, "ADVICE_PIN")
+    authorizedBy = auth.authorizedBy
+  }
+  const [summary, { currency, cashLimit }] = await Promise.all([sessionSummary(session.id), getCompany()])
+  return {
+    expectedCash: summary.expectedCash,
+    openingAmount: summary.openingAmount,
+    cashLimit,
+    ...suggestedWithdrawal(summary.expectedCash, summary.openingAmount, currency),
+    authorizedBy,
+  }
+}
+
+// Tope de efectivo (Fase 4): al pasar el tope de la empresa se avisa UNA vez a quien hace arqueos en esa
+// sucursal; si un retiro lo baja, se rearma (la próxima vez que pase, se vuelve a avisar).
+// Se llama después de lo que mete o saca efectivo: venta, abono en caja, entrada y retiro.
+export async function checkCashLimit(sessionId: string) {
+  const [session, { cashLimit }] = await Promise.all([
+    prisma.cashSession.findFirst({ where: { id: sessionId, status: "OPEN" }, include: sessionInclude }),
+    getCompany(),
+  ])
+  if (!session) return
+  const { expectedCash } = await sessionSummary(sessionId)
+  const over = cashLimit != null && expectedCash > cashLimit
+  if (!over) {
+    if (session.overLimitAt) await prisma.cashSession.update({ where: { id: sessionId }, data: { overLimitAt: null } })
+    return
+  }
+  if (session.overLimitAt) return
+  // updateMany con overLimitAt null: dos ventas a la vez no mandan dos avisos
+  const { count } = await prisma.cashSession.updateMany({ where: { id: sessionId, overLimitAt: null }, data: { overLimitAt: new Date() } })
+  if (!count) return
+  const ids = await memberIdsWith("cash.reconcile", session.register.locationId)
+  await createNotifications(
+    ids.map((userId) => ({
+      userId, type: "cashOverLimit", title: session.register.name, link: "/cash-closings",
+      meta: { cash: expectedCash, limit: cashLimit, cashier: session.openedBy.name, location: session.register.location.name },
+    }))
+  )
 }
 
 export async function listCashMovements(userId: string) {
@@ -682,6 +743,8 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
     throw e
   })
   if (!doc) return (await previous())!
+  // la venta ya quedó guardada: si el aviso del tope falla, no se le dice al cajero que la venta falló
+  if (input.payments.some((p) => p.method === "CASH")) await checkCashLimit(session.id).catch((e) => console.error("checkCashLimit", e))
   return { ...(await getTicket(doc.id)), negatives: short.length }
 }
 
