@@ -487,6 +487,7 @@ components:
         barcode: { type: string, nullable: true }
         name: { type: string }
         description: { type: string, nullable: true }
+        imageUrl: { type: string, nullable: true, description: "Foto del producto, servida desde /uploads/products/... (se cambia con POST/DELETE /products/{id}/image)" }
         price: { type: number, description: "Precio de venta CON IVA incluido (precio de góndola)", example: 1250 }
         unit: { $ref: '#/components/schemas/UnitOfMeasure' }
         taxRate: { $ref: '#/components/schemas/TaxRate' }
@@ -1867,6 +1868,39 @@ paths:
         '200': { description: Eliminado }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /products/{id}/image:
+    post:
+      tags: [Productos]
+      summary: Subir o cambiar la foto del producto (products.manage)
+      description: "JPEG, PNG o WEBP hasta 5 MB; se comprueba el contenido real y la extensión sale del tipo, no del nombre. La foto anterior se borra."
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary }
+      responses:
+        "200":
+          description: Producto con el nuevo imageUrl
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Producto no encontrado }
+    delete:
+      tags: [Productos]
+      summary: Quitar la foto del producto (products.manage)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Producto con imageUrl null }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: Producto no encontrado }
 
   /products/{id}/price-history:
     get:

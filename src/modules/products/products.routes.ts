@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { CreateProductController,getProductPriceHistoryHandler,getAllProductsController,getProductByIdController,updateProductController,deleteProductController,getProductByBarcodeController,
-    getExpiringSoonProductsHandler, importProductsHandler, generateBarcodesHandler, aiMapHandler, aiQuotaHandler
+    getExpiringSoonProductsHandler, importProductsHandler, generateBarcodesHandler, aiMapHandler, aiQuotaHandler,
+    uploadProductImageHandler, removeProductImageHandler
 } from "./products.controller.ts";
+import { productImageUpload, validateImageContent } from "../../shared/utils/upload.ts";
 import Express from "express";
 import { Can,Authenticated } from "../../middlewares/authenticate.middleware.ts";
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts";
@@ -29,5 +31,8 @@ router.get("/barcode/:code", Authenticated, getProductByBarcodeController);
 router.get("/:id",Authenticated,getProductByIdController)
 router.put("/:id",validate(productsSchemaUpdate),Authenticated, Can("products.manage"),updateProductController)
 router.delete("/:id",Authenticated, Can("products.manage"),deleteProductController)
+// foto del producto: se valida el permiso ANTES de guardar el archivo
+router.post("/:id/image", Authenticated, Can("products.manage"), productImageUpload.single("image"), validateImageContent, uploadProductImageHandler)
+router.delete("/:id/image", Authenticated, Can("products.manage"), removeProductImageHandler)
 
 router.get("/:id/price-history", Authenticated, getProductPriceHistoryHandler);

@@ -213,6 +213,7 @@ model Product {
   barcode            String?
   name               String
   description        String?
+  imageUrl           String? // foto del producto (/uploads/products/...); se ve en Productos y en el POS
   price              Decimal             @db.Decimal(10, 2) // incluye IVA
   unit               UnitOfMeasure       @default(UNIT)
   taxRate            TaxRate             @default(RATE_13)

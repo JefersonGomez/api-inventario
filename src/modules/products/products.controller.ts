@@ -11,6 +11,7 @@ import {
 } from "./products.service.ts";
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts";
 import { importProducts } from "./products-import.service.ts";
+import { removeProductImage, setProductImage } from "./product-image.service.ts";
 import { generateBarcodes } from "./barcodes.service.ts";
 import { aiImportQuota, aiMapColumns, AiQuotaError } from "./ai-import.service.ts";
 import { AiPausedError } from "../ai/ai.service.ts";
@@ -162,5 +163,29 @@ export async function importProductsHandler(req: Request, res: Response) {
     res.status(result.dryRun ? 200 : 201).json(result);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
+  }
+}
+
+// Foto del producto (Fase 5): multipart "image" (JPEG, PNG o WEBP, ya validado por contenido)
+export async function uploadProductImageHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No se recibió ningún archivo" });
+    const product = await setProductImage(req.params.id, req.file.filename, req.user!.id);
+    emit(EVERYONE, PRODUCT_TOPICS);
+    res.status(200).json(product);
+  } catch (error) {
+    const e = error as { status?: number; message: string };
+    res.status(e.status ?? 400).json({ error: e.message });
+  }
+}
+
+export async function removeProductImageHandler(req: Request<{ id: string }>, res: Response) {
+  try {
+    const product = await removeProductImage(req.params.id, req.user!.id);
+    emit(EVERYONE, PRODUCT_TOPICS);
+    res.status(200).json(product);
+  } catch (error) {
+    const e = error as { status?: number; message: string };
+    res.status(e.status ?? 400).json({ error: e.message });
   }
 }

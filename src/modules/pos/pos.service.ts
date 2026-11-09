@@ -772,7 +772,7 @@ export async function posCatalog(actor: Actor) {
     prisma.product.findMany({
       where: { deletedAt: null },
       select: {
-        id: true, name: true, sku: true, barcode: true, price: true, minStock: true, taxRate: true, unit: true, tracksLots: true, categoryId: true,
+        id: true, name: true, sku: true, barcode: true, price: true, minStock: true, taxRate: true, unit: true, tracksLots: true, categoryId: true, imageUrl: true,
         stocks: { where: { locationId: session.register.locationId }, select: { quantity: true } },
       },
       orderBy: [{ name: "asc" }, { sku: "asc" }],

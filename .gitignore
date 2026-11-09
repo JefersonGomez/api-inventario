@@ -8,3 +8,5 @@ uploads/avatars/*
 
 # respaldos de la base (pg_dump): datos reales, nunca al repo
 backups/
+uploads/products/*
+!uploads/products/.gitkeep

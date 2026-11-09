@@ -1,17 +1,23 @@
 import multer, { type FileFilterCallback } from "multer"
 import fs from "node:fs/promises"
+import { mkdirSync } from "node:fs"
 import type { NextFunction, Request, Response } from "express"
 
 // La extensión sale del tipo validado, NUNCA del nombre que manda el cliente: si no, un
 // archivo ".html" con tipo "image/png" quedaría servido desde /uploads y ejecutaría scripts.
 const EXT: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" }
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, "uploads/avatars"),
-  filename: (_req, file, cb) => {
-    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${EXT[file.mimetype] ?? ""}`)
-  },
-})
+// una carpeta por tipo de imagen dentro de uploads/ (avatars, products), servida en /uploads
+const storageIn = (folder: string) => {
+  const dir = `uploads/${folder}`
+  mkdirSync(dir, { recursive: true })
+  return multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, dir),
+    filename: (_req, file, cb) => {
+      cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${EXT[file.mimetype] ?? ""}`)
+    },
+  })
+}
 
 const fileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
   if (EXT[file.mimetype]) return cb(null, true)
@@ -21,10 +27,26 @@ const fileFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCall
 }
 
 export const upload = multer({
-  storage,
+  storage: storageIn("avatars"),
   fileFilter,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 })
+
+// fotos de productos (Fase 5): el navegador ya las achica antes de subirlas; el límite es el mismo
+export const productImageUpload = multer({
+  storage: storageIn("products"),
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+})
+
+// borra un archivo subido a partir de su URL pública (/uploads/<carpeta>/<archivo>); solo dentro de esa carpeta
+export async function removeUpload(url: string | null | undefined, folder: string) {
+  const prefix = `/uploads/${folder}/`
+  if (!url?.startsWith(prefix)) return
+  const name = url.slice(prefix.length)
+  if (!/^[\w.-]+$/.test(name)) return // nada de "../"
+  await fs.unlink(`uploads/${folder}/${name}`).catch(() => {})
+}
 
 // El tipo que declara el cliente es solo una declaración: se comprueba el contenido real
 // (firma del archivo) y, si no es una imagen, se borra lo subido.

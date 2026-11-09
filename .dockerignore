@@ -11,3 +11,4 @@ uploads/avatars/*
 .impeccable
 coverage
 *.log
+uploads/products/*
