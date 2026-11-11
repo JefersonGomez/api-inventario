@@ -2,6 +2,7 @@
 import "dotenv/config"
 import { prismaRoot as prisma } from "../src/config/database.ts"
 import bcrypt from "bcrypt"
+import { MAIN_LOCATION } from "../src/modules/locations/location.service.ts"
 
 async function main() {
   try {
@@ -16,6 +17,7 @@ async function main() {
       })
       const company = await tx.company.create({ data: { name: "Mi empresa", ownerId: admin.id } })
       await tx.membership.create({ data: { userId: admin.id, companyId: company.id, role: "ADMIN" } })
+      await tx.location.create({ data: MAIN_LOCATION(company.id) }) // sin sucursal no se puede crear productos ni vender
       await tx.user.update({ where: { id: admin.id }, data: { lastCompanyId: company.id } })
     })
     console.log("Admin y empresa creados correctamente")
