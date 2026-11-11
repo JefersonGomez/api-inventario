@@ -1,18 +1,22 @@
-// Prueba de punta a punta con el AMBIENTE DE PRUEBAS de Hacienda (Bloque 9, fase 1), sin tocar la base:
+// Prueba de punta a punta con el AMBIENTE DE PRUEBAS de Hacienda (Bloque 9), sin tocar la base:
 // arma un tiquete de ejemplo a nombre del titular de la llave, lo valida contra el XSD, lo firma, lo envía
 // y consulta la respuesta hasta que Hacienda lo acepte o lo rechace.
-// Uso: npm run einvoice:sandbox  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
+// Con --nota: el tiquete lleva 2 unidades y, aceptado, se envía una NOTA DE CRÉDITO que devuelve 1 (código 06).
+// Uso: npm run einvoice:sandbox [-- --nota]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
 // Nunca imprime la clave, el PIN ni el token.
 import "dotenv/config"
 import { readFileSync } from "node:fs"
+import type { DocumentType } from "../src/generated/prisma/enums.ts"
+import { DOCUMENT_CODE } from "../src/shared/fiscal.ts"
 import { buildClave, crDateTime } from "../src/modules/einvoice/clave.ts"
 import { haciendaStatus, sendToHacienda } from "../src/modules/einvoice/hacienda.client.ts"
 import { loadSigningKey, signXml } from "../src/modules/einvoice/signer.ts"
-import { buildEInvoiceXml } from "../src/modules/einvoice/xml.ts"
+import { buildEInvoiceXml, type EInvoiceData } from "../src/modules/einvoice/xml.ts"
 import { validateEInvoiceXml } from "../src/modules/einvoice/xsd-validate.ts"
 
 const env = process.env
 if (env.HACIENDA_ENV !== "pruebas") throw new Error("Este script solo corre con HACIENDA_ENV=pruebas")
+const withNote = process.argv.includes("--nota")
 const creds = { env: "pruebas" as const, username: env.HACIENDA_USER!, password: env.HACIENDA_PASSWORD! }
 const key = await loadSigningKey(readFileSync(env.HACIENDA_P12_PATH!), env.HACIENDA_P12_PIN!)
 const id = key.holderId
@@ -33,43 +37,57 @@ activity = activity.trim()
 
 // la ubicación debe ser la registrada en Hacienda: HACIENDA_TEST_UBICACION=provincia-cantón-distrito (ej. 1-01-01)
 const [province, canton, district] = (env.HACIENDA_TEST_UBICACION || "1-01-01").split("-") as [string, string, string]
+const cabys = env.HACIENDA_TEST_CABYS || "4292199990200"
 
-const issuedAt = new Date()
-// consecutivo de prueba: sucursal 001, terminal 99999, tiquete (04), número = segundos del día (no choca)
-const consecutive = `0019999904${String(Math.floor(issuedAt.getTime() / 1000) % 10_000_000_000).padStart(10, "0")}`
-const clave = buildClave({ issuedAt, idNumber: id, consecutive })
-const xml = buildEInvoiceXml({
-  type: "TICKET", clave, consecutive, issuedAt, provider: id, activity,
-  emitter: {
-    name: key.holderName || "Emisor de prueba", idType, idNumber: id,
-    province, canton, district, address: "Prueba del sistema de inventario", email: "pruebas@example.com",
-  },
-  currency: "CRC", saleCondition: "CASH",
-  lines: [{ cabys: env.HACIENDA_TEST_CABYS || "4292199990200", quantity: 1, unit: "UNIT", description: "Martillo de prueba", unitPrice: "1000", discount: 0, taxRate: "RATE_13", subtotal: "1000", taxAmount: "130" }],
-  payments: [{ method: "CASH", amount: 1130 }],
-})
-const errors = await validateEInvoiceXml("TICKET", xml.replace(`</TiqueteElectronico>`, `<ds:Signature/></TiqueteElectronico>`))
-if (errors.some((e) => !e.includes("Signature"))) throw new Error(`El XML no cumple el esquema:\n${errors.join("\n")}`)
-const signed = await signXml(xml, key, issuedAt)
-const schemaErrors = await validateEInvoiceXml("TICKET", signed)
-if (schemaErrors.length) throw new Error(`El XML firmado no cumple el esquema:\n${schemaErrors.join("\n")}`)
-console.log(`Clave: ${clave}`)
+// consecutivo de prueba: sucursal 001, terminal 99999, el tipo, número = segundos (no choca con los reales)
+const consecutiveFor = (type: DocumentType, at: Date) =>
+  `00199999${DOCUMENT_CODE[type as keyof typeof DOCUMENT_CODE]}${String(Math.floor(at.getTime() / 1000) % 10_000_000_000).padStart(10, "0")}`
 
-const sent = await sendToHacienda(creds, {
-  clave, fecha: crDateTime(issuedAt),
-  emisor: { tipoIdentificacion: idType === "FISICA" ? "01" : "02", numeroIdentificacion: id },
-  comprobanteXml: Buffer.from(signed, "utf8").toString("base64"),
-})
-console.log(sent.received ? `Enviado ✔ (HTTP ${sent.status})` : `Envío rechazado ✘ (HTTP ${sent.status}): ${sent.error}`)
-if (!sent.received) process.exit(1)
+// arma, valida, firma, envía y espera la respuesta; devuelve la clave si Hacienda lo aceptó
+async function run(label: string, type: DocumentType, units: number, reference: EInvoiceData["reference"] = null) {
+  const issuedAt = new Date()
+  const consecutive = consecutiveFor(type, issuedAt)
+  const clave = buildClave({ issuedAt, idNumber: id, consecutive })
+  const xml = buildEInvoiceXml({
+    type, clave, consecutive, issuedAt, provider: id, activity,
+    emitter: {
+      name: key.holderName || "Emisor de prueba", idType, idNumber: id,
+      province, canton, district, address: "Prueba del sistema de inventario", email: "pruebas@example.com",
+    },
+    currency: "CRC", saleCondition: "CASH", reference,
+    lines: [{ cabys, quantity: units, unit: "UNIT", description: "Martillo de prueba", unitPrice: "1000", discount: 0, taxRate: "RATE_13", subtotal: String(1000 * units), taxAmount: String(130 * units) }],
+    payments: [{ method: "CASH", amount: 1130 * units }],
+  })
+  const signed = await signXml(xml, key, issuedAt)
+  const schemaErrors = await validateEInvoiceXml(type, signed)
+  if (schemaErrors.length) throw new Error(`${label}: el XML firmado no cumple el esquema:\n${schemaErrors.join("\n")}`)
+  console.log(`\n${label} — clave: ${clave}`)
 
-for (let i = 0; i < 12; i++) {
-  await new Promise((r) => setTimeout(r, 5000))
-  const st = await haciendaStatus(creds, clave)
-  console.log(`Estado: ${st?.state ?? "todavía no aparece"}`)
-  if (st && ["aceptado", "rechazado", "error"].includes(st.state)) {
-    if (st.message) console.log(`Mensaje de Hacienda: ${st.message}`)
-    process.exit(st.state === "aceptado" ? 0 : 1)
+  const sent = await sendToHacienda(creds, {
+    clave, fecha: crDateTime(issuedAt),
+    emisor: { tipoIdentificacion: idType === "FISICA" ? "01" : "02", numeroIdentificacion: id },
+    comprobanteXml: Buffer.from(signed, "utf8").toString("base64"),
+  })
+  console.log(sent.received ? `Enviado ✔ (HTTP ${sent.status})` : `Envío rechazado ✘ (HTTP ${sent.status}): ${sent.error}`)
+  if (!sent.received) return null
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const st = await haciendaStatus(creds, clave)
+    console.log(`Estado: ${st?.state ?? "todavía no aparece"}`)
+    if (st && ["aceptado", "rechazado", "error"].includes(st.state)) {
+      if (st.message) console.log(`Mensaje de Hacienda: ${st.message}`)
+      return st.state === "aceptado" ? { clave, issuedAt } : null
+    }
   }
+  console.log("Hacienda sigue procesando; vuelve a consultar más tarde con la clave de arriba.")
+  return null
 }
-console.log("Hacienda sigue procesando; vuelve a consultar más tarde con la clave de arriba.")
+
+const ticket = await run("Tiquete", "TICKET", withNote ? 2 : 1)
+if (!ticket) process.exit(1)
+if (withNote) {
+  const note = await run("Nota de crédito (devuelve 1 de 2)", "CREDIT_NOTE", 1, {
+    type: "TICKET", clave: ticket.clave, issuedAt: ticket.issuedAt, code: "06", reason: "Devolución de prueba",
+  })
+  if (!note) process.exit(1)
+}

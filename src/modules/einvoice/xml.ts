@@ -1,9 +1,9 @@
-// Arma el XML v4.4 de un comprobante (tiquete y factura electrónica), sin firmar. El orden de los
+// Arma el XML v4.4 de un comprobante (tiquete, factura y nota de crédito), sin firmar. El orden de los
 // elementos es el del XSD oficial; los montos van con 5 decimales como guarda el sistema.
 // Los precios de las líneas ya vienen SIN IVA (DocumentLine), así que solo se ordena y se suma.
 import { Prisma } from "../../generated/prisma/client.ts"
 import type { CurrencyCode, DocumentType, IdType, PaymentMethod, SaleCondition, TaxRate, UnitOfMeasure } from "../../generated/prisma/enums.ts"
-import { TAX_PERCENT } from "../../shared/fiscal.ts"
+import { DOCUMENT_CODE, TAX_PERCENT } from "../../shared/fiscal.ts"
 import { crDateTime } from "./clave.ts"
 import { DOCUMENT_XML, ID_TYPE_CODE, PAYMENT_CODE, RECEIVER_ID_TYPE_CODE, SALE_CONDITION_CODE, TAX_RATE_CODE, UNIT_CODE } from "./codes.ts"
 
@@ -35,6 +35,14 @@ export type EInvoiceData = {
     idType: IdType
     idNumber: string
     email?: string | null
+  } | null
+  // nota de crédito: el comprobante que corrige (obligatorio en la nota)
+  reference?: {
+    type: DocumentType // tipo del original (01 factura, 04 tiquete…)
+    clave: string
+    issuedAt: Date
+    code: "01" | "06" // 01 anula el documento (se devuelve todo), 06 devolución de mercancía
+    reason: string
   } | null
   currency: CurrencyCode
   exchangeRate?: Num // tipo de cambio (1 en colones)
@@ -71,6 +79,8 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   const r = d.type === "TICKET" ? null : d.receiver
   if (d.type === "INVOICE" && !(r?.name.trim() && r.idNumber)) throw new Error("La factura necesita el nombre y la identificación del cliente")
   const receiverEmail = (r?.email ?? "").trim()
+  const ref = d.reference
+  if (d.type === "CREDIT_NOTE" && !ref?.clave) throw new Error("La nota de crédito necesita la clave del comprobante que corrige")
 
   // ---------- líneas ----------
   const totals = { taxed: new D(0), exempt: new D(0), discounts: new D(0), tax: new D(0) }
@@ -174,6 +184,17 @@ export function buildEInvoiceXml(d: EInvoiceData) {
       .join(""),
     el("TotalComprobante", money(total)),
     "</ResumenFactura>",
+    ref
+      ? [
+          "<InformacionReferencia>",
+          el("TipoDocIR", DOCUMENT_CODE[ref.type as keyof typeof DOCUMENT_CODE]),
+          el("Numero", ref.clave),
+          el("FechaEmisionIR", crDateTime(ref.issuedAt)),
+          el("Codigo", ref.code),
+          el("Razon", text(ref.reason || "Devolución", 180)),
+          "</InformacionReferencia>",
+        ].join("")
+      : "",
     `</${meta.root}>`,
   ].join("")
 }

@@ -27,7 +27,7 @@ const fail = (message: string, status: number, code?: string): HttpError => Obje
 const sameId = (a: string, b: string) => a.replace(/\D/g, "").replace(/^0+/, "") === b.replace(/\D/g, "").replace(/^0+/, "")
 // Errores del comprobante o de los datos (se guardan como ERROR); los demás (configuración, red) no
 const DATA_ERRORS = new Set(["EINVOICE_FISCAL_DATA", "EINVOICE_KEY_MISMATCH", "EINVOICE_SCHEMA", "EINVOICE_DATA"])
-export const AUTO_TYPES = ["TICKET", "INVOICE"] as const // fase 3: tiquetes y facturas (las notas, en la parte siguiente)
+export const AUTO_TYPES = ["TICKET", "INVOICE", "CREDIT_NOTE"] as const // la nota, cuando su venta original está aceptada
 const MAX_ATTEMPTS = 10
 // espera antes del siguiente reintento automático: 1, 2, 5, 10, 30 min y después cada hora
 const backoffMinutes = (attempts: number) => [1, 2, 5, 10, 30][attempts - 1] ?? 60
@@ -72,12 +72,30 @@ async function notifyProblem(e: EInvoiceRow, consecutive: string) {
 async function prepare(documentId: string, actorId: string) {
   const doc = await prisma.document.findFirst({
     where: { id: documentId },
-    include: { lines: { orderBy: { lineNumber: "asc" } }, payments: true, einvoice: true, customer: true },
+    include: {
+      lines: { orderBy: { lineNumber: "asc" } }, payments: true, einvoice: true, customer: true,
+      referenceDocument: { select: { type: true, issuedAt: true, total: true, einvoice: { select: { clave: true, status: true } } } },
+    },
   })
   if (!doc) throw fail("Comprobante no encontrado", 404)
   if (doc.einvoice && doc.einvoice.status !== "ERROR") return doc.einvoice
   if (!(AUTO_TYPES as readonly string[]).includes(doc.type)) {
-    throw fail("Por ahora se envían tiquetes y facturas a Hacienda (las notas de crédito llegan en la siguiente parte)", 400, "EINVOICE_TYPE")
+    throw fail("Este tipo de comprobante todavía no se envía a Hacienda", 400, "EINVOICE_TYPE")
+  }
+  // la nota corrige un comprobante que Hacienda tiene aceptado; si no, no hay nada que corregir allá
+  const original = doc.referenceDocument
+  if (doc.type === "CREDIT_NOTE") {
+    const st = original?.einvoice?.status
+    if (!original?.einvoice?.clave || st !== "ACCEPTED") {
+      throw fail(
+        st === "PENDING" || st === "SENT"
+          ? "La venta original todavía no está aceptada por Hacienda: la nota se envía sola cuando lo esté"
+          : st === "REJECTED" || st === "ERROR"
+            ? "La venta original no tiene validez en Hacienda (rechazada o con error): esta nota no se envía"
+            : "La venta original no se envió a Hacienda: esta nota tampoco se envía",
+        409, "EINVOICE_REFERENCE",
+      )
+    }
   }
   const cfg = await einvoiceConfig() // sin configuración no se registra nada: es un 409 para quien lo pidió
   try {
@@ -97,8 +115,16 @@ async function prepare(documentId: string, actorId: string) {
           province: company.province!, canton: company.canton!, district: company.district!, address: company.addressDetail!,
           phone: company.phone, email: company.invoiceEmail!,
         },
-        receiver: doc.customer?.idType && doc.customer.idNumber
+        // el cliente va en la factura y en la nota que corrige una factura (no en tiquetes)
+        receiver: doc.customer?.idType && doc.customer.idNumber && (doc.type === "INVOICE" || original?.type === "INVOICE")
           ? { name: doc.customer.name, idType: doc.customer.idType, idNumber: doc.customer.idNumber, email: doc.customer.email }
+          : null,
+        reference: doc.type === "CREDIT_NOTE" && original
+          ? {
+              type: original.type, clave: original.einvoice!.clave!, issuedAt: original.issuedAt,
+              code: doc.total.equals(original.total) ? "01" : "06", // devolvió todo = anula; si no, devolución de mercancía
+              reason: doc.referenceReason ?? "Devolución",
+            }
           : null,
         currency: doc.currency, saleCondition: doc.saleCondition, creditDays: doc.creditDays,
         lines: doc.lines.map((l) => ({
@@ -223,7 +249,7 @@ export async function documentXml(documentId: string) {
 
 const quiet = (where: string) => (err: unknown) => {
   const e = err as HttpError
-  if (!e.code || !(DATA_ERRORS.has(e.code) || e.code === "EINVOICE_NOT_CONFIGURED" || e.code === "EINVOICE_BUSY")) console.error(`facturación (${where}):`, e.message)
+  if (!e.code || !(DATA_ERRORS.has(e.code) || ["EINVOICE_NOT_CONFIGURED", "EINVOICE_BUSY", "EINVOICE_REFERENCE"].includes(e.code))) console.error(`facturación (${where}):`, e.message)
 }
 
 // Justo después de vender: si la empresa tiene el envío automático, se manda sin hacer esperar al cajero
@@ -255,7 +281,11 @@ export async function processEInvoices(limit = 50) {
       await runWithCompany(c.companyId, async () => {
         const now = new Date()
         const fresh = await prisma.document.findMany({
-          where: { type: { in: [...AUTO_TYPES] }, issuedAt: { gte: c.enabledAt! }, einvoice: null },
+          where: {
+            issuedAt: { gte: c.enabledAt! }, einvoice: null,
+            // las notas, solo cuando Hacienda ya aceptó la venta que corrigen
+            OR: [{ type: { in: ["TICKET", "INVOICE"] } }, { type: "CREDIT_NOTE", referenceDocument: { einvoice: { status: "ACCEPTED" } } }],
+          },
           select: { id: true, createdById: true }, orderBy: { issuedAt: "asc" }, take: limit,
         })
         const retry = await prisma.eInvoice.findMany({

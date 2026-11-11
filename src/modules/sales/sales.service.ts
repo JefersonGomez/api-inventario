@@ -7,7 +7,7 @@
 //  - Dinero: venta a crédito → primero rebaja sus cuotas (desde la última); lo que sobra, y en las de
 //    contado todo, se reembolsa por el medio que elige el cajero (el efectivo sale de su caja abierta).
 import { z } from "zod"
-import { getDocumentEInvoice } from "../einvoice/einvoice.service.ts"
+import { getDocumentEInvoice, queueEInvoice } from "../einvoice/einvoice.service.ts"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { assertLocationAllowed, locationScope } from "../../shared/tenant.ts"
@@ -100,13 +100,17 @@ export async function getSale(id: string) {
   if (!exists) throw fail("Venta no encontrada", 404)
   const ticket = await getTicket(id)
   const einvoice = await getDocumentEInvoice(id)
-  if (exists.type === "CREDIT_NOTE") return { ...ticket, einvoice, returned: {}, creditNotes: [], returnUntil: null }
+  if (exists.type === "CREDIT_NOTE") {
+    // la nota solo se envía a Hacienda si la venta que corrige está aceptada allá
+    const ref = await prisma.document.findFirst({ where: { referencedBy: { some: { id } } }, select: { einvoice: { select: { status: true } } } })
+    return { ...ticket, einvoice, referenceEInvoiceStatus: ref?.einvoice?.status ?? null, returned: {}, creditNotes: [], returnUntil: null }
+  }
   const [returned, notes, company] = await Promise.all([
     returnedByLine(id),
     prisma.document.findMany({
       where: { referenceDocumentId: id, type: "CREDIT_NOTE" },
       orderBy: { issuedAt: "asc" },
-      select: { id: true, consecutive: true, issuedAt: true, total: true, referenceReason: true, returnAuthorizedBy: { select: { name: true } }, payments: true },
+      select: { id: true, consecutive: true, issuedAt: true, total: true, referenceReason: true, returnAuthorizedBy: { select: { name: true } }, payments: true, einvoice: { select: { status: true } } },
     }),
     getCompany(),
   ])
@@ -229,6 +233,7 @@ export async function createReturn(id: string, input: z.infer<typeof returnSchem
     }
     return { noteId: note.id, credited: credited.toNumber(), refund: D.max(refund, 0).toNumber() }
   })
+  queueEInvoice(result.noteId) // la nota de crédito a Hacienda (si la venta original está aceptada), sin hacer esperar
   return { ...(await getTicket(result.noteId)), credited: result.credited, refund: result.refund }
 }
 

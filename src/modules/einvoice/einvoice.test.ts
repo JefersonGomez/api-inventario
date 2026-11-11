@@ -169,6 +169,22 @@ describe("Facturación electrónica", () => {
     const foreign = buildEInvoiceXml(invoice({ receiver: { name: "John Smith", idType: "EXTRANJERO", idNumber: "P1234567", email: "" } }))
     expect(foreign).toContain("<Identificacion><Tipo>05</Tipo><Numero>P1234567</Numero></Identificacion></Receptor>")
     expect(await validateEInvoiceXml("INVOICE", await signXml(foreign, key))).toEqual([])
+    // nota de crédito: referencia al comprobante original (clave, fecha, código y motivo)
+    const original = sample()
+    const note = buildEInvoiceXml(sample({
+      type: "CREDIT_NOTE", consecutive: "00100001030000000001",
+      reference: { type: "TICKET", clave: original.clave, issuedAt: original.issuedAt, code: "06", reason: "Producto <dañado>" },
+    }))
+    expect(note).toContain(`<InformacionReferencia><TipoDocIR>04</TipoDocIR><Numero>${original.clave}</Numero><FechaEmisionIR>2026-11-10T16:15:00-06:00</FechaEmisionIR><Codigo>06</Codigo><Razon>Producto &lt;dañado&gt;</Razon></InformacionReferencia></NotaCreditoElectronica>`)
+    expect(await validateEInvoiceXml("CREDIT_NOTE", await signXml(note, key))).toEqual([])
+    // la nota de una factura lleva al cliente
+    const invoiceNote = buildEInvoiceXml(sample({
+      type: "CREDIT_NOTE", consecutive: "00100001030000000002", receiver,
+      reference: { type: "INVOICE", clave: original.clave, issuedAt: original.issuedAt, code: "01", reason: "Anulación" },
+    }))
+    expect(invoiceNote).toContain("<Receptor>")
+    expect(await validateEInvoiceXml("CREDIT_NOTE", await signXml(invoiceNote, key))).toEqual([])
+    expect(() => buildEInvoiceXml(sample({ type: "CREDIT_NOTE", reference: null }))).toThrow(/clave del comprobante/)
     // sin cliente no hay factura; el tiquete nunca lleva Receptor
     expect(() => buildEInvoiceXml(invoice({ receiver: null }))).toThrow(/cliente/)
     expect(buildEInvoiceXml(sample({ receiver }))).not.toContain("<Receptor>")
@@ -293,6 +309,53 @@ describe("Facturación electrónica", () => {
       delete process.env.RESEND_API_KEY
       delete process.env.EMAIL_FROM
     }
+  })
+
+  it("la devolución sale como nota de crédito a Hacienda, solo cuando la venta original ya está aceptada", async () => {
+    const manager = await createUser("MANAGER", admin.companyId) // encargado que autoriza la devolución con su código
+    await request(app).post(`/users/${manager.user.id}/pin`).set(admin.auth).send({ pin: "5937" })
+    const sale = await request(app).post("/pos/sales").set(cashier.auth)
+      .send({ lines: [{ productId, quantity: 2 }], payments: [{ method: "CASH", amount: 2260 }] })
+    const saleId = sale.body.document.id as string
+    const lineId = sale.body.document.lines[0].id as string
+    await until(async () => (await einvoiceOf(saleId))?.status === "SENT")
+    const original = (await einvoiceOf(saleId))!
+
+    // devuelve 1 de 2 mientras Hacienda todavía no responde la venta: la nota espera
+    const ret = await request(app).post(`/sales/${saleId}/returns`).set(cashier.auth)
+      .send({ lines: [{ lineId, quantity: 1, condition: "GOOD" }], reason: "No le sirvió", refund: { method: "CASH" }, pin: "5937" })
+    expect(ret.status).toBe(201)
+    const noteId = ret.body.document.id as string
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await einvoiceOf(noteId)).toBeNull()
+    expect((await request(app).get(`/sales/${noteId}`).set(admin.auth)).body).toMatchObject({ einvoice: null, referenceEInvoiceStatus: "SENT" })
+    expect((await request(app).post(`/einvoice/documents/${noteId}/send`).set(admin.auth)).body.code).toBe("EINVOICE_REFERENCE")
+
+    // Hacienda acepta la venta (primer repaso) y entonces sale la nota (siguiente repaso)
+    await prisma.eInvoice.update({ where: { id: original.id }, data: { sentAt: new Date(Date.now() - 60_000) } })
+    await processEInvoices()
+    expect((await einvoiceOf(saleId))!.status).toBe("ACCEPTED")
+    await processEInvoices()
+    const note = (await einvoiceOf(noteId))!
+    expect(note.status).toBe("SENT")
+    const post = calls.find((c) => c.method === "POST" && c.body.includes(note.clave!))!
+    const signed = Buffer.from(JSON.parse(post.body).comprobanteXml, "base64").toString("utf8")
+    expect(signed).toContain("<NotaCreditoElectronica")
+    expect(signed).toContain(`<TipoDocIR>04</TipoDocIR><Numero>${original.clave}</Numero>`)
+    expect(signed).toContain("<Codigo>06</Codigo><Razon>No le sirvió</Razon>") // parcial = devolución de mercancía
+    expect(signed).not.toContain("<Receptor>")
+    expect(await validateEInvoiceXml("CREDIT_NOTE", signed)).toEqual([])
+    // la venta muestra el estado de su nota
+    const detail = (await request(app).get(`/sales/${saleId}`).set(admin.auth)).body
+    expect(detail.creditNotes).toEqual([expect.objectContaining({ id: noteId, einvoice: { status: "SENT" } })])
+
+    // devolver lo que queda de una venta que Hacienda nunca tuvo (vendida antes de encender): la nota no se manda
+    const old = (await request(app).get(`/sales/${beforeEnabledId}`).set(admin.auth)).body
+    const back = await request(app).post(`/sales/${beforeEnabledId}/returns`).set(cashier.auth)
+      .send({ lines: [{ lineId: old.document.lines[0].id, quantity: 1, condition: "GOOD" }], reason: "Cambio de opinión", refund: { method: "CASH" }, pin: "5937" })
+    await processEInvoices()
+    expect(await einvoiceOf(back.body.document.id)).toBeNull()
+    expect((await request(app).get(`/sales/${back.body.document.id}`).set(admin.auth)).body.referenceEInvoiceStatus).toBeNull()
   })
 
   it("si Hacienda no responde se reintenta con espera; si falta el CABYS queda en error y avisa", async () => {
