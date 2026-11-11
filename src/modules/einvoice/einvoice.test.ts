@@ -12,6 +12,7 @@ import { loadSigningKey, signXml, verifyXml } from "./signer.ts"
 import { buildEInvoiceXml, type EInvoiceData } from "./xml.ts"
 import { validateEInvoiceXml } from "./xsd-validate.ts"
 import { processEInvoices } from "./einvoice.service.ts"
+import { cleanHaciendaMessage } from "./hacienda.client.ts"
 
 type User = Awaited<ReturnType<typeof createUser>>
 const HOLDER = "112340567" // cédula física del titular de la llave de prueba
@@ -110,6 +111,22 @@ describe("Facturación electrónica", () => {
     expect(clave).toBe("506101126003101123456001000010400000000071" + "87654321")
     expect(clave).toHaveLength(50)
     expect(() => buildClave({ issuedAt: new Date(), idNumber: "1", consecutive: "123" })).toThrow(/20 dígitos/)
+  })
+
+  it("el rechazo de Hacienda se limpia: sin el aviso de pruebas, solo el motivo con su código", () => {
+    const raw = [
+      "Este comprobante fue recibido en el ambiente de pruebas, por lo cual no tiene validez para fines tributarios.&#13;",
+      "",
+      "El comprobante electrónico tiene los siguientes errores: ",
+      "[",
+      "codigo, mensaje, fila, columna",
+      `-400, "En la línea (1) el código ""X"" no existe", 0, 0`,
+      `-37, "Ubicación inválida", 0, 0`,
+      "]",
+    ].join("\n")
+    expect(cleanHaciendaMessage(raw)).toBe(`En la línea (1) el código "X" no existe (código -400)\nUbicación inválida (código -37)`)
+    expect(cleanHaciendaMessage("Este comprobante fue recibido en el ambiente de pruebas, por lo cual no tiene validez.\nAceptado")).toBe("Aceptado")
+    expect(cleanHaciendaMessage(null)).toBeNull()
   })
 
   it("el tiquete cumple el XSD oficial v4.4 y la firma XAdES se verifica", async () => {

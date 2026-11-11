@@ -71,6 +71,17 @@ export async function haciendaStatus(c: HaciendaCredentials, clave: string): Pro
   const body = (await res.json()) as { "ind-estado"?: string; "respuesta-xml"?: string }
   const responseXml = body["respuesta-xml"] ? Buffer.from(body["respuesta-xml"], "base64").toString("utf8") : null
   const detail = responseXml?.match(/<DetalleMensaje>([\s\S]*?)<\/DetalleMensaje>/)?.[1] ?? null
-  const message = detail?.replace(/&#13;/g, "").replace(/""/g, "\"").trim() || null
-  return { state: (body["ind-estado"] ?? "procesando").toLowerCase(), responseXml, message }
+  return { state: (body["ind-estado"] ?? "procesando").toLowerCase(), responseXml, message: cleanHaciendaMessage(detail) }
+}
+
+// DetalleMensaje viene con un aviso fijo del ambiente de pruebas y los errores en un "CSV"
+// (codigo, mensaje, fila, columna). Se deja solo lo útil: "mensaje (código -400)", uno por línea.
+export function cleanHaciendaMessage(detail: string | null | undefined): string | null {
+  if (!detail) return null
+  const text = detail.replace(/&#13;/g, "").replace(/\r/g, "")
+    .replace(/Este comprobante fue recibido en el ambiente de pruebas[^\n]*\n?/i, "")
+  const items = [...text.matchAll(/^\s*(-?\d+)\s*,\s*"((?:[^"]|"")*)"\s*,\s*\d+\s*,\s*\d+\s*$/gm)]
+    .map((m) => `${m[2]!.replace(/""/g, "\"").trim()} (código ${m[1]})`)
+  if (items.length) return items.join("\n")
+  return text.replace(/""/g, "\"").trim() || null
 }
