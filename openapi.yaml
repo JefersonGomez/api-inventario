@@ -75,6 +75,7 @@ tags:
   - name: Comentarios
   - name: Notificaciones
   - name: Reportes
+  - name: Facturación electrónica
   - name: Auditoría
   - name: Asistente
   - name: Plataforma
@@ -2863,6 +2864,53 @@ paths:
         '200': { description: Paquete del mes }
         '400': { description: Mes inválido }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /einvoice/documents/{id}:
+    get:
+      tags: [Facturación electrónica]
+      summary: Estado del comprobante ante Hacienda (company.manage)
+      description: |
+        { documentId, clave, environment (pruebas | produccion), status (PENDING | SENT | ACCEPTED | REJECTED), message
+        (detalle de Hacienda), attempts, lastError, sentAt, answeredAt } o null si todavía no se envió.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Estado o null }
+        "404": { description: Comprobante no encontrado }
+  /einvoice/documents/{id}/send:
+    post:
+      tags: [Facturación electrónica]
+      summary: Firmar y enviar el comprobante a Hacienda (company.manage)
+      description: |
+        Fase 1: solo tiquetes. La primera vez arma el XML v4.4 (clave de 50 dígitos), lo valida contra el XSD oficial, lo firma
+        con XAdES-EPES y lo guarda; después lo envía. Reintentar manda el mismo XML; si ya fue recibido, consulta el estado.
+        Errores con code: EINVOICE_NOT_CONFIGURED (faltan credenciales), EINVOICE_FISCAL_DATA (faltan datos fiscales),
+        EINVOICE_KEY_MISMATCH (la llave es de otra identificación), EINVOICE_TYPE, EINVOICE_SCHEMA, EINVOICE_ENV.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Estado después del envío }
+        "400": { description: Tipo de comprobante todavía no soportado }
+        "409": { description: "Falta configuración o datos fiscales, o la llave no corresponde" }
+        "422": { description: El XML no cumple el esquema }
+  /einvoice/documents/{id}/refresh:
+    post:
+      tags: [Facturación electrónica]
+      summary: Consultar la respuesta de Hacienda (company.manage)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Estado actualizado (ACCEPTED/REJECTED con el mensaje de Hacienda) }
+        "404": { description: No se ha enviado }
+  /einvoice/documents/{id}/xml:
+    get:
+      tags: [Facturación electrónica]
+      summary: Descargar el XML firmado (company.manage)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: XML firmado, content: { application/xml: { schema: { type: string } } } }
+        "404": { description: Sin XML firmado }
 
   /reports/daily-summaries:
     get:

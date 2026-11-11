@@ -455,6 +455,7 @@ model Company {
   bankImports           BankImport[]
   cashDeposits          CashDeposit[]
   vatPeriods            VatPeriod[]
+  einvoices             EInvoice[]
 
   @@index([ownerId])
 }
@@ -540,6 +541,7 @@ model Document {
   lines                  DocumentLine[]
   negatives              StockNegative[]
   payments               DocumentPayment[]
+  einvoice               EInvoice?
 
   @@unique([companyId, type, branchCode, terminalCode, number])
   @@unique([companyId, clientSaleId])
@@ -1266,4 +1268,35 @@ model BankMatch {
 
   @@unique([sourceType, sourceId])
   @@index([bankTransactionId])
+}
+
+// Facturación electrónica (Bloque 9). Estado del envío de un comprobante a Hacienda: uno por Document
+// (el Document es inmutable, por eso el estado vive aparte). Guarda el XML firmado y la respuesta.
+enum EInvoiceStatus {
+  PENDING // firmado, todavía no se envió (o falló el envío y se reintenta)
+  SENT // Hacienda lo recibió y lo está procesando
+  ACCEPTED
+  REJECTED
+}
+
+model EInvoice {
+  id          String         @id @default(uuid())
+  companyId   String
+  company     Company        @relation(fields: [companyId], references: [id])
+  documentId  String         @unique
+  document    Document       @relation(fields: [documentId], references: [id])
+  clave       String         @unique // clave numérica de 50 dígitos
+  environment String // "pruebas" o "produccion"
+  status      EInvoiceStatus @default(PENDING)
+  xml         String // comprobante firmado (XAdES-EPES)
+  responseXml String? // MensajeHacienda (aceptado/rechazado), decodificado
+  message     String? // detalle de Hacienda (motivo del rechazo)
+  attempts    Int            @default(0)
+  lastError   String? // último error de comunicación (sin secretos)
+  sentAt      DateTime?
+  answeredAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([companyId, status])
 }
