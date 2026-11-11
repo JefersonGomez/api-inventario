@@ -77,6 +77,12 @@ describe("Facturación electrónica", () => {
       const url = String(input)
       calls.push({ url, method: init?.method ?? "GET", body: init?.body ? String(init.body) : "" })
       if (url.startsWith("https://api.resend.com")) return mail.ok ? Response.json({ id: "correo-1" }) : new Response("caído", { status: 500 })
+      if (url.startsWith("https://api.hacienda.go.cr/fe/cabys")) {
+        const arroz = { codigo: "2314000991000", descripcion: "Arroz precocido", impuesto: 1, categorias: [] }
+        if (url.includes("codigo=2314000991000")) return Response.json([arroz])
+        if (url.includes("codigo=")) return Response.json([])
+        return Response.json({ total: 16, cantidad: 2, cabys: [arroz, { codigo: "2312000000300", descripcion: "Harina de arroz", impuesto: 13, categorias: [] }] })
+      }
       if (url.startsWith("https://api.hacienda.go.cr/fe/ae")) {
         return url.endsWith("=3101123456")
           ? Response.json({ nombre: "CONSTRUCTORA  LOS PINOS SOCIEDAD ANONIMA", tipoIdentificacion: "02", situacion: { estado: "Inscrito" }, actividades: [{ estado: "A", codigo: "4100.0", descripcion: "Construcción" }, { estado: "I", codigo: "1", descripcion: "x" }] })
@@ -368,6 +374,23 @@ describe("Facturación electrónica", () => {
     await processEInvoices()
     expect(await einvoiceOf(back.body.document.id)).toBeNull()
     expect((await request(app).get(`/sales/${back.body.document.id}`).set(admin.auth)).body.referenceEInvoiceStatus).toBeNull()
+  })
+
+  it("catálogo CABYS: buscar por texto o revisar un código, con la tarifa de IVA del sistema", async () => {
+    const found = await request(app).get("/einvoice/cabys").query({ q: "arroz" }).set(admin.auth)
+    expect(found.body).toEqual({
+      total: 16,
+      items: [
+        { code: "2314000991000", description: "Arroz precocido", taxPercent: 1, taxRate: "RATE_1" },
+        { code: "2312000000300", description: "Harina de arroz", taxPercent: 13, taxRate: "RATE_13" },
+      ],
+    })
+    expect((await request(app).get("/einvoice/cabys").query({ q: "2314000991000" }).set(admin.auth)).body.items).toEqual([
+      { code: "2314000991000", description: "Arroz precocido", taxPercent: 1, taxRate: "RATE_1" },
+    ])
+    expect((await request(app).get("/einvoice/cabys").query({ q: "1234567890123" }).set(admin.auth)).body).toEqual({ items: [], total: 0 })
+    expect((await request(app).get("/einvoice/cabys").query({ q: "ar" }).set(admin.auth)).body.code).toBe("CABYS_QUERY")
+    expect((await request(app).get("/einvoice/cabys").query({ q: "arroz" }).set(cashier.auth)).status).toBe(403) // products.manage
   })
 
   it("la venta que la caja hizo sin internet va a Hacienda como situación 3, con la hora real de la venta", async () => {

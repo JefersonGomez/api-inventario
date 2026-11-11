@@ -75,9 +75,17 @@ const PRODUCTS: P[] = [
   { sku: "LNT-SEG", name: "Lentes de seguridad", unit: "UNIT", price: 2800, cost: 1300, cat: "Jardín y seguridad", min: 6, stock: [25, 12, 30], weight: 2 },
 ]
 // CABYS por categoría (13 dígitos; de ejemplo)
+// CABYS reales por producto, buscados en el catálogo público de Hacienda (todos con IVA 13 %)
 const CABYS: Record<string, string> = {
-  Herramientas: "4291100000100", Tornillería: "4299400000000", Electricidad: "4632100000000", Fontanería: "3632100000000",
-  Pinturas: "3511000000100", Construcción: "3744000000000", "Jardín y seguridad": "4292100000000",
+  "MRT-16": "4292199990200", "DST-6": "4292199990400", "CNT-5M": "4823300009900", "ALC-8": "4292103029900", "LLV-10": "4292104010100",
+  "TAL-650": "4423201000100", "BRC-CON": "4292201050000", "SRR-ARC": "4292102019900", "NVL-60": "4821203999900",
+  "CLV-2": "4294401019900", "CLV-3": "4294401019900", "TRN-GYP": "4294401030200", "TRN-MAD": "4294401030100", "TCO-14": "3695099990000",
+  "ARN-38": "4294401079900", "CBL-12": "4634002029900", "CBL-14": "4634002029900", "TMC-DBL": "4621206990100", "APG-SEN": "4621205000200",
+  "BMB-9W": "4651006000000", "CNT-AIS": "3625000000100", "BRK-20": "4621203009900",
+  "PVC-12": "3632002999900", "CDO-12": "3632098990100", "PGM-PVC": "3542099990000", "LLP-12": "4324002990000", "TFL-CNT": "3639099999900",
+  "PNT-BLA": "3511003000100", "PNT-ANT": "3511003000500", "BRC-3": "3899304020000", "RDL-9": "3899304010000", "THN-L": "3511002000300", "LJA-120": "3791002020100",
+  "CMT-50": "3744001009900", "ARN-40": "1531002000000", "VRL-38": "4124199010100", "ALM-NEG": "4126300010000", "MLL-GLV": "4294303990100",
+  "MNG-15": "3623001010000", "PLA-CUA": "4292101010000", "GNT-TRB": "2820704000000", "LNT-SEG": "4831203009900",
 }
 const SUPPLIERS = [
   { name: "Distribuidora Ferretera del Valle", idType: "JURIDICA" as const, idNumber: "3101234567", email: "ventas@ferredelvalle.demo", phone: "2222-1100" },
@@ -195,7 +203,7 @@ export async function resetDemo(opts: { days?: number; log?: (m: string) => void
   const company = await prismaRoot.company.create({
     data: {
       name: "Ferretería El Tornillo", isDemo: true, ownerId: admin.id, currency: "CRC",
-      legalName: "Ferretería El Tornillo S.A.", idType: "JURIDICA", idNumber: "3101999888", economicActivity: "475201",
+      legalName: "Ferretería El Tornillo S.A.", idType: "JURIDICA", idNumber: "3101999888", economicActivity: "4752.0",
       invoiceEmail: "facturas@eltornillo.demo", phone: "2222-3333", province: "1", canton: "01", district: "01",
       addressDetail: "Avenida Central, calle 5", returnDays: 365, sinpeNumber: "88887777", sinpeName: "Ferretería El Tornillo S.A.", onboardingDismissedAt: new Date(),
     },
@@ -234,7 +242,7 @@ export async function resetDemo(opts: { days?: number; log?: (m: string) => void
       const row = await prisma.product.create({
         data: {
           companyId: cid, sku: p.sku, name: p.name, unit: p.unit, price: p.price, cost: p.cost, taxRate: "RATE_13",
-          cabys: CABYS[p.cat]!, minStock: p.min, stock: 0, categoryId: cats.get(p.cat)!,
+          cabys: CABYS[p.sku]!, minStock: p.min, stock: 0, categoryId: cats.get(p.cat)!,
           supplierId: suppliers[CATEGORIES.indexOf(p.cat) % suppliers.length]!.id,
         },
       })

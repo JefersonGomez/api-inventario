@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import { documentXml, getDocumentEInvoice, refreshDocument, resendEmail, sendDocument } from "./einvoice.service.ts"
 import { getSettings, saveSettings, testSettings } from "./einvoice-settings.service.ts"
 import { lookupTaxpayer } from "./taxpayer.service.ts"
+import { searchCabys } from "./cabys.service.ts"
 
 type HttpError = Error & { status?: number; code?: string }
 const reply = (fn: (req: Request) => Promise<unknown>) => async (req: Request, res: Response) => {
@@ -18,6 +19,7 @@ export const sendEInvoiceHandler = reply((req) => sendDocument(String(req.params
 export const refreshEInvoiceHandler = reply((req) => refreshDocument(String(req.params.id)))
 export const emailEInvoiceHandler = reply((req) => resendEmail(String(req.params.id), req.user!.id))
 export const taxpayerHandler = reply((req) => lookupTaxpayer(String(req.params.id)))
+export const cabysHandler = reply((req) => searchCabys(String(req.query.q ?? "")))
 
 export async function xmlEInvoiceHandler(req: Request, res: Response) {
   try {

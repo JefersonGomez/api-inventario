@@ -2954,6 +2954,16 @@ paths:
       responses:
         "200": { description: "Enviado (emailedTo, emailedAt)" }
         "409": { description: "Todavía no está aceptado (EINVOICE_NOT_ACCEPTED) o no se pudo enviar (EINVOICE_EMAIL, con el motivo)" }
+  /einvoice/cabys:
+    get:
+      tags: [Facturación electrónica]
+      summary: Buscar en el catálogo CABYS de Hacienda (consulta pública; products.manage)
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string }, description: "Texto (3+ letras) o un código de 13 dígitos" }
+      responses:
+        "200": { description: "{ items: [{ code, description, taxPercent, taxRate }], total } — un código que no existe da items vacío" }
+        "400": { description: Texto muy corto (CABYS_QUERY) }
+        "502": { description: Hacienda no responde (CABYS_UNAVAILABLE) }
   /einvoice/taxpayer/{id}:
     get:
       tags: [Facturación electrónica]

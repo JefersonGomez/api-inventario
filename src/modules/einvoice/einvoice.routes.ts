@@ -5,7 +5,7 @@ import multer from "multer"
 import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts"
 import { validate } from "../../middlewares/validate.middleware.ts"
 import {
-  emailEInvoiceHandler, getEInvoiceHandler, getSettingsHandler, refreshEInvoiceHandler, saveSettingsHandler, sendEInvoiceHandler, taxpayerHandler, testSettingsHandler, xmlEInvoiceHandler,
+  emailEInvoiceHandler, getEInvoiceHandler, getSettingsHandler, refreshEInvoiceHandler, saveSettingsHandler, sendEInvoiceHandler, taxpayerHandler, cabysHandler, testSettingsHandler, xmlEInvoiceHandler,
 } from "./einvoice.controller.ts"
 import { settingsSchema } from "./einvoice-settings.service.ts"
 
@@ -16,6 +16,8 @@ const keyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 
 
 // nombre y tipo de identificación de un contribuyente (consulta pública de Hacienda), para registrar clientes
 router.get("/taxpayer/:id", Authenticated, Can("customers.manage"), taxpayerHandler)
+// catálogo CABYS (consulta pública): buscar por texto o revisar un código, con su tarifa de IVA
+router.get("/cabys", Authenticated, Can("products.manage"), cabysHandler)
 
 router.get("/settings", Authenticated, Can("company.manage"), getSettingsHandler)
 // multipart: el permiso se revisa antes de recibir el archivo y el cuerpo se valida después de multer
