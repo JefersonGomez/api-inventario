@@ -3121,6 +3121,37 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: Proveedor u orden no encontrados }
 
+  /payables/invoices/xml/preview:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Vista previa de la factura electrónica de un proveedor desde su XML (payables.manage)
+      description: "multipart con el campo files: el XML de la factura y, opcional, la respuesta de Hacienda (en cualquier orden, 1 MB c/u). No guarda nada."
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { files: { type: array, items: { type: string, format: binary } } } }
+      responses:
+        "200": { description: "{ kind, clave, number, issueDate, dueDate, supplier { …, existing }, lines, taxes, total, haciendaStatus, creditable, duplicateId, notices [{ level error|warning|info, code, text }], canImport }" }
+        "400": { description: Falta el XML de la factura }
+        "422": { description: "No es una factura electrónica válida (o es una nota de crédito: todavía no se importa)" }
+  /payables/invoices/xml:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Registrar en Cuentas por pagar la factura del proveedor desde su XML (payables.manage)
+      description: "Mismos archivos que la vista previa (se vuelven a leer en el servidor) + campos opcionales dueDate, creditable (true/false) y note. Crea el proveedor si no existe (por su cédula) y guarda la clave y el XML."
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files: { type: array, items: { type: string, format: binary } }
+                dueDate: { type: string, format: date }
+                creditable: { type: string, enum: ["true", "false"] }
+                note: { type: string }
+      responses:
+        "201": { description: "La factura registrada (id, supplierId, number, total, clave, haciendaStatus…)" }
+        "409": { description: "No se puede registrar: ya importada, rechazada por Hacienda, tarifa o moneda no soportada" }
   /payables/invoices/{id}/void:
     post:
       tags: [Cuentas por pagar]

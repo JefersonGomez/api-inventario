@@ -3,6 +3,7 @@ import {
   getSupplierAccount, listInvoices, listPayables, registerInvoice, registerSupplierPayment, voidInvoice,
 } from "./payables.service.ts"
 import { emit, EVERYONE } from "../../shared/realtime.ts"
+import { importXmlInvoice, previewXmlInvoice } from "./invoice-import.service.ts"
 
 const TOPICS = ["payables"]
 // cada handler: llama al service y responde; los errores traen su status (404…)
@@ -25,3 +26,8 @@ export const accountHandler = handle((req) => getSupplierAccount(req.params.id))
 export const registerInvoiceHandler = handle((req) => registerInvoice(req.body, req.user!.id), 201, TOPICS)
 export const voidInvoiceHandler = handle((req) => voidInvoice(req.params.id, req.body.reason, req.user!.id), 200, TOPICS)
 export const registerPaymentHandler = handle((req) => registerSupplierPayment(req.body, req.user!.id), 201, TOPICS)
+
+// ---------- Importar el XML de la factura del proveedor ----------
+const uploaded = (req: Request) => ((req.files as Express.Multer.File[] | undefined) ?? []).map((f) => f.buffer)
+export const previewXmlHandler = handle((req) => previewXmlInvoice(uploaded(req)))
+export const importXmlHandler = handle((req) => importXmlInvoice(uploaded(req), req.body, req.user!.id), 201, TOPICS)

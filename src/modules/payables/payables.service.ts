@@ -133,7 +133,7 @@ export async function voidInvoice(id: string, reason: string, userId: string) {
   if (!invoice) throw fail("Factura no encontrada", 404)
   if (invoice.voidedAt) throw new Error("La factura ya está anulada")
   if (invoice.paid.greaterThan(0)) throw new Error("La factura tiene pagos: no se puede anular")
-  const saved = await prisma.supplierInvoice.update({ where: { id }, data: { voidedAt: new Date(), voidReason: reason } })
+  const saved = await prisma.supplierInvoice.update({ where: { id }, data: { voidedAt: new Date(), voidReason: reason }, omit: { xml: true } })
   await logAudit(userId, "UPDATE", "SupplierInvoice", id, { voided: true, number: invoice.number, reason })
   return saved
 }
@@ -153,6 +153,7 @@ export async function listInvoices(f: z.infer<typeof invoicesQuerySchema>) {
     prisma.supplierInvoice.findMany({
       where,
       include: { supplier: { select: { id: true, name: true } } },
+      omit: { xml: true }, // el XML del proveedor no viaja en las listas
       orderBy: f.status === "open" || f.status === "overdue" ? [{ dueDate: "asc" }, { createdAt: "asc" }] : { createdAt: "desc" },
       ...pageArgs(f),
     }),
@@ -218,6 +219,7 @@ export async function getSupplierAccount(supplierId: string) {
       orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
       take: 100,
       include: { taxes: { select: { rate: true, base: true, tax: true } } },
+      omit: { xml: true },
     }),
     prisma.supplierPayment.findMany({
       where: { supplierId },
