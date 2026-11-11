@@ -4,6 +4,8 @@ import type { DocumentType, IdType, PaymentMethod, SaleCondition, TaxRate, UnitO
 
 // Tipo de identificación (IdentificacionType/Tipo); el extranjero no se identifica así en el emisor
 export const ID_TYPE_CODE: Record<Exclude<IdType, "EXTRANJERO">, string> = { FISICA: "01", JURIDICA: "02", DIMEX: "03", NITE: "04" }
+// Receptor (cliente): el extranjero va como 05 "extranjero no domiciliado"
+export const RECEIVER_ID_TYPE_CODE: Record<IdType, string> = { ...ID_TYPE_CODE, EXTRANJERO: "05" }
 
 // Código de tarifa del IVA (CodigoTarifaIVAType) y su porcentaje
 export const TAX_RATE_CODE: Record<TaxRate, string> = { RATE_1: "02", RATE_2: "03", RATE_4: "04", RATE_13: "08", EXEMPT: "10" }

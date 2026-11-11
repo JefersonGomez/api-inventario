@@ -58,6 +58,7 @@ describe("Facturación electrónica", () => {
   // Hacienda simulada: lo que se llamó y cómo responde cada cosa
   const calls: { url: string; method: string; body: string }[] = []
   const hacienda = { token: true, post: 202, state: "aceptado" }
+  const mail = { ok: true } // Resend simulado
   const answer = Buffer.from("<MensajeHacienda><DetalleMensaje>Aceptado en pruebas</DetalleMensaje></MensajeHacienda>").toString("base64")
   const sell = async (id: string) => (await request(app).post("/pos/sales").set(cashier.auth)
     .send({ lines: [{ productId: id, quantity: 1 }], payments: [{ method: "CASH", amount: 1130 }] })).body.document.id as string
@@ -75,6 +76,12 @@ describe("Facturación electrónica", () => {
     jest.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
       calls.push({ url, method: init?.method ?? "GET", body: init?.body ? String(init.body) : "" })
+      if (url.startsWith("https://api.resend.com")) return mail.ok ? Response.json({ id: "correo-1" }) : new Response("caído", { status: 500 })
+      if (url.startsWith("https://api.hacienda.go.cr/fe/ae")) {
+        return url.endsWith("=3101123456")
+          ? Response.json({ nombre: "CONSTRUCTORA  LOS PINOS SOCIEDAD ANONIMA", tipoIdentificacion: "02", situacion: { estado: "Inscrito" }, actividades: [{ estado: "A", codigo: "4100.0", descripcion: "Construcción" }, { estado: "I", codigo: "1", descripcion: "x" }] })
+          : new Response(null, { status: 404 })
+      }
       if (url.includes("/token")) {
         return hacienda.token ? Response.json({ access_token: "tkn", expires_in: 300 }) : Response.json({ error_description: "Invalid user credentials" }, { status: 401 })
       }
@@ -145,6 +152,28 @@ describe("Facturación electrónica", () => {
     expect(() => buildEInvoiceXml(sample({ lines: [{ ...sample().lines[0]!, cabys: "" }] }))).toThrow(/CABYS/)
   })
 
+  it("la factura lleva al cliente (Receptor) y cumple el XSD oficial, también a crédito y con cliente extranjero", async () => {
+    const key = await loadSigningKey(makeP12("1234"), "1234")
+    const invoice = (over: Partial<EInvoiceData>) => sample({ type: "INVOICE", consecutive: "00100001010000000007", ...over })
+    const receiver = { name: "Constructora <Los Pinos> S.A.", idType: "JURIDICA" as const, idNumber: "3-101-123456", email: "compras@pinos.cr" }
+    const xml = buildEInvoiceXml(invoice({ receiver }))
+    expect(xml).toContain("<FacturaElectronica xmlns=\"https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/facturaElectronica\"")
+    expect(xml).toContain("<Receptor><Nombre>Constructora &lt;Los Pinos&gt; S.A.</Nombre><Identificacion><Tipo>02</Tipo><Numero>3101123456</Numero></Identificacion><CorreoElectronico>compras@pinos.cr</CorreoElectronico></Receptor>")
+    expect(await validateEInvoiceXml("INVOICE", await signXml(xml, key))).toEqual([])
+    // a crédito y sin pagos: lleva el plazo y ningún medio de pago
+    const credit = buildEInvoiceXml(invoice({ receiver, saleCondition: "CREDIT", creditDays: 30, payments: [] }))
+    expect(credit).toContain("<CondicionVenta>02</CondicionVenta><PlazoCredito>30</PlazoCredito>")
+    expect(credit).not.toContain("<MedioPago>")
+    expect(await validateEInvoiceXml("INVOICE", await signXml(credit, key))).toEqual([])
+    // extranjero (05) y sin correo
+    const foreign = buildEInvoiceXml(invoice({ receiver: { name: "John Smith", idType: "EXTRANJERO", idNumber: "P1234567", email: "" } }))
+    expect(foreign).toContain("<Identificacion><Tipo>05</Tipo><Numero>P1234567</Numero></Identificacion></Receptor>")
+    expect(await validateEInvoiceXml("INVOICE", await signXml(foreign, key))).toEqual([])
+    // sin cliente no hay factura; el tiquete nunca lleva Receptor
+    expect(() => buildEInvoiceXml(invoice({ receiver: null }))).toThrow(/cliente/)
+    expect(buildEInvoiceXml(sample({ receiver }))).not.toContain("<Receptor>")
+  })
+
   it("configuración: la llave debe abrir con su PIN y ser de la empresa; los secretos quedan cifrados", async () => {
     expect((await request(app).get("/einvoice/settings").set(admin.auth)).body).toMatchObject({ configured: false, enabled: false, secretReady: true })
     expect((await request(app).get("/einvoice/settings").set(cashier.auth)).status).toBe(403)
@@ -205,6 +234,67 @@ describe("Facturación electrónica", () => {
     expect((await request(app).get(`/einvoice/documents/${id}`).set(other.auth)).status).toBe(404)
   })
 
+  it("con cliente identificado sale factura: se envía sola, y al aceptarse le llega por correo con los XML", async () => {
+    process.env.RESEND_API_KEY = "re_prueba"
+    process.env.EMAIL_FROM = "Stockly <facturas@prueba.cr>"
+    try {
+      // el nombre exacto se trae de Hacienda con la cédula
+      const found = await request(app).get("/einvoice/taxpayer/3-101-123456").set(cashier.auth)
+      expect(found.body).toEqual({
+        idNumber: "3101123456", name: "CONSTRUCTORA LOS PINOS SOCIEDAD ANONIMA", idType: "JURIDICA", status: "Inscrito",
+        activities: [{ code: "4100.0", description: "Construcción" }],
+      })
+      expect((await request(app).get("/einvoice/taxpayer/3101999999").set(cashier.auth)).body.code).toBe("TAXPAYER_NOT_FOUND")
+      expect((await request(app).get("/einvoice/taxpayer/12").set(cashier.auth)).body.code).toBe("TAXPAYER_ID")
+
+      const customer = (await request(app).post("/customers").set(admin.auth)
+        .send({ name: found.body.name, idType: "JURIDICA", idNumber: "3101123456", email: "compras@pinos.cr" })).body
+      const sale = await request(app).post("/pos/sales").set(cashier.auth)
+        .send({ customerId: customer.id, lines: [{ productId, quantity: 1 }], payments: [{ method: "CARD", amount: 1130, reference: "AUT-778899" }] })
+      expect(sale.body).toMatchObject({ document: { type: "INVOICE" } })
+      const id = sale.body.document.id as string
+      await until(async () => (await einvoiceOf(id))?.status === "SENT")
+      const e = (await einvoiceOf(id))!
+      const post = calls.find((c) => c.method === "POST" && c.body.includes(e.clave!))!
+      const signed = Buffer.from(JSON.parse(post.body).comprobanteXml, "base64").toString("utf8")
+      expect(signed).toContain("<Receptor><Nombre>CONSTRUCTORA LOS PINOS SOCIEDAD ANONIMA</Nombre>")
+      expect(await validateEInvoiceXml("INVOICE", signed)).toEqual([])
+
+      // aceptada → correo al cliente con el XML firmado y la respuesta de Hacienda
+      await prisma.eInvoice.update({ where: { id: e.id }, data: { sentAt: new Date(Date.now() - 60_000) } })
+      await processEInvoices()
+      const done = (await einvoiceOf(id))!
+      expect(done).toMatchObject({ status: "ACCEPTED", emailedTo: "compras@pinos.cr", emailError: null })
+      const email = JSON.parse(calls.filter((c) => c.url.startsWith("https://api.resend.com")).at(-1)!.body)
+      expect(email).toMatchObject({ to: "compras@pinos.cr", from: "Stockly <facturas@prueba.cr>" })
+      expect(email.subject).toMatch(/^Factura electrónica 0010000101/)
+      expect(email.attachments.map((a: { filename: string }) => a.filename)).toEqual([`${e.clave}.xml`, `${e.clave}-respuesta-hacienda.xml`])
+      expect(Buffer.from(email.attachments[0].content, "base64").toString("utf8")).toBe(signed)
+      expect((await request(app).get(`/sales/${id}`).set(admin.auth)).body.einvoice).toMatchObject({ emailedTo: "compras@pinos.cr" })
+
+      // si el correo falla queda el motivo y se reenvía desde la venta
+      mail.ok = false
+      expect((await request(app).post(`/einvoice/documents/${id}/email`).set(admin.auth)).body.code).toBe("EINVOICE_EMAIL")
+      expect((await einvoiceOf(id))!.emailError).toMatch(/No se pudo enviar el correo/)
+      mail.ok = true
+      const again = await request(app).post(`/einvoice/documents/${id}/email`).set(admin.auth)
+      expect(again.body).toMatchObject({ emailedTo: "compras@pinos.cr", emailError: null })
+      expect((await request(app).post(`/einvoice/documents/${id}/email`).set(cashier.auth)).status).toBe(403)
+
+      // cliente identificado sin correo: la factura sale igual y queda anotado que no se pudo entregar
+      const noMail = (await request(app).post("/customers").set(admin.auth).send({ name: "Ana Mora", idType: "FISICA", idNumber: "105550555" })).body
+      const id2 = (await request(app).post("/pos/sales").set(cashier.auth)
+        .send({ customerId: noMail.id, lines: [{ productId, quantity: 1 }], payments: [{ method: "CASH", amount: 1130 }] })).body.document.id as string
+      await until(async () => (await einvoiceOf(id2))?.status === "SENT")
+      await prisma.eInvoice.update({ where: { documentId: id2 }, data: { sentAt: new Date(Date.now() - 60_000) } })
+      await processEInvoices()
+      expect(await einvoiceOf(id2)).toMatchObject({ status: "ACCEPTED", emailedTo: null, emailError: expect.stringMatching(/no tiene un correo/) })
+    } finally {
+      delete process.env.RESEND_API_KEY
+      delete process.env.EMAIL_FROM
+    }
+  })
+
   it("si Hacienda no responde se reintenta con espera; si falta el CABYS queda en error y avisa", async () => {
     hacienda.post = 503
     const id = await sell(productId)
@@ -220,7 +310,8 @@ describe("Facturación electrónica", () => {
     expect(await einvoiceOf(id)).toMatchObject({ status: "SENT", attempts: 2, lastError: null, clave: failed.clave })
 
     const bad = await sell(noCabysId)
-    await until(async () => (await einvoiceOf(bad))?.status === "ERROR")
+    // el estado se guarda antes que el aviso: se espera a los dos
+    await until(async () => (await einvoiceOf(bad))?.status === "ERROR" && (await prisma.notification.count({ where: { type: "einvoiceProblem", userId: admin.user.id } })) > 0)
     expect((await einvoiceOf(bad))!.lastError).toMatch(/CABYS/)
     const notes = await prisma.notification.findMany({ where: { type: "einvoiceProblem", userId: admin.user.id } })
     expect(notes).toEqual([expect.objectContaining({ link: `/sales/${bad}`, meta: expect.objectContaining({ status: "ERROR" }) })])

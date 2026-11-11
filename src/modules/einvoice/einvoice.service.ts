@@ -19,6 +19,7 @@ import { einvoiceConfig } from "./einvoice.config.ts"
 import { haciendaStatus, sendToHacienda } from "./hacienda.client.ts"
 import { signXml } from "./signer.ts"
 import { buildEInvoiceXml } from "./xml.ts"
+import { emailDocument } from "./einvoice-email.ts"
 import { validateEInvoiceXml } from "./xsd-validate.ts"
 
 type HttpError = Error & { status?: number; code?: string }
@@ -26,7 +27,7 @@ const fail = (message: string, status: number, code?: string): HttpError => Obje
 const sameId = (a: string, b: string) => a.replace(/\D/g, "").replace(/^0+/, "") === b.replace(/\D/g, "").replace(/^0+/, "")
 // Errores del comprobante o de los datos (se guardan como ERROR); los demás (configuración, red) no
 const DATA_ERRORS = new Set(["EINVOICE_FISCAL_DATA", "EINVOICE_KEY_MISMATCH", "EINVOICE_SCHEMA", "EINVOICE_DATA"])
-export const AUTO_TYPES = ["TICKET"] as const // fase 2: solo tiquetes
+export const AUTO_TYPES = ["TICKET", "INVOICE"] as const // fase 3: tiquetes y facturas (las notas, en la parte siguiente)
 const MAX_ATTEMPTS = 10
 // espera antes del siguiente reintento automático: 1, 2, 5, 10, 30 min y después cada hora
 const backoffMinutes = (attempts: number) => [1, 2, 5, 10, 30][attempts - 1] ?? 60
@@ -35,6 +36,7 @@ type EInvoiceRow = Prisma.EInvoiceGetPayload<object>
 const view = (e: EInvoiceRow) => ({
   documentId: e.documentId, clave: e.clave, environment: e.environment, status: e.status, message: e.message,
   attempts: e.attempts, lastError: e.lastError, sentAt: e.sentAt, answeredAt: e.answeredAt, nextAttemptAt: e.nextAttemptAt,
+  emailedTo: e.emailedTo, emailedAt: e.emailedAt, emailError: e.emailError,
 })
 export type EInvoiceView = ReturnType<typeof view>
 
@@ -70,12 +72,12 @@ async function notifyProblem(e: EInvoiceRow, consecutive: string) {
 async function prepare(documentId: string, actorId: string) {
   const doc = await prisma.document.findFirst({
     where: { id: documentId },
-    include: { lines: { orderBy: { lineNumber: "asc" } }, payments: true, einvoice: true },
+    include: { lines: { orderBy: { lineNumber: "asc" } }, payments: true, einvoice: true, customer: true },
   })
   if (!doc) throw fail("Comprobante no encontrado", 404)
   if (doc.einvoice && doc.einvoice.status !== "ERROR") return doc.einvoice
   if (!(AUTO_TYPES as readonly string[]).includes(doc.type)) {
-    throw fail("Por ahora solo se envían tiquetes a Hacienda (facturas y notas llegan en la siguiente fase)", 400, "EINVOICE_TYPE")
+    throw fail("Por ahora se envían tiquetes y facturas a Hacienda (las notas de crédito llegan en la siguiente parte)", 400, "EINVOICE_TYPE")
   }
   const cfg = await einvoiceConfig() // sin configuración no se registra nada: es un 409 para quien lo pidió
   try {
@@ -95,6 +97,9 @@ async function prepare(documentId: string, actorId: string) {
           province: company.province!, canton: company.canton!, district: company.district!, address: company.addressDetail!,
           phone: company.phone, email: company.invoiceEmail!,
         },
+        receiver: doc.customer?.idType && doc.customer.idNumber
+          ? { name: doc.customer.name, idType: doc.customer.idType, idNumber: doc.customer.idNumber, email: doc.customer.email }
+          : null,
         currency: doc.currency, saleCondition: doc.saleCondition, creditDays: doc.creditDays,
         lines: doc.lines.map((l) => ({
           cabys: l.cabys ?? "", quantity: l.quantity, unit: l.unit, description: l.description, unitPrice: l.unitPrice,
@@ -191,7 +196,20 @@ export async function refreshDocument(documentId: string) {
     },
   })
   if (updated.status === "REJECTED") await notifyProblem(updated, doc.consecutive)
+  // aceptado: se le entrega al cliente por correo (si falla, queda el motivo y se reenvía desde la venta)
+  if (updated.status === "ACCEPTED") {
+    const emailed = await emailDocument(documentId).catch((err: Error) => { console.error("facturación (correo):", err.message); return null })
+    if (emailed) return view(emailed)
+    return view(await prisma.eInvoice.findUniqueOrThrow({ where: { id: e.id } }))
+  }
   return view(updated)
+}
+
+// Reenviar el comprobante aceptado al correo del cliente (botón en la venta)
+export async function resendEmail(documentId: string, actorId: string) {
+  const sent = await emailDocument(documentId, true)
+  await logAudit(actorId, "UPDATE", "EInvoice", sent!.id, { emailedTo: sent!.emailedTo })
+  return view(sent!)
 }
 
 // El XML firmado (para descargarlo o entregarlo al cliente)

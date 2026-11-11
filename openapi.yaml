@@ -2944,6 +2944,27 @@ paths:
       responses:
         "200": { description: Estado actualizado (ACCEPTED/REJECTED con el mensaje de Hacienda) }
         "404": { description: No se ha enviado }
+  /einvoice/documents/{id}/email:
+    post:
+      tags: [Facturación electrónica]
+      summary: Reenviar el comprobante aceptado al correo del cliente (company.manage)
+      description: "Al aceptarse se envía solo; esto es para reintentar. Adjunta el XML firmado y la respuesta de Hacienda."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: "Enviado (emailedTo, emailedAt)" }
+        "409": { description: "Todavía no está aceptado (EINVOICE_NOT_ACCEPTED) o no se pudo enviar (EINVOICE_EMAIL, con el motivo)" }
+  /einvoice/taxpayer/{id}:
+    get:
+      tags: [Facturación electrónica]
+      summary: Nombre y tipo de identificación de un contribuyente (consulta pública de Hacienda; customers.manage)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: "Cédula (con o sin guiones)" }
+      responses:
+        "200": { description: "{ idNumber, name, idType, status, activities: [{ code, description }] }" }
+        "400": { description: Número incompleto (TAXPAYER_ID) }
+        "404": { description: Hacienda no la tiene registrada (TAXPAYER_NOT_FOUND) }
+        "502": { description: Hacienda no responde (TAXPAYER_UNAVAILABLE) }
   /einvoice/documents/{id}/xml:
     get:
       tags: [Facturación electrónica]

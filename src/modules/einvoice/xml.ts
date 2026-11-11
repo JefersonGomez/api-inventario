@@ -1,11 +1,11 @@
-// Arma el XML v4.4 de un comprobante (fase 1: tiquete electrónico), sin firmar. El orden de los
+// Arma el XML v4.4 de un comprobante (tiquete y factura electrónica), sin firmar. El orden de los
 // elementos es el del XSD oficial; los montos van con 5 decimales como guarda el sistema.
 // Los precios de las líneas ya vienen SIN IVA (DocumentLine), así que solo se ordena y se suma.
 import { Prisma } from "../../generated/prisma/client.ts"
 import type { CurrencyCode, DocumentType, IdType, PaymentMethod, SaleCondition, TaxRate, UnitOfMeasure } from "../../generated/prisma/enums.ts"
 import { TAX_PERCENT } from "../../shared/fiscal.ts"
 import { crDateTime } from "./clave.ts"
-import { DOCUMENT_XML, ID_TYPE_CODE, PAYMENT_CODE, SALE_CONDITION_CODE, TAX_RATE_CODE, UNIT_CODE } from "./codes.ts"
+import { DOCUMENT_XML, ID_TYPE_CODE, PAYMENT_CODE, RECEIVER_ID_TYPE_CODE, SALE_CONDITION_CODE, TAX_RATE_CODE, UNIT_CODE } from "./codes.ts"
 
 const D = Prisma.Decimal
 type Num = Prisma.Decimal | number | string
@@ -29,6 +29,13 @@ export type EInvoiceData = {
     phone?: string | null
     email: string
   }
+  // cliente (obligatorio en la factura; el tiquete no lo lleva)
+  receiver?: {
+    name: string
+    idType: IdType
+    idNumber: string
+    email?: string | null
+  } | null
   currency: CurrencyCode
   exchangeRate?: Num // tipo de cambio (1 en colones)
   saleCondition: SaleCondition
@@ -61,6 +68,9 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   const idType = d.emitter.idType
   if (idType === "EXTRANJERO") throw new Error("El emisor necesita identificación costarricense")
   if (!d.lines.length) throw new Error("El comprobante no tiene líneas")
+  const r = d.type === "TICKET" ? null : d.receiver
+  if (d.type === "INVOICE" && !(r?.name.trim() && r.idNumber)) throw new Error("La factura necesita el nombre y la identificación del cliente")
+  const receiverEmail = (r?.email ?? "").trim()
 
   // ---------- líneas ----------
   const totals = { taxed: new D(0), exempt: new D(0), discounts: new D(0), tax: new D(0) }
@@ -136,6 +146,15 @@ export function buildEInvoiceXml(d: EInvoiceData) {
     phone.length >= 8 ? `<Telefono>${el("CodigoPais", "506")}${el("NumTelefono", phone.slice(-8))}</Telefono>` : "",
     el("CorreoElectronico", esc(e.email.trim())),
     "</Emisor>",
+    r
+      ? [
+          "<Receptor>",
+          el("Nombre", text(r.name, 100)),
+          `<Identificacion>${el("Tipo", RECEIVER_ID_TYPE_CODE[r.idType])}${el("Numero", esc(r.idNumber.replace(/[\s-]/g, "").slice(0, 20)))}</Identificacion>`,
+          /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(receiverEmail) ? el("CorreoElectronico", esc(receiverEmail.slice(0, 160))) : "",
+          "</Receptor>",
+        ].join("")
+      : "",
     el("CondicionVenta", SALE_CONDITION_CODE[d.saleCondition]),
     d.saleCondition === "CREDIT" ? el("PlazoCredito", String(Math.max(d.creditDays ?? 0, 1))) : "",
     `<DetalleServicio>${lines.join("")}</DetalleServicio>`,

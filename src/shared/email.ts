@@ -1,7 +1,9 @@
 // Envío de correo vía la API REST de Resend (sin SDK: es un solo POST).
 // Sin dominio verificado (EMAIL_FROM vacío) Resend solo deja enviar desde onboarding@resend.dev
 // y solo al correo de la cuenta: en ese modo todo va a EMAIL_TEST_TO y el asunto indica el destinatario real.
-export async function sendEmail({ to, subject, html }: { to: string; subject: string; html: string }) {
+export type EmailAttachment = { filename: string; content: string } // content en base64
+
+export async function sendEmail({ to, subject, html, attachments }: { to: string; subject: string; html: string; attachments?: EmailAttachment[] }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("Falta RESEND_API_KEY en el servidor");
 
@@ -14,8 +16,8 @@ export async function sendEmail({ to, subject, html }: { to: string; subject: st
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(
       from
-        ? { from, to, subject, html }
-        : { from: "onboarding@resend.dev", to: testTo, subject: `[Prueba → ${to}] ${subject}`, html }
+        ? { from, to, subject, html, ...(attachments?.length && { attachments }) }
+        : { from: "onboarding@resend.dev", to: testTo, subject: `[Prueba → ${to}] ${subject}`, html, ...(attachments?.length && { attachments }) }
     ),
   });
   if (!res.ok) {

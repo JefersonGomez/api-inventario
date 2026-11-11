@@ -5,7 +5,7 @@ import multer from "multer"
 import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts"
 import { validate } from "../../middlewares/validate.middleware.ts"
 import {
-  getEInvoiceHandler, getSettingsHandler, refreshEInvoiceHandler, saveSettingsHandler, sendEInvoiceHandler, testSettingsHandler, xmlEInvoiceHandler,
+  emailEInvoiceHandler, getEInvoiceHandler, getSettingsHandler, refreshEInvoiceHandler, saveSettingsHandler, sendEInvoiceHandler, taxpayerHandler, testSettingsHandler, xmlEInvoiceHandler,
 } from "./einvoice.controller.ts"
 import { settingsSchema } from "./einvoice-settings.service.ts"
 
@@ -13,6 +13,9 @@ export const router = Router()
 
 // La llave .p12 queda solo en memoria (nunca en disco) hasta cifrarla; pesa unos pocos KB
 const keyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024, files: 1 } })
+
+// nombre y tipo de identificación de un contribuyente (consulta pública de Hacienda), para registrar clientes
+router.get("/taxpayer/:id", Authenticated, Can("customers.manage"), taxpayerHandler)
 
 router.get("/settings", Authenticated, Can("company.manage"), getSettingsHandler)
 // multipart: el permiso se revisa antes de recibir el archivo y el cuerpo se valida después de multer
@@ -23,3 +26,4 @@ router.get("/documents/:id", Authenticated, Can("company.manage"), getEInvoiceHa
 router.get("/documents/:id/xml", Authenticated, Can("company.manage"), xmlEInvoiceHandler)
 router.post("/documents/:id/send", Authenticated, Can("company.manage"), sendEInvoiceHandler)
 router.post("/documents/:id/refresh", Authenticated, Can("company.manage"), refreshEInvoiceHandler)
+router.post("/documents/:id/email", Authenticated, Can("company.manage"), emailEInvoiceHandler) // reenviar al cliente

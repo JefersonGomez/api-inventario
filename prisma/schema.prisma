@@ -1298,6 +1298,9 @@ model EInvoice {
   sentAt        DateTime?
   answeredAt    DateTime?
   nextAttemptAt DateTime? // reintento del envío automático (espera creciente)
+  emailedTo     String? // correo del cliente al que se le entregó (factura aceptada)
+  emailedAt     DateTime?
+  emailError    String? // por qué no se pudo entregar (sin correo del cliente, correo del servidor sin configurar...)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
