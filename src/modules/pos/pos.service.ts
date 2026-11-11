@@ -700,7 +700,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
         terminalCode: register.terminalCode,
         cashSessionId: session.id,
         ...(input.clientSaleId && { clientSaleId: input.clientSaleId }),
-        ...(offline && { issuedAt: input.soldAt! }),
+        ...(offline && { issuedAt: input.soldAt!, offline: true }),
       },
       actor.id,
       tx

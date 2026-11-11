@@ -80,8 +80,9 @@ export function cleanHaciendaMessage(detail: string | null | undefined): string 
   if (!detail) return null
   const text = detail.replace(/&#13;/g, "").replace(/\r/g, "")
     .replace(/Este comprobante fue recibido en el ambiente de pruebas[^\n]*\n?/i, "")
-  const items = [...text.matchAll(/^\s*(-?\d+)\s*,\s*"((?:[^"]|"")*)"\s*,\s*\d+\s*,\s*\d+\s*$/gm)]
-    .map((m) => `${m[2]!.replace(/""/g, "\"").trim()} (código ${m[1]})`)
+  // cada fila: código, "mensaje", fila, columna — Hacienda a veces envuelve el mensaje en comillas dobles (""…"")
+  const items = [...text.matchAll(/^\s*(-?\d+)\s*,\s*(.*?)\s*,\s*-?\d+\s*,\s*-?\d+\s*$/gm)]
+    .map((m) => `${m[2]!.replace(/^"+|"+$/g, "").replace(/""/g, "\"").trim()} (código ${m[1]})`)
   if (items.length) return items.join("\n")
   return text.replace(/""/g, "\"").trim() || null
 }

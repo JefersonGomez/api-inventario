@@ -104,7 +104,8 @@ async function prepare(documentId: string, actorId: string) {
     if (!sameId(company.idNumber!, cfg.key.holderId)) {
       throw fail("La llave criptográfica configurada es de otra identificación: no se puede firmar a nombre de esta empresa", 409, "EINVOICE_KEY_MISMATCH")
     }
-    const clave = buildClave({ issuedAt: doc.issuedAt, idNumber: company.idNumber!, consecutive: doc.consecutive })
+    // vendida en la caja sin conexión: situación 3 "sin internet" (la fecha es la real de la venta)
+    const clave = buildClave({ issuedAt: doc.issuedAt, idNumber: company.idNumber!, consecutive: doc.consecutive, situation: doc.offline ? "3" : "1" })
     let xml: string
     try {
       xml = buildEInvoiceXml({

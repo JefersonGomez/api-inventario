@@ -538,6 +538,7 @@ model Document {
   issuedAt               DateTime          @default(now())
   cashSessionId          String? // turno de caja donde se vendió (POS)
   clientSaleId           String? // id que generó la caja (8B): si la venta llega dos veces, no se duplica
+  offline                Boolean           @default(false) // vendida en la caja SIN CONEXIÓN: a Hacienda va como situación 3 "sin internet"
   cashSession            CashSession?      @relation(fields: [cashSessionId], references: [id])
   lines                  DocumentLine[]
   negatives              StockNegative[]

@@ -133,6 +133,18 @@ describe("Facturación electrónica", () => {
     ].join("\n")
     expect(cleanHaciendaMessage(raw)).toBe(`En la línea (1) el código "X" no existe (código -400)\nUbicación inválida (código -37)`)
     expect(cleanHaciendaMessage("Este comprobante fue recibido en el ambiente de pruebas, por lo cual no tiene validez.\nAceptado")).toBe("Aceptado")
+    // así llega de verdad: el mensaje entre comillas dobles y &#13; al final de cada fila
+    const real = [
+      "Este comprobante fue recibido en el ambiente de pruebas, por lo cual no tiene validez para fines tributarios.",
+      "",
+      "El comprobante electrónico tiene los siguientes errores: &#13;",
+      "[&#13;",
+      "codigo, mensaje, fila, columna&#13;",
+      `-400, ""En la línea (1) el código no se encuentra en el Catálogo CAByS, por favor verifique"", 0, 0&#13;`,
+      "&#13;",
+      "]",
+    ].join("\n")
+    expect(cleanHaciendaMessage(real)).toBe("En la línea (1) el código no se encuentra en el Catálogo CAByS, por favor verifique (código -400)")
     expect(cleanHaciendaMessage(null)).toBeNull()
   })
 
@@ -356,6 +368,25 @@ describe("Facturación electrónica", () => {
     await processEInvoices()
     expect(await einvoiceOf(back.body.document.id)).toBeNull()
     expect((await request(app).get(`/sales/${back.body.document.id}`).set(admin.auth)).body.referenceEInvoiceStatus).toBeNull()
+  })
+
+  it("la venta que la caja hizo sin internet va a Hacienda como situación 3, con la hora real de la venta", async () => {
+    const soldAt = new Date(Date.now() - 2000) // dentro del turno abierto (la caja lo exige)
+    const sale = await request(app).post("/pos/sales").set(cashier.auth).send({
+      clientSaleId: "6f1e2d3c-4b5a-4987-8a1b-2c3d4e5f6a7b", soldAt: soldAt.toISOString(),
+      lines: [{ productId, quantity: 1, seenPrice: 1130 }], payments: [{ method: "CASH", amount: 1130 }],
+    })
+    expect(sale.body).toMatchObject({ document: { offline: true } })
+    const id = sale.body.document.id as string
+    await until(async () => (await einvoiceOf(id))?.status === "SENT")
+    const e = (await einvoiceOf(id))!
+    expect(e.clave![41]).toBe("3") // situación: 3 = sin internet
+    const signed = Buffer.from(JSON.parse(calls.find((c) => c.method === "POST" && c.body.includes(e.clave!))!.body).comprobanteXml, "base64").toString("utf8")
+    expect(signed).toContain(`<FechaEmision>${crDateTime(soldAt)}</FechaEmision>`)
+    // una venta normal sigue siendo situación 1
+    const normal = await sell(productId)
+    await until(async () => (await einvoiceOf(normal))?.status === "SENT")
+    expect((await einvoiceOf(normal))!.clave![41]).toBe("1")
   })
 
   it("si Hacienda no responde se reintenta con espera; si falta el CABYS queda en error y avisa", async () => {

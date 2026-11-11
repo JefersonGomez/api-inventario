@@ -55,6 +55,7 @@ export type IssueDocumentInput = {
   returnAuthorizedById?: string // nota de crédito: encargado que autorizó la devolución
   clientSaleId?: string // POS: id generado en la caja (no se duplica si llega dos veces)
   issuedAt?: Date // POS sin conexión: la hora real en que se vendió
+  offline?: boolean // POS: vendida sin conexión (Hacienda: situación 3)
 }
 
 type Computed = {
@@ -227,6 +228,7 @@ export async function issueDocument(input: IssueDocumentInput, userId: string, c
         ...(input.cashSessionId && { cashSessionId: input.cashSessionId }),
         ...(input.clientSaleId && { clientSaleId: input.clientSaleId }),
         ...(input.issuedAt && { issuedAt: input.issuedAt }),
+        ...(input.offline && { offline: true }),
         ...(input.discountAuthorizedById && { discountAuthorizedById: input.discountAuthorizedById }),
         ...(input.creditAuthorizedById && { creditAuthorizedById: input.creditAuthorizedById }),
         ...(input.returnAuthorizedById && { returnAuthorizedById: input.returnAuthorizedById }),

@@ -2,7 +2,8 @@
 // arma un tiquete de ejemplo a nombre del titular de la llave, lo valida contra el XSD, lo firma, lo envía
 // y consulta la respuesta hasta que Hacienda lo acepte o lo rechace.
 // Con --nota: el tiquete lleva 2 unidades y, aceptado, se envía una NOTA DE CRÉDITO que devuelve 1 (código 06).
-// Uso: npm run einvoice:sandbox [-- --nota]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
+// Con --sin-internet: el tiquete va como venta hecha sin conexión hace 40 minutos (situación 3 en la clave).
+// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
 // Nunca imprime la clave, el PIN ni el token.
 import "dotenv/config"
 import { readFileSync } from "node:fs"
@@ -17,6 +18,7 @@ import { validateEInvoiceXml } from "../src/modules/einvoice/xsd-validate.ts"
 const env = process.env
 if (env.HACIENDA_ENV !== "pruebas") throw new Error("Este script solo corre con HACIENDA_ENV=pruebas")
 const withNote = process.argv.includes("--nota")
+const offline = process.argv.includes("--sin-internet")
 const creds = { env: "pruebas" as const, username: env.HACIENDA_USER!, password: env.HACIENDA_PASSWORD! }
 const key = await loadSigningKey(readFileSync(env.HACIENDA_P12_PATH!), env.HACIENDA_P12_PIN!)
 const id = key.holderId
@@ -44,10 +46,10 @@ const consecutiveFor = (type: DocumentType, at: Date) =>
   `00199999${DOCUMENT_CODE[type as keyof typeof DOCUMENT_CODE]}${String(Math.floor(at.getTime() / 1000) % 10_000_000_000).padStart(10, "0")}`
 
 // arma, valida, firma, envía y espera la respuesta; devuelve la clave si Hacienda lo aceptó
-async function run(label: string, type: DocumentType, units: number, reference: EInvoiceData["reference"] = null) {
-  const issuedAt = new Date()
+async function run(label: string, type: DocumentType, units: number, reference: EInvoiceData["reference"] = null, situation: "1" | "3" = "1") {
+  const issuedAt = new Date(Date.now() - (situation === "3" ? 40 * 60_000 : 0)) // sin internet: se vendió antes
   const consecutive = consecutiveFor(type, issuedAt)
-  const clave = buildClave({ issuedAt, idNumber: id, consecutive })
+  const clave = buildClave({ issuedAt, idNumber: id, consecutive, situation })
   const xml = buildEInvoiceXml({
     type, clave, consecutive, issuedAt, provider: id, activity,
     emitter: {
@@ -83,7 +85,7 @@ async function run(label: string, type: DocumentType, units: number, reference: 
   return null
 }
 
-const ticket = await run("Tiquete", "TICKET", withNote ? 2 : 1)
+const ticket = await run(offline ? "Tiquete sin internet (situación 3)" : "Tiquete", "TICKET", withNote ? 2 : 1, null, offline ? "3" : "1")
 if (!ticket) process.exit(1)
 if (withNote) {
   const note = await run("Nota de crédito (devuelve 1 de 2)", "CREDIT_NOTE", 1, {
