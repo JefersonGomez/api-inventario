@@ -7,6 +7,7 @@
 //  - Dinero: venta a crédito → primero rebaja sus cuotas (desde la última); lo que sobra, y en las de
 //    contado todo, se reembolsa por el medio que elige el cajero (el efectivo sale de su caja abierta).
 import { z } from "zod"
+import { getDocumentEInvoice } from "../einvoice/einvoice.service.ts"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { assertLocationAllowed, locationScope } from "../../shared/tenant.ts"
@@ -75,6 +76,7 @@ export async function listSales(f: z.infer<typeof salesQuerySchema>) {
         cashSession: { select: { register: { select: { name: true, location: { select: { name: true } } } } } },
         referenceDocument: { select: { id: true, consecutive: true } },
         _count: { select: { referencedBy: true } },
+        einvoice: { select: { status: true } }, // estado ante Hacienda (null = no se envió)
       },
     }),
     prisma.document.count({ where }),
@@ -97,7 +99,8 @@ export async function getSale(id: string) {
   const exists = await prisma.document.findFirst({ where: { id, type: { in: [...SALE_TYPES, "CREDIT_NOTE"] } }, select: { id: true, type: true, issuedAt: true } })
   if (!exists) throw fail("Venta no encontrada", 404)
   const ticket = await getTicket(id)
-  if (exists.type === "CREDIT_NOTE") return { ...ticket, returned: {}, creditNotes: [], returnUntil: null }
+  const einvoice = await getDocumentEInvoice(id)
+  if (exists.type === "CREDIT_NOTE") return { ...ticket, einvoice, returned: {}, creditNotes: [], returnUntil: null }
   const [returned, notes, company] = await Promise.all([
     returnedByLine(id),
     prisma.document.findMany({
@@ -109,6 +112,7 @@ export async function getSale(id: string) {
   ])
   return {
     ...ticket,
+    einvoice,
     returned: Object.fromEntries([...returned].map(([k, v]) => [k, v.toNumber()])),
     creditNotes: notes,
     returnUntil: new Date(exists.issuedAt.getTime() + company.returnDays * 86_400_000),

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express"
 import { documentXml, getDocumentEInvoice, refreshDocument, sendDocument } from "./einvoice.service.ts"
+import { getSettings, saveSettings, testSettings } from "./einvoice-settings.service.ts"
 
 type HttpError = Error & { status?: number; code?: string }
 const reply = (fn: (req: Request) => Promise<unknown>) => async (req: Request, res: Response) => {
@@ -26,3 +27,8 @@ export async function xmlEInvoiceHandler(req: Request, res: Response) {
     res.status(e.status ?? 400).json({ error: e.message })
   }
 }
+
+// ---------- Configuración (fase 2) ----------
+export const getSettingsHandler = reply(() => getSettings())
+export const saveSettingsHandler = reply((req) => saveSettings(req.body, req.file?.buffer, req.user!.id))
+export const testSettingsHandler = reply(() => testSettings())

@@ -7,10 +7,10 @@ export type HaciendaCredentials = { env: HaciendaEnv; username: string; password
 // Token por ambiente y usuario, reutilizado hasta 30 s antes de vencer (dura 5 minutos)
 const tokens = new Map<string, { value: string; expires: number }>()
 
-async function token(c: HaciendaCredentials) {
+async function token(c: HaciendaCredentials, fresh = false) {
   const key = `${c.env}:${c.username}`
   const cached = tokens.get(key)
-  if (cached && cached.expires > Date.now()) return cached.value
+  if (!fresh && cached && cached.expires > Date.now()) return cached.value
   const ep = HACIENDA_ENDPOINTS[c.env]
   const res = await fetch(ep.token, {
     method: "POST",
@@ -24,6 +24,11 @@ async function token(c: HaciendaCredentials) {
   }
   tokens.set(key, { value: body.access_token, expires: Date.now() + ((body.expires_in ?? 300) - 30) * 1000 })
   return body.access_token
+}
+
+// Prueba usuario y clave pidiendo un token nuevo (al guardar la configuración o con "Probar conexión")
+export async function checkCredentials(c: HaciendaCredentials) {
+  await token(c, true)
 }
 
 export type SendPayload = {

@@ -2865,6 +2865,48 @@ paths:
         '400': { description: Mes inválido }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /einvoice/settings:
+    get:
+      tags: [Facturación electrónica]
+      summary: Configuración de la empresa, sin secretos (company.manage)
+      description: |
+        { configured, enabled, enabledAt, environment, username, hasPassword, key: { holderId, holderName, expiresAt } | null,
+        provider, updatedAt, secretReady (el servidor tiene EINVOICE_SECRET) }. La clave, el PIN y la llave nunca se devuelven.
+      responses:
+        "200": { description: Configuración }
+    put:
+      tags: [Facturación electrónica]
+      summary: Guardar credenciales, llave .p12 y envío automático (company.manage)
+      description: |
+        multipart/form-data. Campos opcionales; lo que no se manda queda como estaba. La llave se revisa con su PIN y debe ser de
+        la identificación de la empresa; usuario y clave se prueban contra Hacienda antes de guardar. Todo lo secreto se guarda
+        cifrado (AES-256-GCM). enabled=true pide además los datos fiscales completos y desde ese momento cada tiquete se envía solo.
+        Errores con code: EINVOICE_FISCAL_DATA, EINVOICE_PIN, EINVOICE_KEY, EINVOICE_KEY_MISMATCH, EINVOICE_KEY_EXPIRED,
+        EINVOICE_CREDENTIALS, EINVOICE_NOT_CONFIGURED, SECRET_NOT_CONFIGURED.
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                environment: { type: string, enum: [pruebas, produccion] }
+                username: { type: string }
+                password: { type: string, format: password }
+                pin: { type: string, format: password }
+                provider: { type: string, description: Cédula del proveedor del sistema }
+                enabled: { type: string, enum: ["true", "false"] }
+                p12: { type: string, format: binary }
+      responses:
+        "200": { description: Configuración guardada (sin secretos) }
+        "400": { description: PIN incorrecto o falta la llave }
+        "409": { description: "Datos fiscales, llave o credenciales que no corresponden" }
+  /einvoice/settings/test:
+    post:
+      tags: [Facturación electrónica]
+      summary: Probar usuario y clave guardados contra Hacienda (company.manage)
+      responses:
+        "200": { description: "{ ok: true, environment }" }
+        "409": { description: Hacienda no aceptó las credenciales o no hay configuración }
   /einvoice/documents/{id}:
     get:
       tags: [Facturación electrónica]
@@ -2882,7 +2924,7 @@ paths:
       tags: [Facturación electrónica]
       summary: Firmar y enviar el comprobante a Hacienda (company.manage)
       description: |
-        Fase 1: solo tiquetes. La primera vez arma el XML v4.4 (clave de 50 dígitos), lo valida contra el XSD oficial, lo firma
+        Solo tiquetes por ahora (con el envío automático encendido se mandan solos al vender). La primera vez arma el XML v4.4 (clave de 50 dígitos), lo valida contra el XSD oficial, lo firma
         con XAdES-EPES y lo guarda; después lo envía. Reintentar manda el mismo XML; si ya fue recibido, consulta el estado.
         Errores con code: EINVOICE_NOT_CONFIGURED (faltan credenciales), EINVOICE_FISCAL_DATA (faltan datos fiscales),
         EINVOICE_KEY_MISMATCH (la llave es de otra identificación), EINVOICE_TYPE, EINVOICE_SCHEMA, EINVOICE_ENV.

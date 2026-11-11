@@ -456,6 +456,7 @@ model Company {
   cashDeposits          CashDeposit[]
   vatPeriods            VatPeriod[]
   einvoices             EInvoice[]
+  einvoiceSettings      EInvoiceSettings?
 
   @@index([ownerId])
 }
@@ -1277,26 +1278,51 @@ enum EInvoiceStatus {
   SENT // Hacienda lo recibió y lo está procesando
   ACCEPTED
   REJECTED
+  ERROR // no se pudo armar (p. ej. falta el CABYS): se corrige el dato y se reintenta a mano
 }
 
 model EInvoice {
-  id          String         @id @default(uuid())
-  companyId   String
-  company     Company        @relation(fields: [companyId], references: [id])
-  documentId  String         @unique
-  document    Document       @relation(fields: [documentId], references: [id])
-  clave       String         @unique // clave numérica de 50 dígitos
-  environment String // "pruebas" o "produccion"
-  status      EInvoiceStatus @default(PENDING)
-  xml         String // comprobante firmado (XAdES-EPES)
-  responseXml String? // MensajeHacienda (aceptado/rechazado), decodificado
-  message     String? // detalle de Hacienda (motivo del rechazo)
-  attempts    Int            @default(0)
-  lastError   String? // último error de comunicación (sin secretos)
-  sentAt      DateTime?
-  answeredAt  DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id            String         @id @default(uuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id])
+  documentId    String         @unique
+  document      Document       @relation(fields: [documentId], references: [id])
+  clave         String?        @unique // clave numérica de 50 dígitos (null si no se pudo armar)
+  environment   String // "pruebas" o "produccion"
+  status        EInvoiceStatus @default(PENDING)
+  xml           String? // comprobante firmado (XAdES-EPES)
+  responseXml   String? // MensajeHacienda (aceptado/rechazado), decodificado
+  message       String? // detalle de Hacienda (motivo del rechazo)
+  attempts      Int            @default(0)
+  lastError     String? // último error de comunicación (sin secretos)
+  sentAt        DateTime?
+  answeredAt    DateTime?
+  nextAttemptAt DateTime? // reintento del envío automático (espera creciente)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@index([companyId, status])
+}
+
+// Facturación electrónica de una empresa (Bloque 9, fase 2): sus credenciales de Hacienda y su llave .p12.
+// La clave, el PIN y la llave se guardan CIFRADOS (AES-256-GCM con EINVOICE_SECRET del servidor) y nunca
+// salen por la API. enabledAt: desde cuándo se envía solo cada tiquete (las ventas anteriores no se mandan).
+model EInvoiceSettings {
+  id           String    @id @default(uuid())
+  companyId    String    @unique
+  company      Company   @relation(fields: [companyId], references: [id])
+  enabled      Boolean   @default(false)
+  enabledAt    DateTime?
+  environment  String    @default("pruebas") // "pruebas" o "produccion"
+  username     String?
+  passwordEnc  String?
+  p12Enc       String?
+  pinEnc       String?
+  holderId     String? // identificación del titular de la llave (solo dígitos)
+  holderName   String?
+  keyExpiresAt DateTime?
+  provider     String? // ProveedorSistemas; vacío = el titular de la llave
+  updatedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

@@ -10,6 +10,7 @@
 //  - Crédito (7B-2): el resto que no se paga va a cuotas (receivables.service), con el código del encargado
 //    (sales.credit); los pagos de la venta son la prima.
 import { z } from "zod"
+import { queueEInvoice } from "../einvoice/einvoice.service.ts"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { assertLocationAllowed, currentCompanyId, locationScope } from "../../shared/tenant.ts"
@@ -745,6 +746,7 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   if (!doc) return (await previous())!
   // la venta ya quedó guardada: si el aviso del tope falla, no se le dice al cajero que la venta falló
   if (input.payments.some((p) => p.method === "CASH")) await checkCashLimit(session.id).catch((e) => console.error("checkCashLimit", e))
+  queueEInvoice(doc.id) // facturación electrónica: se envía a Hacienda sin hacer esperar al cajero (si está activa)
   return { ...(await getTicket(doc.id)), negatives: short.length }
 }
 

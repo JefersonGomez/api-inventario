@@ -1,9 +1,7 @@
-// Bloque 9, fase 1: clave, XML v4.4 válido contra el XSD oficial, firma XAdES y envío/consulta a Hacienda.
+// Bloque 9: clave, XML v4.4 válido contra el XSD oficial, firma XAdES, configuración cifrada por empresa,
+// envío automático con reintentos y consulta de respuestas.
 // Hacienda se simula (fetch): las pruebas no salen a internet. La llave .p12 se genera en la prueba.
 import { jest } from "@jest/globals"
-import { mkdtempSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import forge from "node-forge"
 import request from "supertest"
 import app from "../../app.ts"
@@ -13,6 +11,7 @@ import { buildClave, crDateTime } from "./clave.ts"
 import { loadSigningKey, signXml, verifyXml } from "./signer.ts"
 import { buildEInvoiceXml, type EInvoiceData } from "./xml.ts"
 import { validateEInvoiceXml } from "./xsd-validate.ts"
+import { processEInvoices } from "./einvoice.service.ts"
 
 type User = Awaited<ReturnType<typeof createUser>>
 const HOLDER = "112340567" // cédula física del titular de la llave de prueba
@@ -50,39 +49,56 @@ const sample = (over: Partial<EInvoiceData> = {}): EInvoiceData => {
   }
 }
 
-describe("Facturación electrónica — fase 1", () => {
-  const pin = "12#34"
-  let p12Path: string
-  let admin: User, other: User
-  let documentId: string
-  const savedEnv = { ...process.env }
+describe("Facturación electrónica", () => {
+  const PIN = "12#34"
+  const p12 = makeP12(PIN)
+  let admin: User, cashier: User, other: User
+  let productId: string, noCabysId: string, beforeEnabledId: string
+  // Hacienda simulada: lo que se llamó y cómo responde cada cosa
+  const calls: { url: string; method: string; body: string }[] = []
+  const hacienda = { token: true, post: 202, state: "aceptado" }
+  const answer = Buffer.from("<MensajeHacienda><DetalleMensaje>Aceptado en pruebas</DetalleMensaje></MensajeHacienda>").toString("base64")
+  const sell = async (id: string) => (await request(app).post("/pos/sales").set(cashier.auth)
+    .send({ lines: [{ productId: id, quantity: 1 }], payments: [{ method: "CASH", amount: 1130 }] })).body.document.id as string
+  const settings = (fields: Record<string, string>, withKey = false, who: User = admin) => {
+    const r = request(app).put("/einvoice/settings").set(who.auth)
+    for (const [k, v] of Object.entries(fields)) r.field(k, v)
+    return withKey ? r.attach("p12", p12, "llave.p12") : r
+  }
+  const einvoiceOf = (documentId: string) => prisma.eInvoice.findUnique({ where: { documentId } })
+  const until = async (fn: () => Promise<unknown>) => {
+    for (let i = 0; i < 40 && !(await fn()); i++) await new Promise((r) => setTimeout(r, 50))
+  }
 
   beforeAll(async () => {
-    p12Path = join(mkdtempSync(join(tmpdir(), "einv-")), "llave.p12")
-    writeFileSync(p12Path, makeP12(pin))
-    Object.assign(process.env, {
-      HACIENDA_ENV: "pruebas", HACIENDA_USER: "cpf-01-1234-0567@stag.comprobanteselectronicos.go.cr",
-      HACIENDA_PASSWORD: "secreto", HACIENDA_P12_PATH: p12Path, HACIENDA_P12_PIN: pin,
+    jest.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      calls.push({ url, method: init?.method ?? "GET", body: init?.body ? String(init.body) : "" })
+      if (url.includes("/token")) {
+        return hacienda.token ? Response.json({ access_token: "tkn", expires_in: 300 }) : Response.json({ error_description: "Invalid user credentials" }, { status: 401 })
+      }
+      if (init?.method === "POST") return new Response(null, { status: hacienda.post, headers: hacienda.post >= 400 ? { "X-Error-Cause": "Falla simulada" } : {} })
+      return Response.json({ "ind-estado": hacienda.state, "respuesta-xml": answer })
     })
     await resetDb()
     admin = await createUser("ADMIN")
     other = await createUser("ADMIN")
     const c = admin.companyId
     const main = await mainLocationId(c)
-    const cashier = await createUser("CASHIER", c)
+    cashier = await createUser("CASHIER", c)
     await request(app).post(`/users/${cashier.user.id}/pin`).set(admin.auth).send({ pin: "4821" })
     const category = await prisma.category.create({ data: { companyId: c, name: "General" } })
-    const productId = (await request(app).post("/products").set(admin.auth)
-      .send({ sku: "MRT", name: "Martillo", price: 1130, stock: 10, minStock: 0, categoryId: category.id, locationId: main, cabys: "4292199990200" })).body.id
+    const product = (body: object) => request(app).post("/products").set(admin.auth)
+      .send({ price: 1130, stock: 50, minStock: 0, categoryId: category.id, locationId: main, ...body })
+    productId = (await product({ sku: "MRT", name: "Martillo", cabys: "4292199990200" })).body.id
+    noCabysId = (await product({ sku: "SIN", name: "Sin CABYS" })).body.id
     const registerId = (await request(app).post("/pos/registers").set(admin.auth).send({ locationId: main, name: "Caja 1" })).body.id
     await request(app).post("/pos/session").set(cashier.auth).send({ registerId, pin: "4821", openingAmount: 0 })
-    const sale = await request(app).post("/pos/sales").set(cashier.auth).send({ lines: [{ productId, quantity: 2 }], payments: [{ method: "CASH", amount: 2260 }] })
-    documentId = sale.body.document.id
+    beforeEnabledId = await sell(productId)
   })
 
   afterAll(async () => {
     jest.restoreAllMocks()
-    process.env = savedEnv
     await resetDb()
     await prisma.$disconnect()
   })
@@ -112,49 +128,93 @@ describe("Facturación electrónica — fase 1", () => {
     expect(() => buildEInvoiceXml(sample({ lines: [{ ...sample().lines[0]!, cabys: "" }] }))).toThrow(/CABYS/)
   })
 
-  it("enviar: pide los datos fiscales y que la llave sea de la empresa", async () => {
-    const send = () => request(app).post(`/einvoice/documents/${documentId}/send`).set(admin.auth)
-    expect((await send()).body.code).toBe("EINVOICE_FISCAL_DATA")
-    const fiscal = { legalName: "Ferretería de Prueba", economicActivity: "4752.0", province: "1", canton: "01", district: "01", addressDetail: "Frente al parque", invoiceEmail: "ventas@prueba.cr" }
-    await request(app).put("/company").set(admin.auth).send({ ...fiscal, idType: "JURIDICA", idNumber: "3101123456" })
-    expect((await send()).body.code).toBe("EINVOICE_KEY_MISMATCH")
+  it("configuración: la llave debe abrir con su PIN y ser de la empresa; los secretos quedan cifrados", async () => {
+    expect((await request(app).get("/einvoice/settings").set(admin.auth)).body).toMatchObject({ configured: false, enabled: false, secretReady: true })
+    expect((await request(app).get("/einvoice/settings").set(cashier.auth)).status).toBe(403)
+    expect((await settings({ pin: PIN }, true)).body.code).toBe("EINVOICE_FISCAL_DATA") // la empresa sin identificación
+    await request(app).put("/company").set(admin.auth).send({ idType: "JURIDICA", idNumber: "3101123456" })
+    expect((await settings({ pin: "0000" }, true)).body.code).toBe("EINVOICE_PIN")
+    expect((await settings({ pin: PIN }, true)).body.code).toBe("EINVOICE_KEY_MISMATCH")
     await request(app).put("/company").set(admin.auth).send({ idType: "FISICA", idNumber: HOLDER })
-    expect(await prisma.eInvoice.count()).toBe(0)
+
+    hacienda.token = false
+    expect((await settings({ username: "cpf@stag", password: "mala" })).body.code).toBe("EINVOICE_CREDENTIALS")
+    hacienda.token = true
+    const saved = await settings({ environment: "pruebas", username: "cpf@stag", password: "la-clave", pin: PIN }, true)
+    expect(saved.status).toBe(200)
+    expect(saved.body).toMatchObject({ configured: true, enabled: false, hasPassword: true, key: { holderId: HOLDER, holderName: "PERSONA DE PRUEBA" } })
+    expect(JSON.stringify(saved.body)).not.toMatch(/la-clave|12#34/)
+    const row = await prisma.eInvoiceSettings.findUniqueOrThrow({ where: { companyId: admin.companyId } })
+    expect(row.passwordEnc).toMatch(/^v1:/)
+    expect([row.passwordEnc, row.pinEnc, row.p12Enc].join()).not.toMatch(/la-clave|12#34/)
+    const audit = await prisma.auditLog.findMany({ where: { entityType: "EInvoiceSettings" } })
+    expect(audit.length).toBeGreaterThan(0)
+    expect(JSON.stringify(audit)).not.toMatch(/la-clave|12#34/)
+    expect((await request(app).post("/einvoice/settings/test").set(admin.auth)).body).toMatchObject({ ok: true, environment: "pruebas" })
+    // otra empresa no ve esta configuración
+    expect((await request(app).get("/einvoice/settings").set(other.auth)).body.configured).toBe(false)
   })
 
-  it("envía a Hacienda, guarda el XML firmado y consulta la respuesta", async () => {
-    const calls: { url: string; method: string; body?: string }[] = []
-    const answer = Buffer.from("<MensajeHacienda><DetalleMensaje>Aceptado en pruebas</DetalleMensaje></MensajeHacienda>").toString("base64")
-    jest.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input)
-      calls.push({ url, method: init?.method ?? "GET", body: init?.body ? String(init.body) : "" })
-      if (url.includes("/token")) return Response.json({ access_token: "tkn", expires_in: 300 })
-      if (init?.method === "POST") return new Response(null, { status: 202 })
-      return Response.json({ "ind-estado": "aceptado", "respuesta-xml": answer })
+  it("encender pide los datos fiscales; desde ahí cada tiquete se envía solo y se consulta la respuesta", async () => {
+    expect((await settings({ enabled: "true" })).body.code).toBe("EINVOICE_FISCAL_DATA")
+    await request(app).put("/company").set(admin.auth).send({
+      legalName: "Ferretería de Prueba", economicActivity: "4752.0", province: "4", canton: "10", district: "03",
+      addressDetail: "La Victoria, frente a la escuela", invoiceEmail: "ventas@prueba.cr",
     })
+    const on = await settings({ enabled: "true" })
+    expect(on.body).toMatchObject({ enabled: true })
 
-    const sent = await request(app).post(`/einvoice/documents/${documentId}/send`).set(admin.auth)
-    expect(sent.status).toBe(200)
-    expect(sent.body).toMatchObject({ status: "SENT", environment: "pruebas", attempts: 1, lastError: null })
-    expect(sent.body.clave).toMatch(new RegExp(`^506\\d{6}000${HOLDER}\\d{20}1\\d{8}$`))
-    const post = calls.find((c) => c.method === "POST" && c.url.endsWith("/recepcion"))!
-    expect(post.url).toContain("api-sandbox")
-    const payload = JSON.parse(post.body!)
-    expect(payload).toMatchObject({ clave: sent.body.clave, emisor: { tipoIdentificacion: "01", numeroIdentificacion: HOLDER } })
-    const signed = Buffer.from(payload.comprobanteXml, "base64").toString("utf8")
+    const id = await sell(productId)
+    await until(async () => (await einvoiceOf(id))?.status === "SENT")
+    const e = (await einvoiceOf(id))!
+    expect(e).toMatchObject({ status: "SENT", environment: "pruebas", attempts: 1 })
+    const post = calls.find((c) => c.method === "POST" && c.body.includes(e.clave!))!
+    const signed = Buffer.from(JSON.parse(post.body).comprobanteXml, "base64").toString("utf8")
     expect(await validateEInvoiceXml("TICKET", signed)).toEqual([])
     expect(await verifyXml(signed)).toBe(true)
-    expect(JSON.stringify(calls)).not.toContain(process.env.HACIENDA_P12_PIN)
+    expect(signed).toContain("<CodigoActividadEmisor>4752.0</CodigoActividadEmisor>")
 
-    // reenviar no arma otro comprobante: consulta el estado
-    const again = await request(app).post(`/einvoice/documents/${documentId}/send`).set(admin.auth)
-    expect(again.body).toMatchObject({ clave: sent.body.clave, status: "ACCEPTED", message: "Aceptado en pruebas" })
-    expect(await prisma.eInvoice.count()).toBe(1)
-    const xml = await request(app).get(`/einvoice/documents/${documentId}/xml`).set(admin.auth)
-    expect(xml.headers["content-type"]).toMatch(/xml/)
-    expect(xml.text).toBe(signed)
-    expect((await request(app).get(`/einvoice/documents/${documentId}`).set(admin.auth)).body.status).toBe("ACCEPTED")
-    // otra empresa no lo ve
-    expect((await request(app).get(`/einvoice/documents/${documentId}`).set(other.auth)).status).toBe(404)
+    // la respuesta se consulta en el repaso (lo enviado hace más de 20 s)
+    await prisma.eInvoice.update({ where: { id: e.id }, data: { sentAt: new Date(Date.now() - 60_000) } })
+    await processEInvoices()
+    expect(await einvoiceOf(id)).toMatchObject({ status: "ACCEPTED", message: "Aceptado en pruebas" })
+    expect(await einvoiceOf(beforeEnabledId)).toBeNull() // lo vendido antes de encender no se manda solo
+
+    // Ventas muestra el estado
+    const list = (await request(app).get("/sales").set(admin.auth)).body.items as { id: string; einvoice: { status: string } | null }[]
+    expect(list.find((s) => s.id === id)?.einvoice).toEqual({ status: "ACCEPTED" })
+    expect((await request(app).get(`/sales/${id}`).set(admin.auth)).body.einvoice).toMatchObject({ status: "ACCEPTED", clave: e.clave })
+    expect((await request(app).get(`/einvoice/documents/${id}/xml`).set(admin.auth)).text).toBe(signed)
+    expect((await request(app).get(`/einvoice/documents/${id}`).set(other.auth)).status).toBe(404)
+  })
+
+  it("si Hacienda no responde se reintenta con espera; si falta el CABYS queda en error y avisa", async () => {
+    hacienda.post = 503
+    const id = await sell(productId)
+    await until(async () => ((await einvoiceOf(id))?.attempts ?? 0) > 0)
+    const failed = (await einvoiceOf(id))!
+    expect(failed).toMatchObject({ status: "PENDING", attempts: 1, lastError: "Falla simulada" })
+    expect(failed.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now())
+    await processEInvoices() // todavía no toca reintentar
+    expect((await einvoiceOf(id))!.attempts).toBe(1)
+    hacienda.post = 202
+    await prisma.eInvoice.update({ where: { id: failed.id }, data: { nextAttemptAt: new Date(Date.now() - 1000) } })
+    await processEInvoices()
+    expect(await einvoiceOf(id)).toMatchObject({ status: "SENT", attempts: 2, lastError: null, clave: failed.clave })
+
+    const bad = await sell(noCabysId)
+    await until(async () => (await einvoiceOf(bad))?.status === "ERROR")
+    expect((await einvoiceOf(bad))!.lastError).toMatch(/CABYS/)
+    const notes = await prisma.notification.findMany({ where: { type: "einvoiceProblem", userId: admin.user.id } })
+    expect(notes).toEqual([expect.objectContaining({ link: `/sales/${bad}`, meta: expect.objectContaining({ status: "ERROR" }) })])
+    // reintentar a mano sin corregir el dato: el mismo error, y no se repite el aviso
+    expect((await request(app).post(`/einvoice/documents/${bad}/send`).set(admin.auth)).body.code).toBe("EINVOICE_DATA")
+    expect(await prisma.notification.count({ where: { type: "einvoiceProblem", userId: admin.user.id } })).toBe(1)
+
+    // apagar el envío automático
+    expect((await settings({ enabled: "false" })).body).toMatchObject({ enabled: false, enabledAt: null })
+    const off = await sell(productId)
+    await processEInvoices()
+    expect(await einvoiceOf(off)).toBeNull()
   })
 })
