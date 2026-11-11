@@ -265,7 +265,24 @@ async function autoSend(documentId: string) {
   if (!s?.enabled || !s.enabledAt) return
   const doc = await prisma.document.findFirst({ where: { id: documentId }, select: { type: true, issuedAt: true, createdById: true } })
   if (!doc || !(AUTO_TYPES as readonly string[]).includes(doc.type) || doc.issuedAt < s.enabledAt) return
-  await sendDocument(documentId, doc.createdById)
+  const sent = await sendDocument(documentId, doc.createdById)
+  if (sent.status === "SENT") checkSoon(documentId)
+}
+
+// Hacienda suele responder en segundos: se consulta a los 8 y a los 25 s en vez de esperar el repaso del
+// minuto (si todavía no responde, lo toma el repaso). En las pruebas no corre: el repaso se llama a mano.
+const QUICK_CHECKS = [8_000, 25_000]
+function checkSoon(documentId: string) {
+  if (process.env.NODE_ENV === "test") return
+  const companyId = currentCompanyId()
+  for (const ms of QUICK_CHECKS) {
+    setTimeout(() => {
+      runWithCompany(companyId, async () => {
+        const e = await prisma.eInvoice.findUnique({ where: { documentId }, select: { status: true } })
+        if (e?.status === "SENT") await refreshDocument(documentId)
+      }).catch(quiet("consulta rápida"))
+    }, ms).unref()
+  }
 }
 
 let running = false
