@@ -10,3 +10,7 @@ uploads/avatars/*
 backups/
 uploads/products/*
 !uploads/products/.gitkeep
+
+# llaves criptográficas de Hacienda: viven FUERA del repo, nunca se suben
+*.p12
+*.pfx

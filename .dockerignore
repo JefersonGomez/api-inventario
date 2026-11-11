@@ -12,3 +12,5 @@ uploads/avatars/*
 coverage
 *.log
 uploads/products/*
+*.p12
+*.pfx
