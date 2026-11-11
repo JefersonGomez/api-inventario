@@ -1,12 +1,13 @@
 // Paquete para el contador (reemplaza al Bloque 11, decisión del usuario del 25-oct-2026): todo lo del mes
 // en un solo Excel, que arma el frontend con este JSON. Mismo permiso que el IVA del mes (accounting.view).
 // Parte A: IVA del mes, ventas por comprobante, compras (las facturas del IVA) y movimientos de bancos.
-// Parte B (pendiente): cuentas por cobrar, por pagar e inventario valorizado al cierre del mes.
+// Parte B: cuentas por cobrar, por pagar e inventario valorizado al cierre del mes (month-close.service).
 // ponytail: lee los comprobantes del mes de una vez (miles en una pyme); paginar si crece.
 import { prisma } from "../../config/database.ts"
 import { Prisma, type TaxRate } from "../../generated/prisma/client.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
 import { getVatReport, monthRange, type vatReportQuerySchema } from "./vat-report.service.ts"
+import { getMonthClose } from "./month-close.service.ts"
 import type { z } from "zod"
 
 const D = Prisma.Decimal
@@ -14,7 +15,7 @@ const num = (v: Prisma.Decimal | number | null | undefined) => Number(new D(v ??
 
 export async function getAccountantPackage(q: z.infer<typeof vatReportQuerySchema>) {
   const range = monthRange(q.month)
-  const [company, vat, docs, accounts] = await Promise.all([
+  const [company, vat, docs, accounts, close] = await Promise.all([
     prisma.company.findUniqueOrThrow({
       where: { id: currentCompanyId() },
       select: { name: true, legalName: true, idType: true, idNumber: true, currency: true },
@@ -46,6 +47,7 @@ export async function getAccountantPackage(q: z.infer<typeof vatReportQuerySchem
       },
       orderBy: { name: "asc" },
     }),
+    getMonthClose(q.month),
   ])
 
   // ventas: un renglón por comprobante; las notas de crédito restan (montos en negativo)
@@ -96,5 +98,6 @@ export async function getAccountantPackage(q: z.infer<typeof vatReportQuerySchem
     vat,
     sales: { documents, totals: { count: documents.length, subtotal: sum("subtotal"), tax: sum("tax"), total: sum("total") } },
     banks,
+    ...close, // closingDate, receivables, payables, inventory
   }
 }

@@ -2852,6 +2852,11 @@ paths:
         notas) con base e IVA por tarifa y medios de pago; las notas de crédito en negativo y con el consecutivo que
         corrigen. Bancos: por cuenta, los movimientos del mes con status MATCHED (y con qué), CLASSIFIED (category)
         o PENDING, más créditos, débitos y pendientes.
+        Saldos al cierre del mes (closingDate = último día), reconstruidos desde la historia: receivables
+        { customers: [{ customer, balance, overdue, aging, documents, oldestDue }], totals }, payables
+        { invoices: [{ supplier, number, issueDate, dueDate, total, paid, balance, daysLate, bucket }], totals } e inventory
+        { items: [{ product, quantity, inTransit, byLocation, unitCost, costSource (sale | current | none), value }], totals }.
+        Antigüedad (aging/bucket) por días de atraso al cierre: current, d1_30, d31_60, d61_90, d90_plus.
       parameters:
         - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-(0[1-9]|1[0-2])$' }, description: "AAAA-MM" }
       responses:
