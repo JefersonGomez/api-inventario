@@ -6,6 +6,7 @@ import { initRealtime } from "./shared/realtime.ts"
 import { notifyOverdue } from "./modules/receivables/receivables.service.ts"
 import { notifyPayablesDue } from "./modules/payables/payables.service.ts"
 import { processEInvoices } from "./modules/einvoice/einvoice.service.ts"
+import { processReceiverMessages } from "./modules/payables/receiver-message.service.ts"
 
 // falla al arrancar (con un mensaje claro) si falta algo crítico
 assertEnv()
@@ -27,5 +28,8 @@ const payablesDue = () => notifyPayablesDue().catch((e) => console.error("avisos
 payablesDue()
 setInterval(payablesDue, 3_600_000).unref()
 // facturación electrónica: tiquetes sin enviar, reintentos y respuestas de Hacienda, cada minuto
-const einvoices = () => processEInvoices().catch((e) => console.error("facturación electrónica:", e))
+const einvoices = () => {
+  processEInvoices().catch((e) => console.error("facturación electrónica:", e))
+  processReceiverMessages().catch((e) => console.error("mensaje receptor:", e)) // respuestas a facturas de proveedores
+}
 setInterval(einvoices, 60_000).unref()

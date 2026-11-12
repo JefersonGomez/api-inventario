@@ -4,6 +4,7 @@ import {
 } from "./payables.service.ts"
 import { emit, EVERYONE } from "../../shared/realtime.ts"
 import { importXmlInvoice, previewXmlInvoice } from "./invoice-import.service.ts"
+import { respondInvoice, retryResponse } from "./receiver-message.service.ts"
 
 const TOPICS = ["payables"]
 // cada handler: llama al service y responde; los errores traen su status (404…)
@@ -31,3 +32,6 @@ export const registerPaymentHandler = handle((req) => registerSupplierPayment(re
 const uploaded = (req: Request) => ((req.files as Express.Multer.File[] | undefined) ?? []).map((f) => f.buffer)
 export const previewXmlHandler = handle((req) => previewXmlInvoice(uploaded(req)))
 export const importXmlHandler = handle((req) => importXmlInvoice(uploaded(req), req.body, req.user!.id), 201, TOPICS)
+// mensaje receptor: aceptar / aceptar en parte / rechazar ante Hacienda, y reintentar o consultar
+export const respondHandler = handle((req) => respondInvoice(req.params.id, req.body, req.user!.id), 200, TOPICS)
+export const retryResponseHandler = handle((req) => retryResponse(req.params.id), 200, TOPICS)

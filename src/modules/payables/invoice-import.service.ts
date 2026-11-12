@@ -3,7 +3,8 @@
 //     registrar, con avisos (otro receptor, firma, totales) y bloqueos (ya importada, rechazada por Hacienda…);
 //  2. al confirmar se vuelve a leer en el servidor (no se confía en lo que manda la pantalla), se crea el
 //     proveedor si no existe y la factura queda en Cuentas por pagar con su clave y el XML.
-// El mensaje receptor (aceptar/rechazar ante Hacienda) y la entrada al inventario son las partes 2 y 3.
+//  3. opcional (respond=true): se acepta ante Hacienda en el mismo paso (mensaje receptor, parte 2).
+// La entrada al inventario es la parte 3.
 import { z } from "zod"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
@@ -13,6 +14,7 @@ import { crDateTime } from "../einvoice/clave.ts"
 import { verifyXml } from "../einvoice/signer.ts"
 import { createInvoice } from "./payables.service.ts"
 import { parseHaciendaAnswer, parseSupplierInvoice, rootName, type ParsedSupplierInvoice } from "./supplier-xml.ts"
+import { receiverReady, respondInvoice } from "./receiver-message.service.ts"
 
 const D = Prisma.Decimal
 const DAY = 86_400_000
@@ -25,6 +27,7 @@ export const importXmlSchema = z.object({
   dueDate: z.iso.date().optional(),
   creditable: z.enum(["true", "false"]).optional(), // multipart: llega como texto
   note: z.string().trim().max(200).optional(),
+  respond: z.enum(["true", "false"]).optional(), // aceptarla ante Hacienda al registrar
 })
 
 type Notice = { level: "error" | "warning" | "info"; code: string; text: string }
@@ -123,6 +126,7 @@ async function analyze(files: Buffer[]) {
       duplicateId: duplicate && !duplicate.voidedAt ? duplicate.id : null,
       notices,
       canImport: !notices.some((n) => n.level === "error"),
+      receiverReady: parsed.kind === "INVOICE" && (await receiverReady()), // se puede aceptar ante Hacienda desde aquí
     },
   }
 }
@@ -137,7 +141,7 @@ export async function importXmlInvoice(files: Buffer[], input: z.infer<typeof im
   const { parsed, invoiceXml, answer, preview } = await analyze(files)
   const blocking = preview.notices.find((n) => n.level === "error")
   if (blocking) throw fail(blocking.text, 409, `XML_${blocking.code}`)
-  return prisma.$transaction(async (tx) => {
+  const saved = await prisma.$transaction(async (tx) => {
     let supplierId = preview.supplier.existing?.id
     if (!supplierId) {
       // nombre único por empresa: si ya hay otro proveedor con ese nombre, se distingue con la cédula
@@ -166,4 +170,11 @@ export async function importXmlInvoice(files: Buffer[], input: z.infer<typeof im
       select: { id: true, supplierId: true, number: true, issueDate: true, dueDate: true, total: true, creditable: true, clave: true, haciendaStatus: true },
     })
   })
+  if (input.respond !== "true" || parsed.kind !== "INVOICE") return saved
+  // la factura ya quedó registrada: si la respuesta a Hacienda falla, se dice por qué y se responde después
+  try {
+    return { ...saved, receiverMessage: await respondInvoice(saved.id, { decision: "ACCEPT" }, userId) }
+  } catch (err) {
+    return { ...saved, respondError: (err as Error).message }
+  }
 }

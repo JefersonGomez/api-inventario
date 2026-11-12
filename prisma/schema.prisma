@@ -146,6 +146,7 @@ model User {
   purchaseOrders         PurchaseOrder[]
   transfersSent          StockTransfer[]   @relation("TransferSentBy")
   countsCreated          StockCount[]      @relation("CountCreatedBy")
+  receiverMessages       ReceiverMessage[] @relation("ReceiverMessageCreatedBy")
   countsClosed           StockCount[]      @relation("CountClosedBy")
   transfersReceived      StockTransfer[]   @relation("TransferReceivedBy")
   auditLogs              AuditLog[]
@@ -457,6 +458,7 @@ model Company {
   vatPeriods            VatPeriod[]
   einvoices             EInvoice[]
   einvoiceSettings      EInvoiceSettings?
+  receiverMessages      ReceiverMessage[]
 
   @@index([ownerId])
 }
@@ -1077,6 +1079,7 @@ model SupplierInvoice {
   createdBy       User                        @relation(fields: [createdById], references: [id])
   createdAt       DateTime                    @default(now())
   allocations     SupplierPaymentAllocation[]
+  receiverMessage ReceiverMessage?
 
   @@index([companyId, supplierId, dueDate])
   @@unique([companyId, clave])
@@ -1333,4 +1336,37 @@ model EInvoiceSettings {
   updatedById  String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+}
+
+// Mensaje receptor (Bloque 9, punto 48 — parte 2): la respuesta de la empresa a Hacienda sobre la factura
+// electrónica de un proveedor (aceptar, aceptar parcialmente o rechazar). Respalda el crédito de IVA.
+// Se firma una vez y se reintenta igual que los comprobantes propios (mismo EInvoiceStatus).
+model ReceiverMessage {
+  id            String          @id @default(uuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id])
+  invoiceId     String          @unique
+  invoice       SupplierInvoice @relation(fields: [invoiceId], references: [id])
+  decision      String // "1" aceptado, "2" aceptado parcialmente, "3" rechazado
+  detail        String? // motivo (obligatorio al rechazar o aceptar en parte)
+  condition     String? // CondicionImpuesto: 01 crédito de IVA, 04 gasto que no genera crédito
+  taxCredit     Decimal?        @db.Decimal(18, 5) // IVA que se acredita
+  consecutive   String // 20 dígitos: sucursal + terminal + 05/06/07 + número
+  environment   String // "pruebas" o "produccion"
+  xml           String? // mensaje firmado
+  status        EInvoiceStatus  @default(PENDING)
+  responseXml   String?
+  message       String? // lo que dijo Hacienda (si lo rechazó, el motivo)
+  attempts      Int             @default(0)
+  lastError     String?
+  sentAt        DateTime?
+  answeredAt    DateTime?
+  nextAttemptAt DateTime?
+  createdById   String
+  createdBy     User            @relation("ReceiverMessageCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([companyId, consecutive])
+  @@index([companyId, status])
 }

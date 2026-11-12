@@ -36,6 +36,7 @@ export type SendPayload = {
   fecha: string // FechaEmision del comprobante
   emisor: { tipoIdentificacion: string; numeroIdentificacion: string }
   receptor?: { tipoIdentificacion: string; numeroIdentificacion: string }
+  consecutivoReceptor?: string // mensaje receptor: su consecutivo (la clave es la de la factura del proveedor)
   comprobanteXml: string // XML firmado en base64
 }
 

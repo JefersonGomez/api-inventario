@@ -84,6 +84,9 @@ const openWhere = { voidedAt: null, paid: { lt: prisma.supplierInvoice.fields.to
 const owed = (i: { total: Prisma.Decimal; paid: Prisma.Decimal }) => i.total.minus(i.paid)
 
 // Bloquea al proveedor hasta el final de la transacción: dos pagos a la vez no se pisan el saldo
+// estado de la respuesta a Hacienda (mensaje receptor) que se muestra en las listas
+const RECEIVER_SELECT = { decision: true, status: true, message: true, lastError: true, sentAt: true, nextAttemptAt: true } as const
+
 const lockSupplier = (db: Db, id: string) => db.$queryRaw`SELECT 1 FROM "Supplier" WHERE id = ${id} FOR UPDATE`
 
 // ---------- Facturas ----------
@@ -152,7 +155,7 @@ export async function listInvoices(f: z.infer<typeof invoicesQuerySchema>) {
     prisma.supplierInvoice.count({ where }),
     prisma.supplierInvoice.findMany({
       where,
-      include: { supplier: { select: { id: true, name: true } } },
+      include: { supplier: { select: { id: true, name: true } }, receiverMessage: { select: RECEIVER_SELECT } },
       omit: { xml: true }, // el XML del proveedor no viaja en las listas
       orderBy: f.status === "open" || f.status === "overdue" ? [{ dueDate: "asc" }, { createdAt: "asc" }] : { createdAt: "desc" },
       ...pageArgs(f),
@@ -218,7 +221,7 @@ export async function getSupplierAccount(supplierId: string) {
       where: { supplierId },
       orderBy: [{ issueDate: "desc" }, { createdAt: "desc" }],
       take: 100,
-      include: { taxes: { select: { rate: true, base: true, tax: true } } },
+      include: { taxes: { select: { rate: true, base: true, tax: true } }, receiverMessage: { select: RECEIVER_SELECT } },
       omit: { xml: true },
     }),
     prisma.supplierPayment.findMany({

@@ -1,54 +1,13 @@
 // Importar la factura electrónica de un proveedor desde su XML (Bloque 9, punto 48 — parte 1)
-import forge from "node-forge"
 import request from "supertest"
 import app from "../../app.ts"
 import { prismaRoot as prisma } from "../../config/database.ts"
 import { createUser, resetDb } from "../../test/helpers.ts"
-import { buildClave } from "../einvoice/clave.ts"
+import { answerXml, COMPANY_ID, makeP12, SUPPLIER_ID, supplierInvoice } from "../../test/einvoice-fixtures.ts"
 import { loadSigningKey, signXml } from "../einvoice/signer.ts"
 import { buildEInvoiceXml, type EInvoiceData } from "../einvoice/xml.ts"
 
 type User = Awaited<ReturnType<typeof createUser>>
-const SUPPLIER_ID = "3101555444" // cédula jurídica del proveedor de prueba
-const COMPANY_ID = "3101999888"
-
-// llave .p12 de prueba del proveedor (autofirmada)
-function makeP12(pin: string) {
-  const keys = forge.pki.rsa.generateKeyPair(2048)
-  const cert = forge.pki.createCertificate()
-  cert.publicKey = keys.publicKey
-  cert.serialNumber = "01"
-  cert.validity.notBefore = new Date()
-  cert.validity.notAfter = new Date(Date.now() + 365 * 86_400_000)
-  const subject = [{ name: "commonName", value: "DISTRIBUIDORA DE PRUEBA" }, { name: "serialNumber", value: `CPJ-${SUPPLIER_ID}` }]
-  cert.setSubject(subject)
-  cert.setIssuer(subject)
-  cert.sign(keys.privateKey, forge.md.sha256.create())
-  return Buffer.from(forge.asn1.toDer(forge.pkcs12.toPkcs12Asn1(keys.privateKey, [cert], pin, { algorithm: "3des" })).getBytes(), "binary")
-}
-
-let seq = 0
-// factura del proveedor a nombre de la empresa: 2 martillos (13 %) + 1 kg de arroz (1 %)
-function supplierInvoice(over: Partial<EInvoiceData> = {}) {
-  const issuedAt = new Date("2026-11-10T16:00:00Z") // 10:00 en Costa Rica
-  const consecutive = `0010000101${String(++seq).padStart(10, "0")}`
-  return {
-    type: "INVOICE" as const, consecutive, issuedAt,
-    clave: buildClave({ issuedAt, idNumber: SUPPLIER_ID, consecutive }),
-    provider: SUPPLIER_ID, activity: "4659.0",
-    emitter: { name: "Distribuidora de Prueba S.A.", idType: "JURIDICA" as const, idNumber: SUPPLIER_ID, province: "1", canton: "01", district: "01", address: "San José centro", email: "ventas@distribuidora.cr", phone: "2222-1111" },
-    receiver: { name: "Ferretería El Tornillo S.A.", idType: "JURIDICA" as const, idNumber: COMPANY_ID, email: "facturas@eltornillo.cr" },
-    currency: "CRC" as const, saleCondition: "CREDIT" as const, creditDays: 30,
-    lines: [
-      { cabys: "4292199990200", quantity: 2, unit: "UNIT" as const, description: "Martillo de uña 16 oz", unitPrice: "3000", discount: "200", discountLabel: "Promoción", taxRate: "RATE_13" as const, subtotal: "5800", taxAmount: "754" },
-      { cabys: "2314000991000", quantity: 1, unit: "KG" as const, description: "Arroz precocido", unitPrice: "1000", discount: 0, taxRate: "RATE_1" as const, subtotal: "1000", taxAmount: "10" },
-    ],
-    payments: [],
-    ...over,
-  } satisfies EInvoiceData
-}
-const answerXml = (clave: string, mensaje: "1" | "3") =>
-  `<?xml version="1.0" encoding="utf-8"?><MensajeHacienda xmlns="https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/mensajeHacienda"><Clave>${clave}</Clave><NombreEmisor>Distribuidora</NombreEmisor><Mensaje>${mensaje}</Mensaje><DetalleMensaje>${mensaje === "1" ? "Aceptado" : "Rechazado"}</DetalleMensaje></MensajeHacienda>`
 
 describe("Facturas de proveedores desde el XML", () => {
   let admin: User, employee: User
@@ -67,7 +26,7 @@ describe("Facturas de proveedores desde el XML", () => {
     admin = await createUser("ADMIN")
     employee = await createUser("EMPLOYE", admin.companyId)
     await prisma.company.update({ where: { id: admin.companyId }, data: { idType: "JURIDICA", idNumber: COMPANY_ID } })
-    key = await loadSigningKey(makeP12("1234"), "1234")
+    key = await loadSigningKey(makeP12("1234", `CPJ-${SUPPLIER_ID}`, "DISTRIBUIDORA DE PRUEBA"), "1234")
   })
   afterAll(async () => {
     await resetDb()

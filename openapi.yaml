@@ -3149,9 +3149,38 @@ paths:
                 dueDate: { type: string, format: date }
                 creditable: { type: string, enum: ["true", "false"] }
                 note: { type: string }
+                respond: { type: string, enum: ["true", "false"], description: "Aceptarla ante Hacienda en el mismo paso (mensaje receptor)" }
       responses:
-        "201": { description: "La factura registrada (id, supplierId, number, total, clave, haciendaStatus…)" }
+        "201": { description: "La factura registrada (id, supplierId, number, total, clave, haciendaStatus…; con respond: receiverMessage o respondError)" }
         "409": { description: "No se puede registrar: ya importada, rechazada por Hacienda, tarifa o moneda no soportada" }
+  /payables/invoices/{id}/respond:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Mensaje receptor — responderle a Hacienda sobre la factura del proveedor (payables.manage)
+      description: "Solo facturas importadas desde su XML y con la facturación electrónica configurada. ACCEPT (si da crédito fiscal: condición 01 y se acredita todo el IVA; si no: 04), PARTIAL o REJECT (con motivo). Se firma con su consecutivo (05/06/07) y se envía; si Hacienda no responde se reintenta solo."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [ACCEPT, PARTIAL, REJECT] }
+                detail: { type: string, maxLength: 160, description: "Motivo (obligatorio en PARTIAL y REJECT)" }
+      responses:
+        "200": { description: "El mensaje (decision 1/2/3, condition, consecutive, status PENDING|SENT|ACCEPTED|REJECTED…)" }
+        "409": { description: "Sin XML (registrada a mano), ya respondida, anulada o facturación no configurada" }
+  /payables/invoices/{id}/respond/retry:
+    post:
+      tags: [Cuentas por pagar]
+      summary: Reintentar el envío del mensaje receptor o consultar la respuesta de Hacienda (payables.manage)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: El mensaje con su estado actualizado }
+        "404": { description: Todavía no se respondió }
   /payables/invoices/{id}/void:
     post:
       tags: [Cuentas por pagar]

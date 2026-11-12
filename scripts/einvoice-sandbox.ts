@@ -3,7 +3,8 @@
 // y consulta la respuesta hasta que Hacienda lo acepte o lo rechace.
 // Con --nota: el tiquete lleva 2 unidades y, aceptado, se envía una NOTA DE CRÉDITO que devuelve 1 (código 06).
 // Con --sin-internet: el tiquete va como venta hecha sin conexión hace 40 minutos (situación 3 en la clave).
-// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
+// Con --receptor: emite una FACTURA a nombre del mismo titular y, aceptada, le responde con el MENSAJE RECEPTOR (aceptación).
+// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet] [-- --receptor]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
 // Nunca imprime la clave, el PIN ni el token.
 import "dotenv/config"
 import { readFileSync } from "node:fs"
@@ -13,12 +14,14 @@ import { buildClave, crDateTime } from "../src/modules/einvoice/clave.ts"
 import { haciendaStatus, sendToHacienda } from "../src/modules/einvoice/hacienda.client.ts"
 import { loadSigningKey, signXml } from "../src/modules/einvoice/signer.ts"
 import { buildEInvoiceXml, type EInvoiceData } from "../src/modules/einvoice/xml.ts"
-import { validateEInvoiceXml } from "../src/modules/einvoice/xsd-validate.ts"
+import { RECEIVER_MESSAGE_XSD, validateEInvoiceXml, validateWithSchema } from "../src/modules/einvoice/xsd-validate.ts"
+import { buildReceiverMessageXml } from "../src/modules/einvoice/receiver-xml.ts"
 
 const env = process.env
 if (env.HACIENDA_ENV !== "pruebas") throw new Error("Este script solo corre con HACIENDA_ENV=pruebas")
 const withNote = process.argv.includes("--nota")
 const offline = process.argv.includes("--sin-internet")
+const withReceiver = process.argv.includes("--receptor")
 const creds = { env: "pruebas" as const, username: env.HACIENDA_USER!, password: env.HACIENDA_PASSWORD! }
 const key = await loadSigningKey(readFileSync(env.HACIENDA_P12_PATH!), env.HACIENDA_P12_PIN!)
 const id = key.holderId
@@ -57,6 +60,7 @@ async function run(label: string, type: DocumentType, units: number, reference: 
       province, canton, district, address: "Prueba del sistema de inventario", email: "pruebas@example.com",
     },
     currency: "CRC", saleCondition: "CASH", reference,
+    ...(type === "INVOICE" && { receiver: { name: key.holderName || "Receptor de prueba", idType, idNumber: id } }),
     lines: [{ cabys, quantity: units, unit: "UNIT", description: "Martillo de prueba", unitPrice: "1000", discount: 0, taxRate: "RATE_13", subtotal: String(1000 * units), taxAmount: String(130 * units) }],
     payments: [{ method: "CASH", amount: 1130 * units }],
   })
@@ -83,6 +87,44 @@ async function run(label: string, type: DocumentType, units: number, reference: 
   }
   console.log("Hacienda sigue procesando; vuelve a consultar más tarde con la clave de arriba.")
   return null
+}
+
+// mensaje receptor: el titular "recibe" su propia factura y la acepta
+async function receiver(invoice: { clave: string }) {
+  const issuedAt = new Date()
+  const consecutive = `0019999905${String(Math.floor(issuedAt.getTime() / 1000) % 10_000_000_000).padStart(10, "0")}`
+  const xml = buildReceiverMessageXml({
+    clave: invoice.clave, supplierId: id, issuedAt, decision: "1", tax: 130, activity, condition: "01", taxCredit: 130, expense: 1000,
+    total: 1130, receiverId: id, consecutive,
+  })
+  const signed = await signXml(xml, key, issuedAt)
+  const errors = await validateWithSchema(RECEIVER_MESSAGE_XSD, signed)
+  if (errors.length) throw new Error(`Mensaje receptor: no cumple el esquema:\n${errors.join("\n")}`)
+  console.log(`\nMensaje receptor (aceptación) — consecutivo ${consecutive}`)
+  const tipo = idType === "FISICA" ? "01" : "02"
+  const sent = await sendToHacienda(creds, {
+    clave: invoice.clave, fecha: crDateTime(issuedAt),
+    emisor: { tipoIdentificacion: tipo, numeroIdentificacion: id }, receptor: { tipoIdentificacion: tipo, numeroIdentificacion: id },
+    consecutivoReceptor: consecutive, comprobanteXml: Buffer.from(signed, "utf8").toString("base64"),
+  })
+  console.log(sent.received ? `Enviado ✔ (HTTP ${sent.status})` : `Envío rechazado ✘ (HTTP ${sent.status}): ${sent.error}`)
+  if (!sent.received) return false
+  for (let i = 0; i < 12; i++) {
+    await new Promise((r) => setTimeout(r, 5000))
+    const st = await haciendaStatus(creds, `${invoice.clave}-${consecutive}`)
+    console.log(`Estado: ${st?.state ?? "todavía no aparece"}`)
+    if (st && ["aceptado", "rechazado", "error"].includes(st.state)) {
+      if (st.message) console.log(`Mensaje de Hacienda: ${st.message}`)
+      return st.state === "aceptado"
+    }
+  }
+  return false
+}
+
+if (withReceiver) {
+  const invoice = await run("Factura a nombre del titular", "INVOICE", 1)
+  if (!invoice || !(await receiver(invoice))) process.exit(1)
+  process.exit(0)
 }
 
 const ticket = await run(offline ? "Tiquete sin internet (situación 3)" : "Tiquete", "TICKET", withNote ? 2 : 1, null, offline ? "3" : "1")
