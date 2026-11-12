@@ -3181,6 +3181,44 @@ paths:
       responses:
         "200": { description: El mensaje con su estado actualizado }
         "404": { description: Todavía no se respondió }
+  /payables/invoices/{id}/stock:
+    get:
+      tags: [Cuentas por pagar]
+      summary: Qué entra al inventario desde la factura del proveedor (payables.manage + stock.move)
+      description: "Líneas del XML con su costo por unidad (sin IVA si da crédito fiscal; en colones si venía en dólares) y el producto sugerido: el que se eligió la vez pasada con ese proveedor (remembered), el que tiene su código como código de barras o SKU (code) o el único con ese CABYS (cabys)."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: "{ invoice { id, number, supplier, receivedAt }, lines [{ line, description, code, cabys, quantity, unit, unitCost, rate, suggestedUnit, suggestion { product, factor, reason } | null }] }" }
+        "409": { description: "Registrada a mano (sin XML) o anulada" }
+    post:
+      tags: [Cuentas por pagar]
+      summary: Entrar al inventario la mercadería de la factura (payables.manage + stock.move)
+      description: "Cada línea: productId, newProduct { name, price, categoryId, sku? } (se crea) o skip (no entra). factor = unidades nuestras por cada una del proveedor. Entra con origen SUPPLIER_INVOICE, recalcula el costo promedio y recuerda el emparejamiento por proveedor. Una sola vez por factura."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                locationId: { type: string, format: uuid }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [line]
+                    properties:
+                      line: { type: integer }
+                      skip: { type: boolean }
+                      productId: { type: string, format: uuid }
+                      factor: { type: number }
+                      newProduct: { type: object, properties: { name: { type: string }, price: { type: number }, categoryId: { type: string, format: uuid }, sku: { type: string } } }
+      responses:
+        "200": { description: "{ invoiceId, entered [{ line, productId, quantity, unitCost }], created }" }
+        "409": { description: Ya entró al inventario }
   /payables/invoices/{id}/void:
     post:
       tags: [Cuentas por pagar]

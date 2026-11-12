@@ -36,7 +36,7 @@ async function computeDay(since: Date) {
   return {
     movements: {
       in: count("IN"), out: count("OUT"), adjustments: count("ADJUSTMENT"),
-      received: count("IN", ["PURCHASE_RECEIPT"]), transfers: count("OUT", ["TRANSFER"]) + count("IN", ["TRANSFER"]), counts: count("IN", ["COUNT"]) + count("OUT", ["COUNT"]),
+      received: count("IN", ["PURCHASE_RECEIPT", "SUPPLIER_INVOICE"]), transfers: count("OUT", ["TRANSFER"]) + count("IN", ["TRANSFER"]), counts: count("IN", ["COUNT"]) + count("OUT", ["COUNT"]),
     },
     lowStock: Number(lowStock[0]?.n ?? 0),
     expiringSoon: expiringLots + expiringProducts,

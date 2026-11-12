@@ -53,6 +53,7 @@ enum MovementSource {
   RETURN
   COUNT
   TRANSFER
+  SUPPLIER_INVOICE // entrada desde la factura electrónica de un proveedor (sourceId = SupplierInvoice)
 }
 
 // Unidad de medida; se mapea a los códigos de Hacienda (Unid, kg, g, L, mL, m, cm, m²).
@@ -202,6 +203,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   invoices       SupplierInvoice[]
   payments       SupplierPayment[]
+  productMaps    SupplierProductMap[]
 
   @@unique([companyId, name])
 }
@@ -243,6 +245,7 @@ model Product {
   movements          StockMovement[]
   purchaseOrderItems PurchaseOrderItem[]
   purchaseRequests   PurchaseRequest[]
+  supplierMaps       SupplierProductMap[]
   createdAt          DateTime            @default(now()) // Corregido: createAt -> createdAt
   updatedAt          DateTime            @updatedAt // Corregido: updateAt -> updatedAt
 
@@ -459,6 +462,7 @@ model Company {
   einvoices             EInvoice[]
   einvoiceSettings      EInvoiceSettings?
   receiverMessages      ReceiverMessage[]
+  supplierProductMaps   SupplierProductMap[]
 
   @@index([ownerId])
 }
@@ -1074,6 +1078,8 @@ model SupplierInvoice {
   clave           String? // factura electrónica importada desde su XML: clave de 50 dígitos (no se importa dos veces)
   xml             String? // el XML del proveedor tal cual (para el mensaje receptor y la entrada al inventario)
   haciendaStatus  String? // lo que dice la respuesta de Hacienda que vino con el XML: "Aceptado" / "Rechazado"
+  stockReceivedAt   DateTime? // su mercadería ya entró al inventario (parte 3): no entra dos veces
+  stockReceivedById String?
   taxes           SupplierInvoiceTax[]
   createdById     String
   createdBy       User                        @relation(fields: [createdById], references: [id])
@@ -1369,4 +1375,23 @@ model ReceiverMessage {
 
   @@unique([companyId, consecutive])
   @@index([companyId, status])
+}
+
+// Cómo se llama un producto nuestro en las facturas de un proveedor (Bloque 9, punto 48 — parte 3):
+// la próxima factura de ese proveedor ya sabe a qué producto va cada línea. key = "code:<código del
+// proveedor>" o "desc:<detalle normalizado>"; factor = cuántas unidades nuestras trae cada una suya
+// (caja de 50 → 50).
+model SupplierProductMap {
+  id         String   @id @default(uuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  key        String
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  factor     Decimal  @default(1) @db.Decimal(14, 3)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([companyId, supplierId, key])
 }

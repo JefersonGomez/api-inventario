@@ -8,7 +8,7 @@ export const movementListQuerySchema = z.object({
     ...pageQuery,
     productId: z.uuid().optional(),
     type: z.enum(["IN", "OUT", "ADJUSTMENT"]).optional(),
-    source: z.enum(["MANUAL", "INITIAL", "PURCHASE_RECEIPT", "SALE", "RETURN", "COUNT", "TRANSFER"]).optional(),
+    source: z.enum(["MANUAL", "INITIAL", "PURCHASE_RECEIPT", "SUPPLIER_INVOICE", "SALE", "RETURN", "COUNT", "TRANSFER"]).optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
     locationId: z.uuid().optional(), // dentro de las que ve la persona

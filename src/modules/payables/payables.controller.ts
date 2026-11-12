@@ -2,9 +2,10 @@ import type { Request, Response } from "express"
 import {
   getSupplierAccount, listInvoices, listPayables, registerInvoice, registerSupplierPayment, voidInvoice,
 } from "./payables.service.ts"
-import { emit, EVERYONE } from "../../shared/realtime.ts"
+import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts"
 import { importXmlInvoice, previewXmlInvoice } from "./invoice-import.service.ts"
 import { respondInvoice, retryResponse } from "./receiver-message.service.ts"
+import { receiveInvoiceStock, stockPlan } from "./invoice-stock.service.ts"
 
 const TOPICS = ["payables"]
 // cada handler: llama al service y responde; los errores traen su status (404…)
@@ -35,3 +36,6 @@ export const importXmlHandler = handle((req) => importXmlInvoice(uploaded(req), 
 // mensaje receptor: aceptar / aceptar en parte / rechazar ante Hacienda, y reintentar o consultar
 export const respondHandler = handle((req) => respondInvoice(req.params.id, req.body, req.user!.id), 200, TOPICS)
 export const retryResponseHandler = handle((req) => retryResponse(req.params.id), 200, TOPICS)
+// la mercadería de la factura entra al inventario: plan (líneas con su producto sugerido) y confirmar
+export const stockPlanHandler = handle((req) => stockPlan(req.params.id))
+export const receiveStockHandler = handle((req) => receiveInvoiceStock(req.params.id, req.body, req.user!.id), 200, [...TOPICS, ...STOCK_TOPICS])
