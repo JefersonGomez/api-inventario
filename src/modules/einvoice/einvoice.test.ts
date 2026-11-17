@@ -68,8 +68,10 @@ describe("Facturación electrónica", () => {
     return withKey ? r.attach("p12", p12, "llave.p12") : r
   }
   const einvoiceOf = (documentId: string) => prisma.eInvoice.findUnique({ where: { documentId } })
+  // espera lo que hace el envío automático en segundo plano (firmar + enviar): hasta 15 s, porque en la
+  // CI de GitHub la firma tarda más que en la laptop (con 2 s falló la venta sin internet, 17-nov-2026)
   const until = async (fn: () => Promise<unknown>) => {
-    for (let i = 0; i < 40 && !(await fn()); i++) await new Promise((r) => setTimeout(r, 50))
+    for (let i = 0; i < 300 && !(await fn()); i++) await new Promise((r) => setTimeout(r, 50))
   }
 
   beforeAll(async () => {
