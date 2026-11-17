@@ -45,3 +45,32 @@ con la VPS en hora UTC (Costa Rica = UTC−6, así que 9:00 UTC son las 3:00 a. 
 # 3:15 a. m. CR: la demo vuelve a empezar (solo con DEMO_ENABLED=1 en .env)
 15 9 * * * cd /opt/stockly && docker compose -f docker-compose.prod.yml exec -T api npm run demo:reset >> /opt/stockly/demo-reset.log 2>&1
 ```
+
+## En la VPS: facturación electrónica
+
+Todo desde `/opt/stockly` con el usuario `deploy` (o root). Las migraciones se aplican solas al arrancar la API.
+
+```bash
+cd /opt/stockly
+cp .env .env.respaldo-$(date +%Y%m%d)                       # respaldo antes de tocarlo
+sed -i '/^EINVOICE_SECRET=$/d' .env                           # quita una línea vacía si existiera
+grep -q '^EINVOICE_SECRET=.\{32,\}' .env \
+  || echo "EINVOICE_SECRET=$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')" >> .env
+docker compose -f docker-compose.prod.yml up -d --force-recreate api
+```
+
+- `EINVOICE_SECRET` cifra en la base las credenciales y la llave .p12 de cada empresa. **No cambiarla nunca**
+  (lo guardado ya no se podría leer) y guardar una copia fuera del servidor (gestor de contraseñas).
+- Cada empresa carga su usuario, clave, llave .p12 y PIN de **producción** en la app:
+  Configuración → Facturación electrónica (no van en el .env).
+- Correo de facturas a los clientes: hace falta `EMAIL_FROM` con un dominio verificado en Resend; sin eso todo
+  llega a `EMAIL_TEST_TO`.
+- Empresas sin sucursal (creadas por el seed viejo) no pueden crear productos ni vender. Revisar y arreglar:
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T db psql -U stockly -d stockly -c \
+  'select c.name, count(l.id) as sucursales from "Company" c left join "Location" l on l."companyId" = c.id group by c.name;'
+# si alguna tiene 0:
+docker compose -f docker-compose.prod.yml exec -T db psql -U stockly -d stockly -c \
+  "insert into \"Location\" (id, \"companyId\", name, type, code, \"updatedAt\") select gen_random_uuid()::text, c.id, 'Sucursal principal', 'BRANCH', '001', now() from \"Company\" c where not exists (select 1 from \"Location\" l where l.\"companyId\" = c.id);"
+```
