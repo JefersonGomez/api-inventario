@@ -442,6 +442,19 @@ describe("Facturación electrónica", () => {
     expect((await request(app).post(`/einvoice/documents/${bad}/send`).set(admin.auth)).body.code).toBe("EINVOICE_DATA")
     expect(await prisma.notification.count({ where: { type: "einvoiceProblem", userId: admin.user.id } })).toBe(1)
 
+    // corregirlo: el CABYS para la línea que no lo trae (la venta no cambia; el código va en el XML)
+    expect((await request(app).post(`/einvoice/documents/${bad}/send`).set(admin.auth).send({ cabys: { 1: "12" } })).status).toBe(400)
+    const fixed = await request(app).post(`/einvoice/documents/${bad}/send`).set(admin.auth).send({ cabys: { 1: "4292199990200" } })
+    expect(fixed.body).toMatchObject({ status: "SENT" })
+    const fixedXml = Buffer.from(JSON.parse(calls.find((c) => c.method === "POST" && c.body.includes(fixed.body.clave))!.body).comprobanteXml, "base64").toString("utf8")
+    expect(fixedXml).toContain("<CodigoCABYS>4292199990200</CodigoCABYS>")
+    expect((await prisma.documentLine.findFirstOrThrow({ where: { documentId: bad } })).cabys).toBeNull() // la venta quedó igual
+    // o corregirlo en el producto: al reintentar se toma el CABYS que el producto tiene ahora
+    const bad2 = await sell(noCabysId)
+    await until(async () => (await einvoiceOf(bad2))?.status === "ERROR")
+    await prisma.product.update({ where: { id: noCabysId }, data: { cabys: "4292199990200" } })
+    expect((await request(app).post(`/einvoice/documents/${bad2}/send`).set(admin.auth)).body).toMatchObject({ status: "SENT" })
+
     // apagar el envío automático
     expect((await settings({ enabled: "false" })).body).toMatchObject({ enabled: false, enabledAt: null })
     const off = await sell(productId)

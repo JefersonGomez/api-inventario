@@ -15,7 +15,8 @@ const reply = (fn: (req: Request) => Promise<unknown>) => async (req: Request, r
 }
 
 export const getEInvoiceHandler = reply((req) => getDocumentEInvoice(String(req.params.id)))
-export const sendEInvoiceHandler = reply((req) => sendDocument(String(req.params.id), req.user!.id))
+// cuerpo opcional { cabys: { "2": "6511100000000" } }: CABYS para las líneas que no lo traen (al reintentar un ERROR)
+export const sendEInvoiceHandler = reply((req) => sendDocument(String(req.params.id), req.user!.id, req.body?.cabys ?? {}))
 export const refreshEInvoiceHandler = reply((req) => refreshDocument(String(req.params.id)))
 export const emailEInvoiceHandler = reply((req) => resendEmail(String(req.params.id), req.user!.id))
 export const taxpayerHandler = reply((req) => lookupTaxpayer(String(req.params.id)))

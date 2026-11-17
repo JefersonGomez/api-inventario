@@ -1,6 +1,7 @@
 // Facturación electrónica (Bloque 9). Fase 1: enviar y consultar a mano un comprobante ya emitido.
 // Fase 2: configuración de la empresa (credenciales y llave .p12 cifradas) y prueba de conexión.
 import { Router } from "express"
+import { z } from "zod"
 import multer from "multer"
 import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts"
 import { validate } from "../../middlewares/validate.middleware.ts"
@@ -26,6 +27,8 @@ router.post("/settings/test", Authenticated, Can("company.manage"), testSettings
 
 router.get("/documents/:id", Authenticated, Can("company.manage"), getEInvoiceHandler)
 router.get("/documents/:id/xml", Authenticated, Can("company.manage"), xmlEInvoiceHandler)
-router.post("/documents/:id/send", Authenticated, Can("company.manage"), sendEInvoiceHandler)
+// enviar o reintentar; al reintentar un ERROR por falta de CABYS se mandan los códigos por número de línea
+const sendSchema = z.object({ cabys: z.record(z.string().regex(/^\d{1,4}$/), z.string().regex(/^\d{13}$/, "El CABYS tiene 13 dígitos")).optional() }).optional()
+router.post("/documents/:id/send", validate(sendSchema), Authenticated, Can("company.manage"), sendEInvoiceHandler)
 router.post("/documents/:id/refresh", Authenticated, Can("company.manage"), refreshEInvoiceHandler)
 router.post("/documents/:id/email", Authenticated, Can("company.manage"), emailEInvoiceHandler) // reenviar al cliente

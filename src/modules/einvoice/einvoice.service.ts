@@ -69,11 +69,13 @@ async function notifyProblem(e: EInvoiceRow, consecutive: string) {
 }
 
 // Arma, firma y guarda el comprobante (una sola vez). Si los datos no alcanzan, queda en ERROR.
-async function prepare(documentId: string, actorId: string) {
+// cabysFix: CABYS para las líneas que no lo traen (número de línea → código), al reintentar un ERROR.
+// El comprobante emitido no se modifica: el código va en el XML firmado, que es lo que vale ante Hacienda.
+async function prepare(documentId: string, actorId: string, cabysFix: Record<string, string> = {}) {
   const doc = await prisma.document.findFirst({
     where: { id: documentId },
     include: {
-      lines: { orderBy: { lineNumber: "asc" } }, payments: true, einvoice: true, customer: true,
+      lines: { orderBy: { lineNumber: "asc" }, include: { product: { select: { cabys: true } } } }, payments: true, einvoice: true, customer: true,
       referenceDocument: { select: { type: true, issuedAt: true, total: true, einvoice: { select: { clave: true, status: true } } } },
     },
   })
@@ -129,7 +131,8 @@ async function prepare(documentId: string, actorId: string) {
           : null,
         currency: doc.currency, saleCondition: doc.saleCondition, creditDays: doc.creditDays,
         lines: doc.lines.map((l) => ({
-          cabys: l.cabys ?? "", quantity: l.quantity, unit: l.unit, description: l.description, unitPrice: l.unitPrice,
+          // la línea; si no trae: el que se indicó al reintentar o el que el producto tiene HOY (si lo corrigieron)
+          cabys: l.cabys ?? cabysFix[String(l.lineNumber)] ?? l.product?.cabys ?? "", quantity: l.quantity, unit: l.unit, description: l.description, unitPrice: l.unitPrice,
           discount: l.discount, discountLabel: l.discountLabel, taxRate: l.taxRate, subtotal: l.subtotal, taxAmount: l.taxAmount,
         })),
         payments: doc.payments.map((p) => ({ method: p.method, amount: p.amount })),
@@ -164,18 +167,18 @@ async function prepare(documentId: string, actorId: string) {
 const inFlight = new Set<string>()
 
 // Envía el comprobante a Hacienda (o lo reintenta si el envío anterior falló)
-export async function sendDocument(documentId: string, actorId: string) {
+export async function sendDocument(documentId: string, actorId: string, cabysFix: Record<string, string> = {}) {
   if (inFlight.has(documentId)) throw fail("Este comprobante ya se está enviando", 409, "EINVOICE_BUSY")
   inFlight.add(documentId)
   try {
-    return await sendNow(documentId, actorId)
+    return await sendNow(documentId, actorId, cabysFix)
   } finally {
     inFlight.delete(documentId)
   }
 }
 
-async function sendNow(documentId: string, actorId: string) {
-  const e = await prepare(documentId, actorId)
+async function sendNow(documentId: string, actorId: string, cabysFix: Record<string, string> = {}) {
+  const e = await prepare(documentId, actorId, cabysFix)
   if (e.status !== "PENDING") return refreshDocument(documentId)
   const cfg = await einvoiceConfig()
   if (cfg.credentials.env !== e.environment) {

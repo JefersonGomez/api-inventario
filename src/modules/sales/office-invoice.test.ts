@@ -76,7 +76,7 @@ describe("Factura desde la oficina", () => {
     expect(installments.map((i) => Number(i.amount))).toEqual([2825, 2825])
     expect(await prisma.documentPayment.count({ where: { documentId: res.body.document.id } })).toBe(0)
     // pasa el límite
-    const tooMuch = await invoice(admin, { ...credit, lines: [{ description: "Instalación", quantity: 1, unitPriceWithTax: 200000, taxRate: "RATE_13" }] })
+    const tooMuch = await invoice(admin, { ...credit, lines: [{ description: "Instalación", quantity: 1, unitPriceWithTax: 200000, taxRate: "RATE_13", cabys: "5461100000000" }] })
     expect(tooMuch.body.code).toBe("CREDIT_LIMIT")
   })
 
@@ -89,6 +89,7 @@ describe("Factura desde la oficina", () => {
     expect((await invoice(admin, { customerId, lines: base.lines })).status).toBe(400) // ni contado ni crédito
     expect((await invoice(admin, { ...base, customerId, credit: { frequency: "MONTHLY", installments: 1 } })).status).toBe(400) // las dos
     expect((await invoice(admin, { ...base, customerId, lines: [{ description: "Servicio", quantity: 1 }] })).status).toBe(400) // servicio sin precio
+    expect((await invoice(admin, { ...base, customerId, lines: [{ description: "Flete", quantity: 1, unitPriceWithTax: 5000, taxRate: "RATE_13" }] })).status).toBe(400) // servicio sin CABYS
     expect((await invoice(cashier, { ...base, customerId })).status).toBe(403) // los cajeros facturan en la caja
     expect(await stockAt(hammerId, main)).toBe(7) // lo rechazado no movió nada
   })

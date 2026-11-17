@@ -31,8 +31,8 @@ const lineSchema = z
     taxRate: z.enum(["EXEMPT", "RATE_1", "RATE_2", "RATE_4", "RATE_13"]).optional(),
     cabys: z.string().regex(/^\d{13}$/, "El CABYS tiene 13 dígitos").optional(),
   })
-  .refine((l) => l.productId || (l.description && l.unitPriceWithTax !== undefined && l.taxRate), {
-    message: "Una línea de servicio necesita descripción, precio e IVA",
+  .refine((l) => l.productId || (l.description && l.unitPriceWithTax !== undefined && l.taxRate && l.cabys), {
+    message: "Una línea de servicio necesita descripción, precio, IVA y su CABYS (Hacienda lo exige en cada línea)",
   })
 
 export const officeInvoiceSchema = z
@@ -66,8 +66,14 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
   const ids = [...new Set(input.lines.flatMap((l) => (l.productId ? [l.productId] : [])))]
   const products = await prisma.product.findMany({
     where: { id: { in: ids }, deletedAt: null },
-    select: { id: true, name: true, cost: true, unit: true, stocks: { where: { locationId: location.id }, select: { quantity: true } } },
+    select: { id: true, name: true, cost: true, unit: true, cabys: true, stocks: { where: { locationId: location.id }, select: { quantity: true } } },
   })
+  // con el envío automático a Hacienda encendido, una línea sin CABYS quedaría "Con error": se avisa antes
+  const einvoiceOn = await prisma.eInvoiceSettings.findFirst({ where: { enabled: true }, select: { id: true } })
+  const noCabys = products.filter((p) => !p.cabys && !input.lines.some((l) => l.productId === p.id && l.cabys))
+  if (einvoiceOn && noCabys.length) {
+    throw fail(`Sin código CABYS (Hacienda lo exige): ${noCabys.map((p) => p.name).join(", ")}. Complétalo en Productos.`, 409, "INVOICE_CABYS")
+  }
   const byId = new Map(products.map((p) => [p.id, p]))
   const wanted = new Map<string, Prisma.Decimal>()
   for (const l of input.lines) if (l.productId) wanted.set(l.productId, (wanted.get(l.productId) ?? new D(0)).plus(l.quantity))
