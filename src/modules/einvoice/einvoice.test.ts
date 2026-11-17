@@ -396,7 +396,11 @@ describe("Facturación electrónica", () => {
   })
 
   it("la venta que la caja hizo sin internet va a Hacienda como situación 3, con la hora real de la venta", async () => {
-    const soldAt = new Date(Date.now() - 2000) // dentro del turno abierto (la caja lo exige)
+    // un poco antes de ahora (dentro del turno abierto, como exige la caja) pero DESPUÉS de encender el envío
+    // automático: lo vendido antes de encender no se manda solo. En la CI de GitHub las pruebas corren tan
+    // rápido que "hace 2 s" caía antes de encender y la venta no se enviaba (17-nov-2026).
+    const { enabledAt } = await prisma.eInvoiceSettings.findFirstOrThrow({ where: { companyId: admin.companyId }, select: { enabledAt: true } })
+    const soldAt = new Date(Math.max(Date.now() - 2000, enabledAt!.getTime() + 100))
     const sale = await request(app).post("/pos/sales").set(cashier.auth).send({
       clientSaleId: "6f1e2d3c-4b5a-4987-8a1b-2c3d4e5f6a7b", soldAt: soldAt.toISOString(),
       lines: [{ productId, quantity: 1, seenPrice: 1130 }], payments: [{ method: "CASH", amount: 1130 }],
