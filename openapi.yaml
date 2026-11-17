@@ -2527,6 +2527,38 @@ paths:
         '200': { description: Página de comprobantes }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /sales/invoices:
+    post:
+      tags: [Ventas]
+      summary: Factura desde la oficina, sin caja (invoices.issue — administrador y encargado)
+      description: "Siempre factura electrónica a un cliente con cédula. Las líneas con productId salen del stock de locationId (sin negativos); las de servicio llevan description, unitPriceWithTax y taxRate. De contado (payment: TRANSFER | SINPE | CARD, con bankAccountId opcional) el pago entra a esa cuenta; a crédito (credit: frequency + installments) se crean las cuotas con el límite del cliente. Se envía sola a Hacienda."
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customerId, lines]
+              properties:
+                customerId: { type: string, format: uuid }
+                locationId: { type: string, format: uuid }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [quantity]
+                    properties:
+                      productId: { type: string, format: uuid }
+                      description: { type: string }
+                      quantity: { type: number }
+                      unitPriceWithTax: { type: number }
+                      taxRate: { type: string, enum: [EXEMPT, RATE_1, RATE_2, RATE_4, RATE_13] }
+                      cabys: { type: string }
+                payment: { type: object, properties: { method: { type: string, enum: [TRANSFER, SINPE, CARD] }, reference: { type: string }, bankAccountId: { type: string, format: uuid } } }
+                credit: { type: object, properties: { frequency: { type: string, enum: [BIWEEKLY, MONTHLY] }, installments: { type: integer } } }
+                notes: { type: string }
+      responses:
+        "201": { description: "El comprobante (como el tiquete de la caja: document, lines, payments…)" }
+        "409": { description: "Cliente sin cédula (INVOICE_CUSTOMER_ID), sin stock (INVOICE_STOCK) o problemas de crédito (CREDIT_*)" }
   /sales/{id}:
     get:
       tags: [Ventas]

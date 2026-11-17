@@ -1,9 +1,10 @@
 import { Router, type NextFunction, type Request, type Response } from "express"
-import { Authenticated } from "../../middlewares/authenticate.middleware.ts"
+import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts"
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import { pinLimiter } from "../../middlewares/rate-limit.middleware.ts"
 import { returnSchema, salesQuerySchema } from "./sales.service.ts"
-import { listSalesHandler, returnHandler, saleHandler } from "./sales.controller.ts"
+import { listSalesHandler, officeInvoiceHandler, returnHandler, saleHandler } from "./sales.controller.ts"
+import { officeInvoiceSchema } from "./office-invoice.service.ts"
 
 // con alguno de estos permisos (Can pide todos)
 const AnyOf = (...perms: string[]) => (req: Request, res: Response, next: NextFunction) =>
@@ -13,6 +14,8 @@ export const router = Router()
 
 // ver ventas: quien vende, quien autoriza devoluciones o quien ve reportes
 router.get("/", validateQuery(salesQuerySchema), Authenticated, AnyOf("sales.sell", "sales.void", "reports.view"), listSalesHandler)
+// factura desde la oficina (sin caja): administrador y encargado (antes de /:id)
+router.post("/invoices", validate(officeInvoiceSchema), Authenticated, Can("invoices.issue"), officeInvoiceHandler)
 router.get("/:id", Authenticated, AnyOf("sales.sell", "sales.void", "reports.view"), saleHandler)
 // devolver: en la caja o desde Ventas; siempre lo autoriza un encargado con su código (sales.void)
 router.post("/:id/returns", validate(returnSchema), Authenticated, AnyOf("sales.sell", "sales.void"), pinLimiter, returnHandler)

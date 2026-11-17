@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   "sales.void", // anular ventas y hacer devoluciones; autoriza con su PIN
   "sales.negative", // autorizar negativas: vender lo que el sistema tiene sin stock (descuadre); con su PIN
   "sales.credit", // autorizar ventas a crédito en la caja; con su PIN
+  "invoices.issue", // emitir facturas desde la oficina (sin caja): sale del stock y el contado entra a un banco
   "credit.manage", // habilitar crédito a un cliente y fijar su límite (por defecto solo el admin)
   "receivables.manage", // cuentas por cobrar: ver saldos y registrar abonos sin caja
   "payables.manage", // cuentas por pagar: facturas de proveedores, pagos y saldos
@@ -44,7 +45,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MANAGER: [
     "products.manage", "costs.view", "stock.move", "purchases.request", "purchases.manage", "suppliers.manage",
     "customers.manage", "customers.delete", "reports.view", "audit.view", "sales.sell", "cash.manage",
-    "cash.reconcile", "sales.discount", "sales.void", "sales.negative", "sales.credit", "receivables.manage", "payables.manage", "banks.manage", "accounting.view",
+    "cash.reconcile", "sales.discount", "sales.void", "sales.negative", "sales.credit", "invoices.issue", "receivables.manage", "payables.manage", "banks.manage", "accounting.view",
   ],
   EMPLOYE: ["costs.view", "stock.move", "purchases.request", "customers.manage", "reports.view"],
   CASHIER: ["purchases.request", "customers.manage", "sales.sell", "cash.manage"],

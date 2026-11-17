@@ -592,6 +592,8 @@ model DocumentPayment {
   amount     Decimal       @db.Decimal(18, 5)
   reference  String? // n.º de autorización del datáfono o comprobante SINPE
   tendered   Decimal?      @db.Decimal(18, 2) // efectivo: lo que entregó el cliente (vuelto = tendered − amount)
+  bankAccountId String? // factura de oficina: la cuenta donde entró (en la caja: la de su sucursal)
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
 }
 
 // Último número usado por empresa + tipo + sucursal + terminal (se incrementa en la misma transacción)
@@ -1177,6 +1179,7 @@ model BankAccount {
   deposits         CashDeposit[]
   customerPayments CustomerPayment[]
   supplierPayments SupplierPayment[]
+  salePayments     DocumentPayment[]
 
   @@index([companyId])
 }

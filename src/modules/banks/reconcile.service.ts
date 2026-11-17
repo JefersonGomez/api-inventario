@@ -64,7 +64,7 @@ export async function expectedItems(accountId: string, from: Date, to: Date): Pr
     prisma.documentPayment.findMany({
       where: { method: { in: ["SINPE", "TRANSFER", "CARD"] }, document: { companyId, issuedAt: range } },
       select: {
-        id: true, method: true, amount: true, reference: true,
+        id: true, method: true, amount: true, reference: true, bankAccountId: true, // factura de oficina: la cuenta elegida
         document: { select: { type: true, consecutive: true, issuedAt: true, branchCode: true, cashSession: { select: { register: { select: { locationId: true } } } } } },
       },
     }),
@@ -91,7 +91,7 @@ export async function expectedItems(accountId: string, from: Date, to: Date): Pr
   for (const p of salePayments) {
     const d = p.document
     const locationId = d.cashSession?.register.locationId ?? locationByCode.get(d.branchCode)
-    if (accountOf(locationId) !== accountId) continue
+    if ((p.bankAccountId ?? accountOf(locationId)) !== accountId) continue
     const amount = round2(Number(p.amount)) * (d.type === "CREDIT_NOTE" ? -1 : 1) // la nota de crédito = reembolso
     const day = localDay(d.issuedAt)
     if (p.method === "CARD") cards.set(day, round2((cards.get(day) ?? 0) + amount))
