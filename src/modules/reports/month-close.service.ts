@@ -83,7 +83,8 @@ async function receivablesAt(end: Date, daysLate: (d: Date) => number) {
 
 async function payablesAt(endDate: Date, end: Date, daysLate: (d: Date) => number) {
   const invoices = await prisma.supplierInvoice.findMany({
-    where: { issueDate: { lt: endDate }, OR: [{ voidedAt: null }, { voidedAt: { gte: end } }] },
+    // las notas de crédito de proveedores no son deuda: su efecto ya está en el abono que rebajó las facturas
+    where: { type: "INVOICE", issueDate: { lt: endDate }, OR: [{ voidedAt: null }, { voidedAt: { gte: end } }] },
     select: {
       id: true, number: true, issueDate: true, dueDate: true, total: true, creditable: true,
       supplier: { select: { id: true, name: true, idNumber: true } },

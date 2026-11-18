@@ -6,7 +6,7 @@
 //  3. opcional (respond=true): se acepta ante Hacienda en el mismo paso (mensaje receptor, parte 2).
 // La entrada al inventario es la parte 3.
 import { z } from "zod"
-import { prisma } from "../../config/database.ts"
+import { prisma, type Db } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { logAudit } from "../audit/audit.service.ts"
 import { getCompany } from "../company/company.service.ts"
@@ -63,7 +63,7 @@ async function analyze(files: Buffer[]) {
   else if (!answer) notices.push({ level: "info", code: "NO_ANSWER", text: "No viene la respuesta de Hacienda: no se puede confirmar que la haya aceptado (suele llegar en el mismo correo del proveedor)" })
 
   // a nombre de quién está: sin la cédula de la empresa no da crédito fiscal
-  const receiverMatches = parsed.kind === "INVOICE" && sameId(parsed.receiverId, company.idNumber)
+  const receiverMatches = parsed.kind !== "TICKET" && sameId(parsed.receiverId, company.idNumber)
   if (parsed.kind === "TICKET") notices.push({ level: "warning", code: "TICKET", text: "Es un tiquete, no una factura a nombre de la empresa: se registra para pagarlo, pero no da crédito fiscal" })
   else if (!company.idNumber) notices.push({ level: "warning", code: "NO_COMPANY_ID", text: "La empresa no tiene su cédula en Datos fiscales: no se puede revisar a nombre de quién está la factura" })
   else if (!receiverMatches) notices.push({ level: "warning", code: "OTHER_RECEIVER", text: `La factura está a nombre de otra identificación (${parsed.receiverId ?? "sin receptor"}): no da crédito fiscal a la empresa` })
@@ -103,8 +103,27 @@ async function analyze(files: Buffer[]) {
 
   // fechas en hora de Costa Rica; vence según el plazo de la factura o, si no trae, el del proveedor
   const issueDate = crDateTime(parsed.issuedAt).slice(0, 10)
-  const days = parsed.saleCondition === "02" && parsed.creditDays ? parsed.creditDays : (supplier?.creditDays ?? 0)
+  const isNote = parsed.kind === "CREDIT_NOTE"
+  const days = isNote ? 0 : parsed.saleCondition === "02" && parsed.creditDays ? parsed.creditDays : (supplier?.creditDays ?? 0)
   const dueDate = new Date(new Date(`${issueDate}T00:00:00Z`).getTime() + days * DAY).toISOString().slice(0, 10)
+
+  // nota de crédito: rebaja lo que se le debe al proveedor, empezando por la factura que corrige
+  let credit: Awaited<ReturnType<typeof creditPlan>> | null = null
+  if (isNote) {
+    const refClave = parsed.reference?.clave ?? null
+    const original = refClave
+      ? await prisma.supplierInvoice.findFirst({ where: { clave: refClave, type: "INVOICE", voidedAt: null }, select: { id: true, number: true, supplierId: true } })
+      : null
+    if (original && supplier && original.supplierId !== supplier.id) {
+      notices.push({ level: "error", code: "ORIGINAL_OTHER", text: "La factura que corrige esta nota es de otro proveedor: revisa el archivo" })
+    } else if (!original) {
+      notices.push({ level: "warning", code: "NO_ORIGINAL", text: `No está registrada la factura que corrige${refClave ? ` (…${refClave.slice(-20)})` : ""}: se rebaja de las facturas abiertas de este proveedor` })
+    }
+    credit = await creditPlan(prisma, supplier?.id ?? null, original?.id ?? null, computed.toDecimalPlaces(2))
+    if (credit.unapplied > 0) {
+      notices.push({ level: "info", code: "UNAPPLIED", text: `Quedan ${credit.unapplied.toFixed(2)} a favor: no hay facturas abiertas de este proveedor para rebajarlos (el proveedor te los debe)` })
+    }
+  }
 
   return {
     parsed, invoiceXml, answer,
@@ -126,9 +145,34 @@ async function analyze(files: Buffer[]) {
       duplicateId: duplicate && !duplicate.voidedAt ? duplicate.id : null,
       notices,
       canImport: !notices.some((n) => n.level === "error"),
-      receiverReady: parsed.kind === "INVOICE" && (await receiverReady()), // se puede aceptar ante Hacienda desde aquí
+      receiverReady: parsed.kind !== "TICKET" && (await receiverReady()), // se puede aceptar ante Hacienda desde aquí
+      // nota de crédito: a qué facturas se rebaja y cuánto queda a favor
+      credit: credit && { original: credit.original, applied: credit.applied.map((a) => ({ id: a.id, number: a.number, amount: a.amount.toNumber() })), unapplied: credit.unapplied },
     },
   }
+}
+
+// A qué facturas abiertas del proveedor se rebaja una nota de crédito: la que corrige primero y luego la que
+// vence primero. Lo que no alcanza a rebajarse queda "a favor".
+async function creditPlan(db: Db, supplierId: string | null, originalId: string | null, amount: Prisma.Decimal) {
+  const open = supplierId
+    ? await db.supplierInvoice.findMany({
+        where: { supplierId, type: "INVOICE", voidedAt: null, paid: { lt: prisma.supplierInvoice.fields.total } },
+        select: { id: true, number: true, total: true, paid: true },
+        orderBy: [{ dueDate: "asc" }, { number: "asc" }],
+      })
+    : []
+  const ordered = [...open.filter((i) => i.id === originalId), ...open.filter((i) => i.id !== originalId)]
+  let left = amount
+  const applied: { id: string; number: string; amount: Prisma.Decimal }[] = []
+  for (const inv of ordered) {
+    if (!left.greaterThan(0)) break
+    const take = D.min(left, inv.total.minus(inv.paid))
+    if (take.greaterThan(0)) applied.push({ id: inv.id, number: inv.number, amount: take })
+    left = left.minus(take)
+  }
+  const original = originalId ? (await db.supplierInvoice.findFirst({ where: { id: originalId }, select: { id: true, number: true } })) : null
+  return { original, applied, unapplied: left.toDecimalPlaces(2).toNumber() }
 }
 
 // Vista previa: qué se va a registrar y qué hay que revisar
@@ -164,13 +208,40 @@ export async function importXmlInvoice(files: Buffer[], input: z.infer<typeof im
       lines: preview.taxes, creditable: input.creditable ? input.creditable === "true" : preview.creditable,
       ...(input.note && { note: input.note }),
     }, userId)
-    return tx.supplierInvoice.update({
+    const isNote = parsed.kind === "CREDIT_NOTE"
+    const saved = await tx.supplierInvoice.update({
       where: { id: invoice.id },
-      data: { clave: parsed.clave, xml: invoiceXml, haciendaStatus: answer?.status ?? null },
-      select: { id: true, supplierId: true, number: true, issueDate: true, dueDate: true, total: true, creditable: true, clave: true, haciendaStatus: true },
+      data: {
+        clave: parsed.clave, xml: invoiceXml, haciendaStatus: answer?.status ?? null,
+        // la nota no es deuda: queda "usada" (paid = total) y su efecto es el abono de abajo
+        ...(isNote && { type: "CREDIT_NOTE" as const, paid: invoice.total, referenceInvoiceId: preview.credit?.original?.id ?? null }),
+      },
+      select: { id: true, type: true, supplierId: true, number: true, issueDate: true, dueDate: true, total: true, creditable: true, clave: true, haciendaStatus: true },
     })
+    if (isNote) {
+      // con el proveedor bloqueado: lo abierto se recalcula aquí (no se confía en la vista previa)
+      await tx.$queryRaw`SELECT 1 FROM "Supplier" WHERE id = ${supplierId} FOR UPDATE`
+      const plan = await creditPlan(tx, supplierId, preview.credit?.original?.id ?? null, invoice.total)
+      const applied = plan.applied.reduce((s, a) => s.plus(a.amount), new D(0))
+      if (applied.greaterThan(0)) {
+        await tx.supplierPayment.create({
+          data: {
+            companyId: invoice.companyId, supplierId, amount: applied, method: "OTHER", paidAt: invoice.issueDate,
+            reference: `NC ${parsed.number.slice(-10)}`, note: parsed.reference?.reason?.slice(0, 200) ?? "Nota de crédito del proveedor",
+            userId, creditNoteId: saved.id,
+            allocations: { create: plan.applied.map((a) => ({ invoiceId: a.id, amount: a.amount })) },
+          },
+        })
+        for (const a of plan.applied) await tx.supplierInvoice.update({ where: { id: a.id }, data: { paid: { increment: a.amount } } })
+      }
+      await logAudit(userId, "CREATE", "SupplierCreditNote", saved.id, {
+        number: parsed.number, total: invoice.total.toNumber(), applied: applied.toNumber(), unapplied: plan.unapplied,
+        original: preview.credit?.original?.number ?? null,
+      }, tx)
+    }
+    return saved
   })
-  if (input.respond !== "true" || parsed.kind !== "INVOICE") return saved
+  if (input.respond !== "true" || parsed.kind === "TICKET") return saved
   // la factura ya quedó registrada: si la respuesta a Hacienda falla, se dice por qué y se responde después
   try {
     return { ...saved, receiverMessage: await respondInvoice(saved.id, { decision: "ACCEPT" }, userId) }

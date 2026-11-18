@@ -109,7 +109,9 @@ describe("Facturas de proveedores desde el XML", () => {
     expect((await preview(admin, [["r.xml", answerXml(data.clave, "1")]])).body.error).toMatch(/Falta el XML de la factura/)
     expect((await preview(admin, [["f.xml", "<hola>"]])).status).toBe(422)
     const note = buildEInvoiceXml(supplierInvoice({ type: "CREDIT_NOTE", reference: { type: "INVOICE", clave: data.clave, issuedAt: data.issuedAt, code: "06", reason: "Devolución" } }))
-    expect((await preview(admin, [["n.xml", note]])).body.error).toMatch(/nota de crédito/)
+    expect((await preview(admin, [["n.xml", note]])).body.kind).toBe("CREDIT_NOTE") // las notas de crédito ya se importan
+    const debit = note.replace(/NotaCreditoElectronica/g, "NotaDebitoElectronica")
+    expect((await preview(admin, [["d.xml", debit]])).body.error).toMatch(/nota de débito/) // las de débito todavía no
     expect((await request(app).post("/payables/invoices/xml/preview").set(admin.auth)).body.error).toMatch(/Sube el XML/)
   })
 })

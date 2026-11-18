@@ -48,7 +48,9 @@ export type ParsedLine = {
 }
 
 export type ParsedSupplierInvoice = {
-  kind: "INVOICE" | "TICKET"
+  kind: "INVOICE" | "TICKET" | "CREDIT_NOTE"
+  // nota de crédito: el comprobante que corrige (InformacionReferencia)
+  reference: { clave: string | null; code: string | null; reason: string | null } | null
   clave: string
   number: string // consecutivo de 20 dígitos
   issuedAt: Date
@@ -68,9 +70,9 @@ export type ParsedSupplierInvoice = {
 // La factura (o tiquete) del proveedor
 export function parseSupplierInvoice(xml: string): ParsedSupplierInvoice {
   const root = parse(xml)
-  const kind = root.localName === "FacturaElectronica" ? "INVOICE" : root.localName === "TiqueteElectronico" ? "TICKET" : null
+  const kind = root.localName === "FacturaElectronica" ? "INVOICE" : root.localName === "TiqueteElectronico" ? "TICKET" : root.localName === "NotaCreditoElectronica" ? "CREDIT_NOTE" : null
   if (!kind) {
-    if (root.localName === "NotaCreditoElectronica" || root.localName === "NotaDebitoElectronica") throw new Error("Es una nota de crédito o débito: todavía no se importan, regístrala a mano")
+    if (root.localName === "NotaDebitoElectronica") throw new Error("Es una nota de débito: todavía no se importan, regístrala a mano")
     if (root.localName === "MensajeHacienda") throw new Error("Ese archivo es la respuesta de Hacienda: sube también el XML de la factura")
     throw new Error("Ese XML no es una factura electrónica de Hacienda")
   }
@@ -135,8 +137,10 @@ export function parseSupplierInvoice(xml: string): ParsedSupplierInvoice {
   if (otherCharges.greaterThan(0)) add("EXEMPT", otherCharges, 0)
 
   const plazo = txt(root, "PlazoCredito")
+  const ref = kids(root, "InformacionReferencia").find((r) => /^\d{50}$/.test(txt(r, "Numero") ?? "")) ?? kid(root, "InformacionReferencia")
   return {
     kind,
+    reference: kind === "CREDIT_NOTE" && ref ? { clave: txt(ref, "Numero"), code: txt(ref, "Codigo"), reason: txt(ref, "Razon") } : null,
     clave,
     number: txt(root, "NumeroConsecutivo") ?? clave.slice(21, 41),
     issuedAt,

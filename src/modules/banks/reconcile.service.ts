@@ -76,7 +76,8 @@ export async function expectedItems(accountId: string, from: Date, to: Date): Pr
       },
     }),
     prisma.supplierPayment.findMany({
-      where: { method: { not: "CASH" }, paidAt: range, ...(isDefault ? { OR: [{ bankAccountId: accountId }, { bankAccountId: null }] } : { bankAccountId: accountId }) },
+      // los abonos de una nota de crédito del proveedor no salieron del banco
+      where: { method: { not: "CASH" }, creditNoteId: null, paidAt: range, ...(isDefault ? { OR: [{ bankAccountId: accountId }, { bankAccountId: null }] } : { bankAccountId: accountId }) },
       select: { id: true, amount: true, reference: true, paidAt: true, supplier: { select: { name: true } } },
     }),
     prisma.cashDeposit.findMany({

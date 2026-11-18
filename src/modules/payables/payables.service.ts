@@ -135,6 +135,7 @@ export async function voidInvoice(id: string, reason: string, userId: string) {
   const invoice = await prisma.supplierInvoice.findFirst({ where: { id } })
   if (!invoice) throw fail("Factura no encontrada", 404)
   if (invoice.voidedAt) throw new Error("La factura ya está anulada")
+  if (invoice.type === "CREDIT_NOTE") throw new Error("Una nota de crédito del proveedor no se anula: ya rebajó lo que se le debe")
   if (invoice.paid.greaterThan(0)) throw new Error("La factura tiene pagos: no se puede anular")
   const saved = await prisma.supplierInvoice.update({ where: { id }, data: { voidedAt: new Date(), voidReason: reason }, omit: { xml: true } })
   await logAudit(userId, "UPDATE", "SupplierInvoice", id, { voided: true, number: invoice.number, reason })

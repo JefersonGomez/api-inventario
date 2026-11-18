@@ -34,7 +34,7 @@ const productView = { id: true, name: true, sku: true, barcode: true, unit: true
 async function loadInvoice(invoiceId: string) {
   const invoice = await prisma.supplierInvoice.findFirst({
     where: { id: invoiceId },
-    select: { id: true, number: true, xml: true, voidedAt: true, creditable: true, stockReceivedAt: true, supplierId: true, supplier: { select: { name: true } } },
+    select: { id: true, type: true, number: true, xml: true, voidedAt: true, creditable: true, stockReceivedAt: true, supplierId: true, supplier: { select: { name: true } } },
   })
   if (!invoice) throw fail("Factura no encontrada", 404)
   if (!invoice.xml) throw fail("Esta factura se registró a mano: no trae las líneas para entrar al inventario (regístralo en Movimientos)", 409, "STOCK_NO_XML")
@@ -77,7 +77,8 @@ export async function stockPlan(invoiceId: string) {
     })
   }
   return {
-    invoice: { id: invoice.id, number: invoice.number, supplier: invoice.supplier.name, receivedAt: invoice.stockReceivedAt },
+    // nota de crédito: la mercadería SALE (se le devolvió al proveedor)
+    invoice: { id: invoice.id, type: invoice.type, direction: invoice.type === "CREDIT_NOTE" ? "OUT" : "IN", number: invoice.number, supplier: invoice.supplier.name, receivedAt: invoice.stockReceivedAt },
     lines,
   }
 }
@@ -104,7 +105,12 @@ export const receiveStockSchema = z.object({
 // Entra al inventario
 export async function receiveInvoiceStock(invoiceId: string, input: z.infer<typeof receiveStockSchema>, userId: string) {
   const { invoice, parsed, costOf } = await loadInvoice(invoiceId)
-  if (invoice.stockReceivedAt) throw fail("La mercadería de esta factura ya entró al inventario", 409, "STOCK_DONE")
+  // nota de crédito: lo devuelto al proveedor SALE del inventario (sin tocar el costo ni crear productos)
+  const out = invoice.type === "CREDIT_NOTE"
+  if (invoice.stockReceivedAt) {
+    throw fail(out ? "La mercadería de esta nota ya salió del inventario" : "La mercadería de esta factura ya entró al inventario", 409, "STOCK_DONE")
+  }
+  if (out && input.lines.some((c) => c.newProduct)) throw new Error("En una devolución al proveedor solo salen productos que ya tienes")
   const byLine = new Map(parsed.lines.map((l) => [l.line, l]))
   const chosen = input.lines.filter((c) => !c.skip)
   for (const c of input.lines) if (!byLine.has(c.line)) throw new Error(`La línea ${c.line} no es de esta factura`)
@@ -127,7 +133,9 @@ export async function receiveInvoiceStock(invoiceId: string, input: z.infer<type
     created.set(c.line, product.id)
   }
 
-  const reason = `Factura ${invoice.number.slice(-10)} de ${invoice.supplier.name}`
+  const reason = out
+    ? `Devolución al proveedor ${invoice.supplier.name} (nota de crédito ${invoice.number.slice(-10)})`
+    : `Factura ${invoice.number.slice(-10)} de ${invoice.supplier.name}`
   const entered = await prisma.$transaction(async (tx) => {
     const done: { line: number; productId: string; quantity: number; unitCost: number }[] = []
     for (const c of chosen) {
@@ -139,15 +147,18 @@ export async function receiveInvoiceStock(invoiceId: string, input: z.infer<type
       const quantity = new D(l.quantity).times(factor).toDecimalPlaces(3).toNumber()
       const unitCost = new D(costOf(l)).div(factor).toDecimalPlaces(4).toNumber()
       // costo promedio ponderado con el stock de ANTES, igual que la recepción de una orden de compra
-      const stockBefore = Number(product.stock)
-      const newCost = product.cost !== null && stockBefore > 0
-        ? (stockBefore * Number(product.cost) + quantity * unitCost) / (stockBefore + quantity)
-        : unitCost
-      await tx.product.update({ where: { id: product.id }, data: { cost: Number(newCost.toFixed(4)) } })
+      // (en una devolución al proveedor el costo de lo que queda no cambia)
+      if (!out) {
+        const stockBefore = Number(product.stock)
+        const newCost = product.cost !== null && stockBefore > 0
+          ? (stockBefore * Number(product.cost) + quantity * unitCost) / (stockBefore + quantity)
+          : unitCost
+        await tx.product.update({ where: { id: product.id }, data: { cost: Number(newCost.toFixed(4)) } })
+      }
       try {
-        await createMovement(product.id, userId, "IN", quantity, reason, tx, {
+        await createMovement(product.id, userId, out ? "OUT" : "IN", quantity, reason, tx, {
           source: "SUPPLIER_INVOICE", sourceId: invoice.id, ...(input.locationId && { locationId: input.locationId }),
-          lotDefault: `FAC-${invoice.number.slice(-10)}`,
+          ...(!out && { lotDefault: `FAC-${invoice.number.slice(-10)}` }), // al salir, los lotes se toman como en una venta
         })
       } catch (err) {
         throw new Error(`Línea ${c.line} (${l.description}): ${(err as Error).message}`)

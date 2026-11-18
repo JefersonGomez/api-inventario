@@ -1057,8 +1057,21 @@ enum ReturnCondition {
 // (purchaseOrderId) o suelta (fletes, servicios). Montos con IVA como vienen en la factura; el IVA queda
 // aparte para el crédito fiscal (punto 54). El número no se repite por proveedor entre las vigentes
 // (índice único parcial en la migración). Anular solo sin pagos.
+// Documento de un proveedor: factura o nota de crédito (la nota rebaja lo que se le debe y el crédito fiscal)
+enum SupplierDocType {
+  INVOICE
+  CREDIT_NOTE
+}
+
 model SupplierInvoice {
   id              String                      @id @default(uuid())
+  type            SupplierDocType             @default(INVOICE)
+  // nota de crédito: la factura que corrige (si está importada). La nota queda con paid = total: su efecto
+  // en el saldo es el abono creditPayment, aplicado a la factura original primero.
+  referenceInvoiceId String?
+  referenceInvoice   SupplierInvoice?  @relation("SupplierCreditNotes", fields: [referenceInvoiceId], references: [id])
+  creditNotes        SupplierInvoice[] @relation("SupplierCreditNotes")
+  creditPayment      SupplierPayment?  @relation("CreditNotePayment")
   companyId       String
   company         Company                     @relation(fields: [companyId], references: [id])
   supplierId      String
@@ -1108,6 +1121,9 @@ model SupplierPayment {
   bankAccountId String? // de qué cuenta salió (efectivo: ninguna)
   bankAccount   BankAccount?                @relation(fields: [bankAccountId], references: [id])
   note          String?
+  // abono creado por una nota de crédito del proveedor (no es plata que salió del banco)
+  creditNoteId  String?          @unique
+  creditNote    SupplierInvoice? @relation("CreditNotePayment", fields: [creditNoteId], references: [id])
   userId        String
   user          User                        @relation(fields: [userId], references: [id])
   createdAt     DateTime                    @default(now())

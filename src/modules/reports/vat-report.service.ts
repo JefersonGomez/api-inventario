@@ -88,7 +88,7 @@ export async function getVatReport(q: z.infer<typeof vatReportQuerySchema>) {
     prisma.supplierInvoice.findMany({
       where: { voidedAt: null, issueDate: range.utc },
       select: {
-        id: true, number: true, issueDate: true, subtotal: true, tax: true, total: true, creditable: true,
+        id: true, type: true, number: true, issueDate: true, subtotal: true, tax: true, total: true, creditable: true,
         supplier: { select: { id: true, name: true } },
         taxes: { select: { rate: true, base: true, tax: true } },
       },
@@ -102,12 +102,14 @@ export async function getVatReport(q: z.infer<typeof vatReportQuerySchema>) {
   // II. compras: acreditables y no acreditables por tarifa
   const creditable = emptyRows()
   const nonCreditable = emptyRows()
+  // la nota de crédito de un proveedor RESTA (rebaja la compra y su IVA acreditable)
+  const sign = (inv: { type: string }) => (inv.type === "CREDIT_NOTE" ? -1 : 1)
   for (const inv of invoices) {
     const rows = inv.creditable ? creditable : nonCreditable
     for (const t of inv.taxes) {
       const r = rows.find((x) => x.rate === t.rate)!
-      r.base += Number(t.base)
-      r.tax += Number(t.tax)
+      r.base += sign(inv) * Number(t.base)
+      r.tax += sign(inv) * Number(t.tax)
     }
   }
   for (const r of [...creditable, ...nonCreditable]) {
@@ -135,9 +137,9 @@ export async function getVatReport(q: z.infer<typeof vatReportQuerySchema>) {
       creditable: { rows: creditable, totals: purchases },
       nonCreditable: { rows: nonCreditable, totals: sumRows(nonCreditable) },
       invoices: invoices.map((i) => ({
-        id: i.id, number: i.number, issueDate: i.issueDate.toISOString().slice(0, 10), supplier: i.supplier, creditable: i.creditable,
-        subtotal: num(i.subtotal), tax: num(i.tax), total: num(i.total),
-        taxes: i.taxes.map((t) => ({ rate: t.rate, base: num(t.base), tax: num(t.tax) })),
+        id: i.id, type: i.type, number: i.number, issueDate: i.issueDate.toISOString().slice(0, 10), supplier: i.supplier, creditable: i.creditable,
+        subtotal: num(sign(i) * Number(i.subtotal)), tax: num(sign(i) * Number(i.tax)), total: num(sign(i) * Number(i.total)),
+        taxes: i.taxes.map((t) => ({ rate: t.rate, base: num(sign(i) * Number(t.base)), tax: num(sign(i) * Number(t.tax)) })),
       })),
     },
     prorata: {
