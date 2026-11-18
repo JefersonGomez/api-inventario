@@ -7,6 +7,7 @@ import { z } from "zod"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { activeAccount } from "../banks/banks.service.ts"
+import { assertDocumentQuota } from "../company/company.service.ts"
 import { issueDocument } from "../documents/document.service.ts"
 import { queueEInvoice } from "../einvoice/einvoice.service.ts"
 import { getTicket } from "../pos/pos.service.ts"
@@ -44,6 +45,7 @@ export async function issueDebitNote(saleId: string, input: z.infer<typeof debit
   if (!original) throw fail("Venta no encontrada", 404)
   if (original.type !== "TICKET" && original.type !== "INVOICE") throw fail("La nota de débito se hace sobre una factura o un tiquete", 409, "DEBIT_ORIGINAL")
   if (input.payment?.bankAccountId) await activeAccount(input.payment.bankAccountId)
+  await assertDocumentQuota() // cuenta para el cupo del mes del plan
   const creditCustomer = input.credit ? await assertCreditAllowed(original.customerId ?? undefined) : null
 
   const doc = await prisma.$transaction(async (tx) => {

@@ -269,7 +269,7 @@ components:
         ownerId: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-        plan: { type: string, enum: [BASIC, PRO, BUSINESS], description: Plan del dueño }
+        plan: { type: string, enum: [BASIC, PRO, BUSINESS, INVOICING], description: Plan del dueño (INVOICING = solo facturación) }
         limits:
           type: object
           properties:
@@ -278,6 +278,15 @@ components:
             maxRegistersPerBranch: { type: integer, nullable: true, description: Cajas (Bloque 7) }
             maxUsersPerCompany: { type: integer, nullable: true }
             maxProducts: { type: integer, nullable: true, description: null = sin límite }
+            aiImportsPerMonth: { type: integer }
+            invoicingOnly: { type: boolean, description: "Solo facturación: facturar y devolver no mueven stock, sin cajas ni entrada de mercadería de facturas de proveedor (409 PLAN_NO_STOCK)" }
+            documentsPerMonth: { type: integer, nullable: true, description: "Facturas, tiquetes y notas de débito al mes (las notas de crédito no cuentan); al llegar, 409 PLAN_DOCUMENTS" }
+        usage:
+          type: object
+          nullable: true
+          description: Solo con cupo mensual de comprobantes
+          properties:
+            documentsThisMonth: { type: integer }
 
     Location:
       type: object
@@ -845,6 +854,7 @@ paths:
                 password: { type: string, minLength: 8, maxLength: 72, description: Sin las contraseñas más comunes }
                 phone: { type: string, maxLength: 30 }
                 company: { type: string, maxLength: 120 }
+                plan: { type: string, enum: [BASIC, INVOICING], description: "Qué necesita: el sistema completo (por defecto) o solo facturación" }
                 acceptTerms: { type: boolean, enum: [true], description: Obligatoria. Aceptación de los términos y la política de privacidad (se guarda con fecha y versión). }
       responses:
         '201':
@@ -1487,7 +1497,7 @@ paths:
                         id: { type: string, format: uuid }
                         name: { type: string }
                         email: { type: string }
-                    plan: { type: string, enum: [BASIC, PRO, BUSINESS] }
+                    plan: { type: string, enum: [BASIC, PRO, BUSINESS, INVOICING] }
                     limits: { type: object, additionalProperties: true }
                     users: { type: integer, description: Miembros activos }
                     products: { type: integer, description: Productos no eliminados }
@@ -1507,7 +1517,7 @@ paths:
               type: object
               required: [plan]
               properties:
-                plan: { type: string, enum: [BASIC, PRO, BUSINESS] }
+                plan: { type: string, enum: [BASIC, PRO, BUSINESS, INVOICING] }
       responses:
         '204': { description: Plan cambiado }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -2531,7 +2541,7 @@ paths:
     post:
       tags: [Ventas]
       summary: Factura desde la oficina, sin caja (invoices.issue — administrador y encargado)
-      description: "Siempre factura electrónica a un cliente con cédula. Las líneas con productId salen del stock de locationId (sin negativos); las de servicio llevan description, unitPriceWithTax y taxRate. De contado (payment: TRANSFER | SINPE | CARD, con bankAccountId opcional) el pago entra a esa cuenta; a crédito (credit: frequency + installments) se crean las cuotas con el límite del cliente. Se envía sola a Hacienda."
+      description: "Siempre factura electrónica a un cliente con cédula. Las líneas con productId salen del stock de locationId (sin negativos); las de servicio llevan description, unitPriceWithTax y taxRate. De contado (payment: TRANSFER | SINPE | CARD, con bankAccountId opcional) el pago entra a esa cuenta; a crédito (credit: frequency + installments) se crean las cuotas con el límite del cliente. Se envía sola a Hacienda. Plan Solo facturación: no toca el stock y gasta cupo del mes (409 PLAN_DOCUMENTS)."
       requestBody:
         content:
           application/json:
@@ -2563,7 +2573,7 @@ paths:
     post:
       tags: [Ventas]
       summary: Nota de débito — cargo extra sobre una factura o un tiquete (invoices.issue)
-      description: "Líneas de cargo (sin inventario) con su CABYS; de contado (payment) a una cuenta bancaria o a crédito (credit). Sale a Hacienda con referencia 04 cuando la venta original está aceptada."
+      description: "Líneas de cargo (sin inventario) con su CABYS; de contado (payment) a una cuenta bancaria o a crédito (credit). Sale a Hacienda con referencia 04 cuando la venta original está aceptada. Gasta cupo del mes si el plan lo tiene (409 PLAN_DOCUMENTS)."
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       requestBody:
@@ -2603,7 +2613,7 @@ paths:
     post:
       tags: [Ventas]
       summary: Devolver productos de una venta (nota de crédito)
-      description: "Siempre con pin de un encargado con sales.void (403 RETURN_PIN). No más de lo vendido menos lo ya devuelto; dentro de Company.returnDays (409 RETURN_EXPIRED). GOOD vuelve al stock (RETURN); DAMAGED no vuelve y avisa a inventario (returnDamaged). Venta a crédito: primero rebaja sus cuotas desde la última; el resto se reembolsa con refund (CASH necesita la caja abierta de quien devuelve, 409 NO_SESSION). Devuelve el tiquete de la nota, credited y refund."
+      description: "Con pin de un encargado con sales.void (403 RETURN_PIN); en el plan Solo facturación no hace falta si quien la hace tiene sales.void, y no toca el stock. No más de lo vendido menos lo ya devuelto; dentro de Company.returnDays (409 RETURN_EXPIRED). GOOD vuelve al stock (RETURN); DAMAGED no vuelve y avisa a inventario (returnDamaged). Venta a crédito: primero rebaja sus cuotas desde la última; el resto se reembolsa con refund (CASH necesita la caja abierta de quien devuelve, 409 NO_SESSION). Devuelve el tiquete de la nota, credited y refund."
       parameters: [{ $ref: '#/components/parameters/Id' }]
       requestBody:
         required: true
@@ -2611,7 +2621,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [lines, reason, pin]
+              required: [lines, reason]
               properties:
                 lines:
                   type: array

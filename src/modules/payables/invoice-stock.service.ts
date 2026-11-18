@@ -104,6 +104,7 @@ export const receiveStockSchema = z.object({
 
 // Entra al inventario
 export async function receiveInvoiceStock(invoiceId: string, input: z.infer<typeof receiveStockSchema>, userId: string) {
+  if ((await getCompany()).limits.invoicingOnly) throw Object.assign(new Error("Tu plan es de solo facturación: no lleva inventario"), { status: 409, code: "PLAN_NO_STOCK" })
   const { invoice, parsed, costOf } = await loadInvoice(invoiceId)
   // nota de crédito: lo devuelto al proveedor SALE del inventario (sin tocar el costo ni crear productos)
   const out = invoice.type === "CREDIT_NOTE"

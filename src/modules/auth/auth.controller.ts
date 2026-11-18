@@ -5,8 +5,8 @@ import { DEMO_CODES, demoUser } from "../demo/demo.service.ts";
 
 export async function RegisterController(req: Request, res: Response) {
   try {
-    const { name, email, password, phone, company } = req.body;
-    const userCreated = await Register(name, email, password, { phone, company });
+    const { name, email, password, phone, company, plan } = req.body;
+    const userCreated = await Register(name, email, password, { phone, company, plan });
     if (userCreated) {
       res.status(201).json(userCreated);
     }

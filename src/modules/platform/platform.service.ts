@@ -35,7 +35,7 @@ export async function listCompanies() {
 }
 
 // El plan es de la cuenta del dueño: cambia el de todas sus empresas.
-export async function setPlan(companyId: string, plan: "BASIC" | "PRO" | "BUSINESS", byUserId: string) {
+export async function setPlan(companyId: string, plan: "BASIC" | "PRO" | "BUSINESS" | "INVOICING", byUserId: string) {
   const company = await prismaRoot.company.findUnique({ where: { id: companyId }, select: { ownerId: true } });
   if (!company) throw new Error("Empresa no encontrada");
   await prismaRoot.user.update({ where: { id: company.ownerId }, data: { plan } });

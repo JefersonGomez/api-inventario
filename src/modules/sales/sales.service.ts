@@ -44,7 +44,8 @@ export const returnSchema = z.object({
   reason: z.string().trim().min(3, "Indica el motivo").max(200),
   // cómo se le devuelve el dinero (no hace falta si todo se rebaja del crédito)
   refund: z.object({ method: z.enum(["CASH", "CARD", "SINPE", "TRANSFER"]), reference: z.string().trim().max(60).optional() }).optional(),
-  pin: z.string().regex(/^\d{4,6}$/, "El código tiene de 4 a 6 dígitos"),
+  // código del encargado que autoriza; en el plan "Solo facturación" no hace falta si quien la hace puede anular
+  pin: z.string().regex(/^\d{4,6}$/, "El código tiene de 4 a 6 dígitos").optional(),
 })
 
 // ---------- Lista y detalle ----------
@@ -164,7 +165,12 @@ export async function createReturn(id: string, input: z.infer<typeof returnSchem
   if (input.refund?.method === "CASH" && !session) throw fail("Para devolver efectivo necesitas tu caja abierta", 409, "NO_SESSION")
 
   const described = picked.map((p) => `${p.quantity} × ${p.line.description}`).join(", ")
-  const auth = await authorizeWithPin(actor.id, input.pin, "sales.void", `Devolución de ${doc.consecutive}: ${described}`.slice(0, 200))
+  // solo facturación: sin cajeros, quien anula la nota la autoriza (no hay códigos de caja)
+  const selfAuth = company.limits.invoicingOnly && actor.permissions.includes("sales.void")
+  if (!selfAuth && !input.pin) throw fail("Falta el código del encargado que autoriza la devolución", 400, "RETURN_PIN_REQUIRED")
+  const auth = selfAuth
+    ? { authorizedBy: { id: actor.id } }
+    : await authorizeWithPin(actor.id, input.pin!, "sales.void", `Devolución de ${doc.consecutive}: ${described}`.slice(0, 200))
   if (!auth) throw fail("Ese código no autoriza devoluciones (tiene que ser de un encargado, vigente)", 403, "RETURN_PIN")
 
   // líneas de la nota: mismo precio y la parte proporcional del descuento de la venta (montos con IVA)
@@ -218,14 +224,14 @@ export async function createReturn(id: string, input: z.infer<typeof returnSchem
       })
     }
     // stock: lo que volvió en buen estado entra a la sucursal donde se devuelve
-    for (const p of picked) {
+    for (const p of company.limits.invoicingOnly ? [] : picked) {
       if (p.condition !== "GOOD" || !p.line.productId) continue
       await createMovement(p.line.productId, actor.id, "IN", p.quantity, `Devolución ${note.consecutive}`, tx, {
         source: "RETURN", sourceId: note.id, ...(locationId && { locationId }), lotDefault: "DEVOLUCION",
       })
     }
     // lo dañado no vuelve: aviso a quien maneja el inventario (merma)
-    const damaged = picked.filter((p) => p.condition === "DAMAGED")
+    const damaged = company.limits.invoicingOnly ? [] : picked.filter((p) => p.condition === "DAMAGED")
     if (damaged.length) {
       const ids = await memberIdsWith("stock.move", locationId ?? undefined)
       await createNotifications(

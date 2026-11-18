@@ -15,7 +15,35 @@ export async function getCompany() {
     include: { owner: { select: { plan: true } } },
   });
   const { owner, ...rest } = company;
-  return { ...rest, plan: owner.plan, limits: PLANS[owner.plan] };
+  const limits = PLANS[owner.plan];
+  // con cupo mensual de comprobantes: cuántos lleva este mes (lo muestra Configuración y Facturar)
+  const usage = limits.documentsPerMonth === null ? null : { documentsThisMonth: await documentsThisMonth(company.id) };
+  return { ...rest, plan: owner.plan, limits, usage };
+}
+
+// Facturas, tiquetes y notas de débito emitidos este mes (las notas de crédito corrigen: no gastan cupo)
+const QUOTA_TYPES = ["INVOICE", "TICKET", "DEBIT_NOTE"] as const;
+function documentsThisMonth(companyId: string) {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  return prismaRoot.document.count({ where: { companyId, type: { in: [...QUOTA_TYPES] }, issuedAt: { gte: from } } });
+}
+
+// Antes de emitir un comprobante: si el plan tiene cupo mensual y ya se usó, no se emite
+export async function assertDocumentQuota() {
+  const { limits, usage } = await getCompany();
+  if (limits.documentsPerMonth === null || !usage) return;
+  if (usage.documentsThisMonth >= limits.documentsPerMonth) {
+    throw Object.assign(
+      new Error(`Llegaste a los ${limits.documentsPerMonth} comprobantes de este mes que incluye tu plan. El 1.º del próximo mes se renueva; si necesitas más, mejora tu plan.`),
+      { status: 409, code: "PLAN_DOCUMENTS" }
+    );
+  }
+}
+
+// Plan "Solo facturación": facturar no mueve stock y no hay cajas
+export async function invoicingOnly() {
+  return (await getCompany()).limits.invoicingOnly;
 }
 
 export async function updateCompany(input: UpdateCompanyInput, userId: string) {

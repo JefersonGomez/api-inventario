@@ -30,6 +30,7 @@ enum PlanCode {
   BASIC
   PRO
   BUSINESS
+  INVOICING // solo facturación electrónica (sin inventario)
 }
 
 enum MovementType {

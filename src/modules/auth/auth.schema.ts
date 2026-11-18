@@ -8,6 +8,8 @@ export const registerSchema = z.object({
   password: newPasswordSchema,
   phone: z.string().trim().max(30).optional(),
   company: z.string().trim().max(120).optional(),
+  // qué necesita: el sistema completo (BASIC) o solo facturación electrónica (INVOICING)
+  plan: z.enum(["BASIC", "INVOICING"]).optional(),
   // casilla obligatoria: sin aceptar no se crea la cuenta
   acceptTerms: z.literal(true, { error: TERMS_REQUIRED_MESSAGE }),
 })

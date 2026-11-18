@@ -19,7 +19,7 @@ export async function Register(
   name: string,
   email: string,
   password: string,
-  extra: { phone?: string; company?: string } = {}
+  extra: { phone?: string; company?: string; plan?: "BASIC" | "INVOICING" } = {}
 ) {
   const existingUser = await prisma.user.findUnique({ where: { email } });
   if (existingUser) {
@@ -39,6 +39,7 @@ export async function Register(
         termsVersion: TERMS_VERSION,
         ...(extra.phone && { phone: extra.phone }),
         ...(extra.company && { company: extra.company }),
+        ...(extra.plan && { plan: extra.plan }),
       },
       select: userPublic,
     });

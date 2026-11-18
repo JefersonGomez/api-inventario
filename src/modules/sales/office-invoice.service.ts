@@ -4,11 +4,13 @@
 //    también lleva líneas de servicio sin producto (flete, instalación) que no tocan el stock;
 //  - de contado, el dinero entra a una CUENTA BANCARIA (transferencia, SINPE o tarjeta), no a una caja;
 //    a crédito, cuotas como en la caja (con el límite y sin cuotas vencidas);
+//  - plan "Solo facturación": no toca el stock (los productos son solo un catálogo) y cuenta para el cupo del mes;
 //  - la emiten quienes tienen invoices.issue (administrador y encargado) y se envía sola a Hacienda.
 import { z } from "zod"
 import { prisma } from "../../config/database.ts"
 import { Prisma } from "../../generated/prisma/client.ts"
 import { activeAccount } from "../banks/banks.service.ts"
+import { assertDocumentQuota, invoicingOnly } from "../company/company.service.ts"
 import { issueDocument, type DocumentLineInput } from "../documents/document.service.ts"
 import { queueEInvoice } from "../einvoice/einvoice.service.ts"
 import { resolveLocation } from "../locations/location.service.ts"
@@ -63,6 +65,8 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
   const location = await resolveLocation(input.locationId)
   if (input.payment?.bankAccountId) await activeAccount(input.payment.bankAccountId)
   const creditCustomer = input.credit ? await assertCreditAllowed(customer.id) : null
+  await assertDocumentQuota()
+  const noStock = await invoicingOnly()
 
   // stock suficiente donde sale (aviso claro antes; el movimiento lo vuelve a revisar dentro de la transacción)
   const ids = [...new Set(input.lines.flatMap((l) => (l.productId ? [l.productId] : [])))]
@@ -85,7 +89,7 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
     const have = new D(p.stocks[0]?.quantity ?? 0)
     return qty.greaterThan(have) ? [`${p.name} (hay ${have.toNumber()}, se facturan ${qty.toNumber()})`] : []
   })
-  if (short.length) throw fail(`No alcanza el stock en ${location.name}: ${short.join(", ")}`, 409, "INVOICE_STOCK")
+  if (short.length && !noStock) throw fail(`No alcanza el stock en ${location.name}: ${short.join(", ")}`, 409, "INVOICE_STOCK")
 
   const lines: DocumentLineInput[] = input.lines.map((l) => {
     const p = l.productId ? byId.get(l.productId)! : null
@@ -130,7 +134,7 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
         },
       })
     }
-    for (const [productId, qty] of wanted) {
+    for (const [productId, qty] of noStock ? [] : wanted) {
       await createMovement(productId, actor.id, "OUT", qty.toNumber(), `Factura ${doc.consecutive}`, tx, { source: "SALE", sourceId: doc.id, locationId: location.id })
     }
     return doc

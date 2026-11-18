@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const setPlanSchema = z.object({
-  plan: z.enum(["BASIC", "PRO", "BUSINESS"]),
+  plan: z.enum(["BASIC", "PRO", "BUSINESS", "INVOICING"]),
 });
 
 export const setSuspendedSchema = z.object({
