@@ -283,6 +283,9 @@ describe("Facturación electrónica", () => {
     const list = (await request(app).get("/sales").set(admin.auth)).body.items as { id: string; einvoice: { status: string } | null }[]
     expect(list.find((s) => s.id === id)?.einvoice).toEqual({ status: "ACCEPTED" })
     expect((await request(app).get(`/sales/${id}`).set(admin.auth)).body.einvoice).toMatchObject({ status: "ACCEPTED", clave: e.clave })
+    // el tiquete impreso sabe que es electrónico (y la venta de antes de encender, no)
+    expect((await request(app).get(`/sales/${id}`).set(admin.auth)).body.einvoiceOn).toBe(true)
+    expect((await request(app).get(`/sales/${beforeEnabledId}`).set(admin.auth)).body).toMatchObject({ einvoiceOn: false, einvoice: null })
     expect((await request(app).get(`/einvoice/documents/${id}/xml`).set(admin.auth)).text).toBe(signed)
     expect((await request(app).get(`/einvoice/documents/${id}`).set(other.auth)).status).toBe(404)
   })

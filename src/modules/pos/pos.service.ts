@@ -799,7 +799,22 @@ export async function getTicket(documentId: string) {
     : null
   if (session) assertLocationAllowed(session.register.locationId)
   const c = await getCompany()
+  // ¿es (o va a ser) un comprobante electrónico? el tiquete impreso lo dice en vez de "comprobante interno"
+  const [einvoice, settings] = await Promise.all([
+    prisma.eInvoice.findUnique({ where: { documentId }, select: { status: true, clave: true, environment: true } }),
+    prisma.eInvoiceSettings.findFirst({ select: { enabled: true, enabledAt: true } }),
+  ])
+  // una nota solo sale si Hacienda aceptó la venta que corrige
+  const original = doc.referenceDocumentId
+    ? await prisma.eInvoice.findUnique({ where: { documentId: doc.referenceDocumentId }, select: { status: true } })
+    : null
+  const einvoiceOn = Boolean(
+    settings?.enabled && settings.enabledAt && doc.issuedAt >= settings.enabledAt && (!doc.referenceDocumentId || original?.status === "ACCEPTED"),
+  )
   return {
+    // status/clave del comprobante electrónico (null si no se armó) y si el envío automático lo va a mandar
+    einvoice,
+    einvoiceOn,
     document: doc,
     company: {
       name: c.name, legalName: c.legalName, idType: c.idType, idNumber: c.idNumber, phone: c.phone,
