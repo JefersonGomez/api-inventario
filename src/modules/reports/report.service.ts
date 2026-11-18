@@ -58,11 +58,11 @@ export async function getLowStockReport() {
   const scope = locationScope()
   if (scope) {
     const ids = await lowStockProductIds(scope)
-    const products = await prisma.product.findMany({ where: { id: { in: ids }, deletedAt: null }, include: { category: true } })
+    const products = await prisma.product.findMany({ where: { id: { in: ids }, deletedAt: null, isService: false }, include: { category: true } })
     return withScopedStock(products, scope)
   }
   const allProducts = await prisma.product.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, isService: false }, // los servicios no llevan inventario
     include: { category: true }
   });
 

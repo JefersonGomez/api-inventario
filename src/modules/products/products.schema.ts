@@ -12,7 +12,9 @@ const groupId = z.string().uuid().nullable().optional();
 const attributes = z.record(z.string().trim().min(1).max(40), z.string().trim().max(60)).nullable().optional();
 
 export const productsSchemaCreate = z.object({
-  sku: z.string().min(1, "El SKU del producto es requerido"),
+  // en un servicio el código es opcional: sin indicar se genera (SERV-0001…)
+  sku: z.string().trim().optional(),
+  isService: z.boolean().optional(), // servicio: sin inventario y con CABYS de servicios
   barcode: z.string().optional(), // Nuevo campo opcional
   name: z.string().min(1, "El nombre del producto es requerido"),
   description: z.string().optional(),
@@ -31,7 +33,7 @@ export const productsSchemaCreate = z.object({
   locationId: z.uuid().optional(), // dónde entra el stock inicial (sin indicar: la ubicación activa)
   tracksLots: z.boolean().optional(), // maneja lotes con vencimiento
   lot: lotSchema.optional(), // con lotes y stock inicial: a qué lote entra
-});
+}).refine((p) => p.isService || p.sku, { message: "El SKU del producto es requerido", path: ["sku"] });
 
 export const productsSchemaUpdate = z.object({
   name: z.string().min(1, "El nombre del producto es requerido"),
@@ -49,6 +51,7 @@ export const productsSchemaUpdate = z.object({
   expirationDate: z.coerce.date().optional(),
   supplierId: z.string().uuid("El ID de proveedor debe ser un UUID válido").nullable().optional(),
   tracksLots: z.boolean().optional(), // omitido = no tocar
+  isService: z.boolean().optional(), // omitido = no tocar
 });
 // Importación desde Excel: el frontend manda las filas ya leídas; las reglas de negocio las valida el service
 const importRow = z.object({

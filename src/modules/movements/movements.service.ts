@@ -36,6 +36,11 @@ export async function createMovement(
   const location = await resolveLocation(origin.locationId)
   const product = await client.product.findFirst({ where: { id: productId, deletedAt: null } })
   if (!product) throw new Error("No se encontró el producto")
+  // un servicio no lleva inventario: venderlo o devolverlo no mueve nada; moverlo a mano no tiene sentido
+  if (product.isService) {
+    if (origin.source === "SALE" || origin.source === "RETURN") return null
+    throw new Error(`"${product.name}" es un servicio: no lleva inventario`)
+  }
   assertQuantityForUnit(quantity, product.unit);
 
   const run = async (tx: Db) => {

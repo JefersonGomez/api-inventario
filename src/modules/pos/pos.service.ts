@@ -599,11 +599,11 @@ export async function sell(input: z.infer<typeof saleSchema>, actor: Actor) {
   for (const l of input.lines) wanted.set(l.productId, (wanted.get(l.productId) ?? 0) + l.quantity)
   const products = await prisma.product.findMany({
     where: { id: { in: [...wanted.keys()] }, deletedAt: null },
-    select: { id: true, name: true, price: true, cost: true, unit: true, tracksLots: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
+    select: { id: true, name: true, price: true, cost: true, unit: true, tracksLots: true, isService: true, stocks: { where: { locationId: register.locationId }, select: { quantity: true } } },
   })
   if (products.length !== wanted.size) throw new Error("Algún producto no existe")
   const stockOf = (p: (typeof products)[number]) => new D(p.stocks[0]?.quantity ?? 0)
-  const short = products.filter((p) => stockOf(p).lessThan(wanted.get(p.id)!))
+  const short = products.filter((p) => !p.isService && stockOf(p).lessThan(wanted.get(p.id)!)) // los servicios no llevan stock
   const describe = (list: typeof products) => list.map((p) => `${p.name} (hay ${stockOf(p).toNumber()})`).join(", ")
   // con lotes no hay negativa: sin stock no se sabe de qué lote sale
   const withLots = short.filter((p) => p.tracksLots)

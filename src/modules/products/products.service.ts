@@ -31,8 +31,30 @@ const withSupplier = {
 export type ProductCreateInput = z.infer<typeof productsSchemaCreate>;
 export type ProductUpdateInput = z.infer<typeof productsSchemaUpdate>;
 
+// Servicios (18-nov-2026): Hacienda los distingue por el CABYS (secciones 5–9); no llevan inventario
+const SERVICE_CABYS = /^[5-9]/;
+const fail = (message: string, code: string) => Object.assign(new Error(message), { status: 400, code });
+function assertServiceRules(p: { isService: boolean; cabys?: string | null | undefined; stock?: number; tracksLots?: boolean | undefined; groupId?: string | null | undefined }) {
+  if (!p.isService) return;
+  if (p.cabys && !SERVICE_CABYS.test(p.cabys)) {
+    throw fail("Ese CABYS es de un bien (mercadería). Para un servicio elige un código de servicios (empiezan con 5 a 9).", "SERVICE_CABYS");
+  }
+  if ((p.stock ?? 0) > 0 || p.tracksLots || p.groupId) throw fail("Un servicio no lleva inventario, lotes ni variantes", "SERVICE_STOCK");
+}
+
+// siguiente código libre para un servicio sin código: SERV-0001, SERV-0002…
+async function nextServiceSku() {
+  for (let n = (await prisma.product.count({ where: { isService: true } })) + 1; ; n++) {
+    const sku = `SERV-${String(n).padStart(4, "0")}`;
+    if (!(await prisma.product.findFirst({ where: { sku, deletedAt: null }, select: { id: true } }))) return sku;
+  }
+}
+
 export async function createProduct(input: ProductCreateInput, userId: string) {
-  const { sku, barcode, name, description, price, stock, minStock, categoryId, expirationDate, supplierId, cost } = input;
+  const isService = input.isService ?? false;
+  assertServiceRules({ isService, cabys: input.cabys, stock: input.stock, tracksLots: input.tracksLots, groupId: input.groupId });
+  const sku = input.sku || (await nextServiceSku());
+  const { barcode, name, description, price, stock, minStock, categoryId, expirationDate, supplierId, cost } = input;
   const unit = input.unit ?? "UNIT";
   assertQuantityForUnit(stock, unit, "El stock");
   assertQuantityForUnit(minStock, unit, "El stock mínimo");
@@ -82,6 +104,7 @@ export async function createProduct(input: ProductCreateInput, userId: string) {
         supplierId: supplierId ?? null,
         cost: cost ?? null,
         tracksLots: input.tracksLots ?? false,
+        isService,
       },
       select: { id: true },
     });
@@ -105,7 +128,7 @@ function productWhere(f: ProductListQuery, lowIds: string[] | null = null): Pris
     ...(f.supplierId && { supplierId: f.supplierId }),
     ...(f.groupId && { groupId: f.groupId }),
     ...(f.pending !== undefined && { pendingReview: f.pending }),
-    ...(f.lowStock && (lowIds ? { id: { in: lowIds } } : { stock: { lte: prismaRoot.product.fields.minStock } })),
+    ...(f.lowStock && (lowIds ? { id: { in: lowIds } } : { isService: false, stock: { lte: prismaRoot.product.fields.minStock } })),
     ...(f.q && {
       OR: [
         { name: contains(f.q) },
@@ -213,7 +236,7 @@ async function summarizeGroups(ids: string[], scope: string[] | null = null) {
   const [all, priced, low, units] = await Promise.all([
     prisma.product.groupBy({ by: ["groupId"], where: base, _count: { _all: true }, _sum: { stock: true } }),
     prisma.product.groupBy({ by: ["groupId"], where: { ...base, pendingReview: false }, _min: { price: true }, _max: { price: true } }),
-    prisma.product.groupBy({ by: ["groupId"], where: { ...base, stock: { lte: prismaRoot.product.fields.minStock } }, _count: { _all: true } }),
+    prisma.product.groupBy({ by: ["groupId"], where: { ...base, isService: false, stock: { lte: prismaRoot.product.fields.minStock } }, _count: { _all: true } }),
     prisma.product.groupBy({ by: ["groupId", "unit"], where: base }),
   ]);
   for (const r of all) Object.assign(out.get(r.groupId!)!, { variantCount: r._count._all, totalStock: Number(r._sum.stock ?? 0) });
@@ -284,8 +307,18 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
     throw new Error("Categoría ingresada inválida");
   }
 
-  const current = await prisma.product.findFirst({ where: { id, deletedAt: null }, select: { stock: true, unit: true, tracksLots: true } });
+  const current = await prisma.product.findFirst({ where: { id, deletedAt: null }, select: { stock: true, unit: true, tracksLots: true, isService: true, cabys: true, groupId: true } });
   if (!current) throw new Error("No se encontró el producto");
+  const isService = input.isService ?? current.isService;
+  if (isService && !current.isService && !current.stock.isZero()) {
+    throw fail("Para volverlo servicio, primero deja su stock en 0 (un servicio no lleva inventario)", "SERVICE_STOCK");
+  }
+  assertServiceRules({
+    isService,
+    cabys: cabys !== undefined ? cabys : current.cabys,
+    tracksLots: input.tracksLots ?? current.tracksLots,
+    groupId: input.groupId !== undefined ? input.groupId : current.groupId,
+  });
   const finalUnit = unit ?? current.unit;
   // pasar a "por unidad" con stock fraccionado (p. ej. 2,5 kg) dejaría un stock imposible
   assertQuantityForUnit(Number(current.stock), finalUnit, "El stock actual");
@@ -315,6 +348,7 @@ export async function updateProduct(id: string, input: ProductUpdateInput, userI
       ...(cabys !== undefined && { cabys: cabys || null }),
       ...(variant && { groupId: variant.groupId, attributes: variant.attributes ?? Prisma.DbNull }),
       ...(lotsChange && { tracksLots: input.tracksLots! }),
+      ...(input.isService !== undefined && { isService: input.isService }),
     },
   });
   if (lotsChange) await setTracksLots(tx, id, input.tracksLots!, expirationDate ?? null);

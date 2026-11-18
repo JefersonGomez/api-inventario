@@ -45,6 +45,8 @@ export async function Register(
     });
     const company = await tx.company.create({ data: { name: companyName, ownerId: user.id } });
     await tx.location.create({ data: MAIN_LOCATION(company.id) });
+    // una categoría para empezar: sin ella no se puede crear el primer producto o servicio
+    await tx.category.create({ data: { companyId: company.id, name: "General" } });
     await tx.membership.create({ data: { userId: user.id, companyId: company.id, role: "ADMIN" } });
     await tx.user.update({ where: { id: user.id }, data: { lastCompanyId: company.id } });
     return { ...user, role: "ADMIN" as const, companyId: company.id };

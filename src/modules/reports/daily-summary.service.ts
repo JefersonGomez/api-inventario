@@ -22,7 +22,7 @@ async function computeDay(since: Date) {
   const soon = new Date(since.getTime() + 8 * 24 * 60 * 60 * 1000)
   const [moves, lowStock, expiringLots, expiringProducts, pendingRequests, openOrders, inTransit, openCounts, sales] = await Promise.all([
     prisma.stockMovement.groupBy({ by: ["type", "source"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
-    prismaRoot.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" WHERE "companyId" = ${currentCompanyId()} AND "deletedAt" IS NULL AND "stock" <= "minStock"`,
+    prismaRoot.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" WHERE "companyId" = ${currentCompanyId()} AND "deletedAt" IS NULL AND "isService" = false AND "stock" <= "minStock"`,
     prisma.productLot.count({ where: { quantity: { gt: 0 }, expiresAt: { not: null, lte: soon }, product: { deletedAt: null } } }),
     prisma.product.count({ where: { deletedAt: null, tracksLots: false, expirationDate: { not: null, lte: soon } } }),
     prisma.purchaseRequest.count({ where: { status: "PENDING" } }),

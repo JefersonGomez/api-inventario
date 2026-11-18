@@ -222,6 +222,8 @@ model Product {
   unit               UnitOfMeasure       @default(UNIT)
   taxRate            TaxRate             @default(RATE_13)
   cabys              String? // código CABYS de 13 dígitos (lo exige la factura electrónica)
+  // servicio (consultoría, instalación, flete…): no lleva inventario; su CABYS es de servicios (empieza en 5-9)
+  isService          Boolean             @default(false)
   groupId            String? // variante de un producto base (talla, color...); null = producto suelto
   group              ProductGroup?       @relation(fields: [groupId], references: [id])
   attributes         Json? // valores de la variante: { "Talla": "M", "Color": "Rojo" }

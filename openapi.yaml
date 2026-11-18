@@ -494,6 +494,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         sku: { type: string }
+        isService: { type: boolean, description: Servicio (sin inventario) }
         barcode: { type: string, nullable: true }
         name: { type: string }
         description: { type: string, nullable: true }
@@ -529,8 +530,10 @@ components:
 
     ProductCreateInput:
       type: object
-      required: [sku, name, price, stock, minStock, categoryId]
+      required: [name, price, stock, minStock, categoryId]
+      description: "sku es obligatorio salvo en un servicio (sin indicar se genera SERV-0001…)"
       properties:
+        isService: { type: boolean, description: "Servicio: sin inventario (stock 0, sin lotes ni variantes; vender o devolver no mueve stock) y CABYS de servicios, que empieza con 5 a 9 (400 SERVICE_CABYS / SERVICE_STOCK). También en el PUT; volverlo servicio exige stock 0." }
         locationId: { type: string, format: uuid, description: "Dónde entra el stock inicial (sin indicar, la ubicación activa)" }
         tracksLots: { type: boolean, description: "Maneja lotes con vencimiento (alimentos, medicinas...)" }
         lot: { $ref: '#/components/schemas/LotInput' }

@@ -72,7 +72,7 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
   const ids = [...new Set(input.lines.flatMap((l) => (l.productId ? [l.productId] : [])))]
   const products = await prisma.product.findMany({
     where: { id: { in: ids }, deletedAt: null },
-    select: { id: true, name: true, cost: true, unit: true, cabys: true, stocks: { where: { locationId: location.id }, select: { quantity: true } } },
+    select: { id: true, name: true, cost: true, unit: true, cabys: true, isService: true, stocks: { where: { locationId: location.id }, select: { quantity: true } } },
   })
   // con el envío automático a Hacienda encendido, una línea sin CABYS quedaría "Con error": se avisa antes
   const einvoiceOn = await prisma.eInvoiceSettings.findFirst({ where: { enabled: true }, select: { id: true } })
@@ -82,7 +82,8 @@ export async function issueOfficeInvoice(input: z.infer<typeof officeInvoiceSche
   }
   const byId = new Map(products.map((p) => [p.id, p]))
   const wanted = new Map<string, Prisma.Decimal>()
-  for (const l of input.lines) if (l.productId) wanted.set(l.productId, (wanted.get(l.productId) ?? new D(0)).plus(l.quantity))
+  // los servicios del catálogo no llevan stock
+  for (const l of input.lines) if (l.productId && !byId.get(l.productId)?.isService) wanted.set(l.productId, (wanted.get(l.productId) ?? new D(0)).plus(l.quantity))
   const short = [...wanted].flatMap(([id, qty]) => {
     const p = byId.get(id)
     if (!p) throw fail("Algún producto no existe", 404)

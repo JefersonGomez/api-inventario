@@ -23,7 +23,7 @@ export async function lowStockProductIds(scope: string[]) {
   const rows = await prismaRoot.$queryRaw<{ productId: string }[]>`
     SELECT ps."productId"
     FROM "ProductStock" ps JOIN "Product" p ON p."id" = ps."productId"
-    WHERE ps."companyId" = ${currentCompanyId()} AND ps."locationId" IN (${Prisma.join(scope)}) AND p."deletedAt" IS NULL
+    WHERE ps."companyId" = ${currentCompanyId()} AND ps."locationId" IN (${Prisma.join(scope)}) AND p."deletedAt" IS NULL AND p."isService" = false
     GROUP BY ps."productId", p."minStock"
     HAVING SUM(ps."quantity") <= p."minStock"`
   return rows.map((r) => r.productId)

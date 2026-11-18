@@ -89,6 +89,27 @@ describe("Plan Solo facturación", () => {
     expect(res.body.code).toBe("PLAN_DOCUMENTS")
   })
 
+  it("servicios del catálogo: código automático, CABYS de servicios y sin inventario (en cualquier plan)", async () => {
+    const categoryId = (await prisma.category.findFirstOrThrow({ where: { companyId: admin.companyId } })).id
+    const base = { name: "Instalación", price: 11300, stock: 0, minStock: 0, categoryId, isService: true }
+    // un CABYS de bienes no sirve para un servicio
+    const goods = await request(app).post("/products").set(admin.auth).send({ ...base, cabys: "4292199990200" })
+    expect(goods.status).toBe(400)
+    const res = await request(app).post("/products").set(admin.auth).send({ ...base, cabys: "5421000000000" })
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ isService: true, sku: "SERV-0001" })
+    // con stock inicial no
+    expect((await request(app).post("/products").set(admin.auth).send({ ...base, name: "Otro", stock: 5 })).status).toBe(400)
+    // no sale en stock bajo (0 de 0)
+    const low = await request(app).get("/reports/low-stock").set(admin.auth)
+    expect(low.body.map((p: { id: string }) => p.id)).not.toContain(res.body.id)
+    // en el plan completo se factura sin existencias y no mueve stock
+    await prisma.user.update({ where: { id: admin.user.id }, data: { plan: "BASIC" } })
+    const sale = await invoice({ lines: [{ productId: res.body.id, quantity: 2 }] })
+    expect(sale.status).toBe(201)
+    expect(await prisma.stockMovement.count({ where: { sourceId: sale.body.document.id } })).toBe(0)
+  })
+
   it("el plan completo sigue moviendo el stock como siempre", async () => {
     await prisma.user.update({ where: { id: admin.user.id }, data: { plan: "BASIC" } })
     const res = await invoice()
