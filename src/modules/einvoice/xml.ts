@@ -142,6 +142,10 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   for (const p of d.payments) paid.set(p.method, (paid.get(p.method) ?? new D(0)).plus(p.amount))
   if (paid.size > 4) throw new Error("Hacienda admite hasta 4 medios de pago por comprobante")
   if (d.saleCondition === "CASH" && paid.size === 1) paid.set([...paid.keys()][0]!, total)
+  // De contado Hacienda exige el medio de pago (rechazo -496). Sin pagos (p. ej. la nota de crédito de una
+  // venta a crédito: se rebaja del saldo, no se devuelve plata) va como 99 "Otros".
+  const noPayment = d.saleCondition === "CASH" && paid.size === 0
+  if (noPayment) paid.set("OTHER", total)
   const breakdown = [...byRate]
     .filter(([rate]) => rate !== "EXEMPT")
     .map(([rate, amount]) => `<TotalDesgloseImpuesto>${el("Codigo", "01")}${el("CodigoTarifaIVA", TAX_RATE_CODE[rate])}${el("TotalMontoImpuesto", money(amount))}</TotalDesgloseImpuesto>`)
@@ -191,7 +195,7 @@ export function buildEInvoiceXml(d: EInvoiceData) {
     breakdown.join(""),
     el("TotalImpuesto", money(totals.tax)),
     [...paid]
-      .map(([m, amount]) => `<MedioPago>${el("TipoMedioPago", PAYMENT_CODE[m])}${m === "OTHER" ? el("MedioPagoOtros", "Otro medio de pago") : ""}${el("TotalMedioPago", money(amount))}</MedioPago>`)
+      .map(([m, amount]) => `<MedioPago>${el("TipoMedioPago", PAYMENT_CODE[m])}${m === "OTHER" ? el("MedioPagoOtros", noPayment ? "Aplicado al saldo pendiente" : "Otro medio de pago") : ""}${el("TotalMedioPago", money(amount))}</MedioPago>`)
       .join(""),
     el("TotalComprobante", money(total)),
     "</ResumenFactura>",

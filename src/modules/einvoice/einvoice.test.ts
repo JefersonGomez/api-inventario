@@ -205,6 +205,13 @@ describe("Facturación electrónica", () => {
     expect(invoiceNote).toContain("<Receptor>")
     expect(await validateEInvoiceXml("CREDIT_NOTE", await signXml(invoiceNote, key))).toEqual([])
     expect(() => buildEInvoiceXml(sample({ type: "CREDIT_NOTE", reference: null }))).toThrow(/clave del comprobante/)
+    // nota de una venta a crédito: no se devuelve plata (se rebaja del saldo) → medio de pago 99 (rechazo -496)
+    const noRefund = buildEInvoiceXml(sample({
+      type: "CREDIT_NOTE", consecutive: "00100001030000000003", payments: [],
+      reference: { type: "INVOICE", clave: original.clave, issuedAt: original.issuedAt, code: "01", reason: "Anulación" },
+    }))
+    expect(noRefund).toContain("<MedioPago><TipoMedioPago>99</TipoMedioPago><MedioPagoOtros>Aplicado al saldo pendiente</MedioPagoOtros><TotalMedioPago>2897.00000</TotalMedioPago></MedioPago>")
+    expect(await validateEInvoiceXml("CREDIT_NOTE", await signXml(noRefund, key))).toEqual([])
     // un servicio (CABYS de las secciones 5–9) va en los totales de servicios y con unidad Os (rechazo -110/-111)
     const withService = buildEInvoiceXml(invoice({
       receiver,
