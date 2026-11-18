@@ -27,7 +27,7 @@ const fail = (message: string, status: number, code?: string): HttpError => Obje
 const sameId = (a: string, b: string) => a.replace(/\D/g, "").replace(/^0+/, "") === b.replace(/\D/g, "").replace(/^0+/, "")
 // Errores del comprobante o de los datos (se guardan como ERROR); los demás (configuración, red) no
 const DATA_ERRORS = new Set(["EINVOICE_FISCAL_DATA", "EINVOICE_KEY_MISMATCH", "EINVOICE_SCHEMA", "EINVOICE_DATA"])
-export const AUTO_TYPES = ["TICKET", "INVOICE", "CREDIT_NOTE"] as const // la nota, cuando su venta original está aceptada
+export const AUTO_TYPES = ["TICKET", "INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"] as const // las notas, cuando su venta original está aceptada
 const MAX_ATTEMPTS = 10
 // espera antes del siguiente reintento automático: 1, 2, 5, 10, 30 min y después cada hora
 const backoffMinutes = (attempts: number) => [1, 2, 5, 10, 30][attempts - 1] ?? 60
@@ -86,7 +86,7 @@ async function prepare(documentId: string, actorId: string, cabysFix: Record<str
   }
   // la nota corrige un comprobante que Hacienda tiene aceptado; si no, no hay nada que corregir allá
   const original = doc.referenceDocument
-  if (doc.type === "CREDIT_NOTE") {
+  if (doc.type === "CREDIT_NOTE" || doc.type === "DEBIT_NOTE") {
     const st = original?.einvoice?.status
     if (!original?.einvoice?.clave || st !== "ACCEPTED") {
       throw fail(
@@ -122,10 +122,11 @@ async function prepare(documentId: string, actorId: string, cabysFix: Record<str
         receiver: doc.customer?.idType && doc.customer.idNumber && (doc.type === "INVOICE" || original?.type === "INVOICE")
           ? { name: doc.customer.name, idType: doc.customer.idType, idNumber: doc.customer.idNumber, email: doc.customer.email }
           : null,
-        reference: doc.type === "CREDIT_NOTE" && original
+        reference: (doc.type === "CREDIT_NOTE" || doc.type === "DEBIT_NOTE") && original
           ? {
               type: original.type, clave: original.einvoice!.clave!, issuedAt: original.issuedAt,
-              code: doc.total.equals(original.total) ? "01" : "06", // devolvió todo = anula; si no, devolución de mercancía
+              // débito: cargo extra sobre el comprobante (04); crédito: devolvió todo = anula (01), si no devolución de mercancía (06)
+              code: doc.type === "DEBIT_NOTE" ? "04" : doc.total.equals(original.total) ? "01" : "06",
               reason: doc.referenceReason ?? "Devolución",
             }
           : null,
@@ -305,7 +306,7 @@ export async function processEInvoices(limit = 50) {
           where: {
             issuedAt: { gte: c.enabledAt! }, einvoice: null,
             // las notas, solo cuando Hacienda ya aceptó la venta que corrigen
-            OR: [{ type: { in: ["TICKET", "INVOICE"] } }, { type: "CREDIT_NOTE", referenceDocument: { einvoice: { status: "ACCEPTED" } } }],
+            OR: [{ type: { in: ["TICKET", "INVOICE"] } }, { type: { in: ["CREDIT_NOTE", "DEBIT_NOTE"] }, referenceDocument: { einvoice: { status: "ACCEPTED" } } }],
           },
           select: { id: true, createdById: true }, orderBy: { issuedAt: "asc" }, take: limit,
         })

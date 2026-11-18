@@ -11,7 +11,7 @@ import { withScopedStock } from "../locations/stock-scope.ts"
 import { TAX_PERCENT } from "../../shared/fiscal.ts"
 
 const D = Prisma.Decimal
-const SALES = ["TICKET", "INVOICE"] as const
+const SALES = ["TICKET", "INVOICE", "DEBIT_NOTE"] as const // la nota de débito es un cargo extra: suma como venta
 const DAY = 86_400_000
 
 export const salesReportQuerySchema = z.object({ from: z.iso.date(), to: z.iso.date() })

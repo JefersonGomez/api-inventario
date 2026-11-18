@@ -3,8 +3,9 @@ import { Authenticated, Can } from "../../middlewares/authenticate.middleware.ts
 import { validate, validateQuery } from "../../middlewares/validate.middleware.ts"
 import { pinLimiter } from "../../middlewares/rate-limit.middleware.ts"
 import { returnSchema, salesQuerySchema } from "./sales.service.ts"
-import { listSalesHandler, officeInvoiceHandler, returnHandler, saleHandler } from "./sales.controller.ts"
+import { debitNoteHandler, listSalesHandler, officeInvoiceHandler, returnHandler, saleHandler } from "./sales.controller.ts"
 import { officeInvoiceSchema } from "./office-invoice.service.ts"
+import { debitNoteSchema } from "./debit-note.service.ts"
 
 // con alguno de estos permisos (Can pide todos)
 const AnyOf = (...perms: string[]) => (req: Request, res: Response, next: NextFunction) =>
@@ -19,3 +20,5 @@ router.post("/invoices", validate(officeInvoiceSchema), Authenticated, Can("invo
 router.get("/:id", Authenticated, AnyOf("sales.sell", "sales.void", "reports.view"), saleHandler)
 // devolver: en la caja o desde Ventas; siempre lo autoriza un encargado con su código (sales.void)
 router.post("/:id/returns", validate(returnSchema), Authenticated, AnyOf("sales.sell", "sales.void"), pinLimiter, returnHandler)
+// nota de débito: cargo extra sobre una factura o un tiquete (administrador y encargado)
+router.post("/:id/debit-notes", validate(debitNoteSchema), Authenticated, Can("invoices.issue"), debitNoteHandler)

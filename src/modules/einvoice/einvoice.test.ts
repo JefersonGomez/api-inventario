@@ -435,6 +435,25 @@ describe("Facturación electrónica", () => {
     expect((await einvoiceOf(normal))!.clave![41]).toBe("1")
   })
 
+  it("la nota de débito (cargo extra) sale a Hacienda con referencia 04 a la venta aceptada", async () => {
+    const accepted = await prisma.eInvoice.findFirstOrThrow({ where: { status: "ACCEPTED", document: { type: "TICKET" } }, include: { document: true } })
+    const res = await request(app).post(`/sales/${accepted.documentId}/debit-notes`).set(admin.auth).send({
+      reason: "Flete a domicilio que no se cobró",
+      lines: [{ description: "Flete", quantity: 1, unitPriceWithTax: 5650, taxRate: "RATE_13", cabys: "6511900009900" }],
+      payment: { method: "SINPE", reference: "SINPE-123" },
+    })
+    expect(res.status).toBe(201)
+    const id = res.body.document.id as string
+    await until(async () => (await einvoiceOf(id))?.status === "SENT")
+    const e = (await einvoiceOf(id))!
+    const signed = Buffer.from(JSON.parse(calls.find((c) => c.method === "POST" && c.body.includes(e.clave!))!.body).comprobanteXml, "base64").toString("utf8")
+    expect(signed).toContain("<NotaDebitoElectronica")
+    expect(signed).toContain(`<TipoDocIR>04</TipoDocIR><Numero>${accepted.clave}</Numero>`)
+    expect(signed).toContain("<Codigo>04</Codigo><Razon>Flete a domicilio que no se cobró</Razon>")
+    expect(signed).toContain("<TotalServGravados>5000.00000</TotalServGravados>") // el flete es un servicio
+    expect(await validateEInvoiceXml("DEBIT_NOTE", signed)).toEqual([])
+  })
+
   it("si Hacienda no responde se reintenta con espera; si falta el CABYS queda en error y avisa", async () => {
     hacienda.post = 503
     const id = await sell(productId)

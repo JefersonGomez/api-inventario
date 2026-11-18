@@ -5,7 +5,8 @@
 // Con --sin-internet: el tiquete va como venta hecha sin conexión hace 40 minutos (situación 3 en la clave).
 // Con --receptor: emite una FACTURA a nombre del mismo titular y, aceptada, le responde con el MENSAJE RECEPTOR (aceptación).
 // Con --servicio: una FACTURA con un producto y un servicio (totales de servicios y unidad Os).
-// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet] [-- --receptor] [-- --servicio]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
+// Con --debito: un tiquete y una NOTA DE DÉBITO sobre él.
+// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet] [-- --receptor] [-- --servicio] [-- --debito]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
 // Nunca imprime la clave, el PIN ni el token.
 import "dotenv/config"
 import { readFileSync } from "node:fs"
@@ -23,6 +24,7 @@ if (env.HACIENDA_ENV !== "pruebas") throw new Error("Este script solo corre con 
 const withNote = process.argv.includes("--nota")
 const offline = process.argv.includes("--sin-internet")
 const withReceiver = process.argv.includes("--receptor")
+const withDebit = process.argv.includes("--debito") // tiquete + nota de débito (cargo extra, referencia 04)
 const withService = process.argv.includes("--servicio") // factura con un martillo + un flete (servicio, CABYS 6…)
 const creds = { env: "pruebas" as const, username: env.HACIENDA_USER!, password: env.HACIENDA_PASSWORD! }
 const key = await loadSigningKey(readFileSync(env.HACIENDA_P12_PATH!), env.HACIENDA_P12_PIN!)
@@ -124,6 +126,12 @@ async function receiver(invoice: { clave: string }) {
     }
   }
   return false
+}
+
+if (withDebit) {
+  const ticket = await run("Tiquete", "TICKET", 1)
+  const debit = ticket && (await run("Nota de débito (cargo extra)", "DEBIT_NOTE", 1, { type: "TICKET", clave: ticket.clave, issuedAt: ticket.issuedAt, code: "04", reason: "Cargo extra de prueba" }))
+  process.exit(debit ? 0 : 1)
 }
 
 if (withService) {

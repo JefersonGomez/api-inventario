@@ -41,7 +41,7 @@ export type EInvoiceData = {
     type: DocumentType // tipo del original (01 factura, 04 tiquete…)
     clave: string
     issuedAt: Date
-    code: "01" | "06" // 01 anula el documento (se devuelve todo), 06 devolución de mercancía
+    code: "01" | "04" | "06" // 01 anula el documento (se devuelve todo), 04 referencia a otro documento (nota de débito), 06 devolución de mercancía
     reason: string
   } | null
   currency: CurrencyCode
@@ -80,7 +80,7 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   if (d.type === "INVOICE" && !(r?.name.trim() && r.idNumber)) throw new Error("La factura necesita el nombre y la identificación del cliente")
   const receiverEmail = (r?.email ?? "").trim()
   const ref = d.reference
-  if (d.type === "CREDIT_NOTE" && !ref?.clave) throw new Error("La nota de crédito necesita la clave del comprobante que corrige")
+  if ((d.type === "CREDIT_NOTE" || d.type === "DEBIT_NOTE") && !ref?.clave) throw new Error("La nota necesita la clave del comprobante que corrige")
 
   // ---------- líneas ----------
   // Hacienda separa servicios y mercancías por el CABYS: secciones 0–4 son bienes y 5–9 servicios

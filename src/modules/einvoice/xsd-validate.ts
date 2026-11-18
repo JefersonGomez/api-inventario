@@ -6,7 +6,7 @@ import { validateXML } from "xmllint-wasm"
 import type { DocumentType } from "../../generated/prisma/enums.ts"
 
 const dir = fileURLToPath(new URL("./xsd/", import.meta.url))
-const SCHEMAS: Partial<Record<DocumentType, string>> = { TICKET: "TiqueteElectronico_V4.4.xsd", INVOICE: "FacturaElectronica_V4.4.xsd", CREDIT_NOTE: "NotaCreditoElectronica_V4.4.xsd" }
+const SCHEMAS: Partial<Record<DocumentType, string>> = { TICKET: "TiqueteElectronico_V4.4.xsd", INVOICE: "FacturaElectronica_V4.4.xsd", CREDIT_NOTE: "NotaCreditoElectronica_V4.4.xsd", DEBIT_NOTE: "NotaDebitoElectronica_V4.4.xsd" }
 export const RECEIVER_MESSAGE_XSD = "MensajeReceptor_V4.4.xsd"
 const cache = new Map<string, string>()
 const read = (name: string) => {

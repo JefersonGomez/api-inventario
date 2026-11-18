@@ -29,7 +29,7 @@ const SALE_TYPES = ["TICKET", "INVOICE"] as const
 
 export const salesQuerySchema = z.object({
   ...pageQuery,
-  kind: z.enum(["SALE", "CREDIT_NOTE"]).optional(), // sin indicar: ventas y notas
+  kind: z.enum(["SALE", "CREDIT_NOTE", "DEBIT_NOTE"]).optional(), // sin indicar: ventas y notas
   from: z.iso.date().optional(),
   to: z.iso.date().optional(),
   registerId: z.uuid().optional(),
@@ -56,7 +56,7 @@ export async function listSales(f: z.infer<typeof salesQuerySchema>) {
   const scope = locationScope()
   const q = f.q?.trim()
   const where: Prisma.DocumentWhereInput = {
-    type: f.kind === "CREDIT_NOTE" ? "CREDIT_NOTE" : f.kind === "SALE" ? { in: [...SALE_TYPES] } : { in: [...SALE_TYPES, "CREDIT_NOTE"] },
+    type: f.kind === "CREDIT_NOTE" || f.kind === "DEBIT_NOTE" ? f.kind : f.kind === "SALE" ? { in: [...SALE_TYPES] } : { in: [...SALE_TYPES, "CREDIT_NOTE", "DEBIT_NOTE"] },
     ...((f.from || f.to) && { issuedAt: { ...(f.from && { gte: dayStart(f.from) }), ...(f.to && { lte: dayEnd(f.to) }) } }),
     ...(f.customerId && { customerId: f.customerId }),
     ...(f.registerId && { cashSession: { registerId: f.registerId } }),
@@ -96,21 +96,27 @@ async function returnedByLine(documentId: string) {
 
 // Venta (o nota) con su tiquete, lo devuelto por línea, sus notas de crédito y hasta cuándo se puede devolver
 export async function getSale(id: string) {
-  const exists = await prisma.document.findFirst({ where: { id, type: { in: [...SALE_TYPES, "CREDIT_NOTE"] } }, select: { id: true, type: true, issuedAt: true } })
+  const exists = await prisma.document.findFirst({ where: { id, type: { in: [...SALE_TYPES, "CREDIT_NOTE", "DEBIT_NOTE"] } }, select: { id: true, type: true, issuedAt: true } })
   if (!exists) throw fail("Venta no encontrada", 404)
   const ticket = await getTicket(id)
   const einvoice = await getDocumentEInvoice(id)
-  if (exists.type === "CREDIT_NOTE") {
+  if (exists.type === "CREDIT_NOTE" || exists.type === "DEBIT_NOTE") {
     // la nota solo se envía a Hacienda si la venta que corrige está aceptada allá
     const ref = await prisma.document.findFirst({ where: { referencedBy: { some: { id } } }, select: { einvoice: { select: { status: true } } } })
-    return { ...ticket, einvoice, referenceEInvoiceStatus: ref?.einvoice?.status ?? null, returned: {}, creditNotes: [], returnUntil: null }
+    return { ...ticket, einvoice, referenceEInvoiceStatus: ref?.einvoice?.status ?? null, returned: {}, creditNotes: [], debitNotes: [], returnUntil: null }
   }
-  const [returned, notes, company] = await Promise.all([
+  const [returned, notes, debits, company] = await Promise.all([
     returnedByLine(id),
     prisma.document.findMany({
       where: { referenceDocumentId: id, type: "CREDIT_NOTE" },
       orderBy: { issuedAt: "asc" },
       select: { id: true, consecutive: true, issuedAt: true, total: true, referenceReason: true, returnAuthorizedBy: { select: { name: true } }, payments: true, einvoice: { select: { status: true } } },
+    }),
+    // cargos extra (notas de débito) sobre esta venta
+    prisma.document.findMany({
+      where: { referenceDocumentId: id, type: "DEBIT_NOTE" },
+      orderBy: { issuedAt: "asc" },
+      select: { id: true, consecutive: true, issuedAt: true, total: true, referenceReason: true, createdBy: { select: { name: true } }, einvoice: { select: { status: true } } },
     }),
     getCompany(),
   ])
@@ -119,6 +125,7 @@ export async function getSale(id: string) {
     einvoice,
     returned: Object.fromEntries([...returned].map(([k, v]) => [k, v.toNumber()])),
     creditNotes: notes,
+    debitNotes: debits,
     returnUntil: new Date(exists.issuedAt.getTime() + company.returnDays * 86_400_000),
   }
 }

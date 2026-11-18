@@ -2559,6 +2559,37 @@ paths:
       responses:
         "201": { description: "El comprobante (como el tiquete de la caja: document, lines, payments…)" }
         "409": { description: "Cliente sin cédula (INVOICE_CUSTOMER_ID), sin stock (INVOICE_STOCK) o problemas de crédito (CREDIT_*)" }
+  /sales/{id}/debit-notes:
+    post:
+      tags: [Ventas]
+      summary: Nota de débito — cargo extra sobre una factura o un tiquete (invoices.issue)
+      description: "Líneas de cargo (sin inventario) con su CABYS; de contado (payment) a una cuenta bancaria o a crédito (credit). Sale a Hacienda con referencia 04 cuando la venta original está aceptada."
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, lines]
+              properties:
+                reason: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [description, quantity, unitPriceWithTax, taxRate, cabys]
+                    properties:
+                      description: { type: string }
+                      quantity: { type: number }
+                      unitPriceWithTax: { type: number }
+                      taxRate: { type: string, enum: [EXEMPT, RATE_1, RATE_2, RATE_4, RATE_13] }
+                      cabys: { type: string }
+                payment: { type: object, properties: { method: { type: string, enum: [TRANSFER, SINPE, CARD] }, reference: { type: string }, bankAccountId: { type: string, format: uuid } } }
+                credit: { type: object, properties: { frequency: { type: string, enum: [BIWEEKLY, MONTHLY] }, installments: { type: integer } } }
+      responses:
+        "201": { description: El comprobante de la nota }
+        "409": { description: "No es una factura o tiquete (DEBIT_ORIGINAL) o problemas de crédito (CREDIT_*)" }
   /sales/{id}:
     get:
       tags: [Ventas]

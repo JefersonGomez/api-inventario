@@ -2,6 +2,7 @@ import type { Request, Response } from "express"
 import { createReturn, getSale, listSales } from "./sales.service.ts"
 import { emit, EVERYONE, STOCK_TOPICS } from "../../shared/realtime.ts"
 import { issueOfficeInvoice } from "./office-invoice.service.ts"
+import { issueDebitNote } from "./debit-note.service.ts"
 
 // cada handler: llama al service y responde; los errores traen su status (403, 404, 409…)
 const handle =
@@ -24,3 +25,5 @@ export const returnHandler = handle((req) => createReturn(req.params.id, req.bod
 ])
 // factura desde la oficina (sin caja)
 export const officeInvoiceHandler = handle((req) => issueOfficeInvoice(req.body, req.user!), 201, ["sales", "receivables", ...STOCK_TOPICS])
+// nota de débito: cargo extra sobre una factura o un tiquete
+export const debitNoteHandler = handle((req) => issueDebitNote(req.params.id, req.body, req.user!), 201, ["sales", "receivables"])
