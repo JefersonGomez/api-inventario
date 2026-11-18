@@ -83,17 +83,21 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   if (d.type === "CREDIT_NOTE" && !ref?.clave) throw new Error("La nota de crédito necesita la clave del comprobante que corrige")
 
   // ---------- líneas ----------
-  const totals = { taxed: new D(0), exempt: new D(0), discounts: new D(0), tax: new D(0) }
+  // Hacienda separa servicios y mercancías por el CABYS: secciones 0–4 son bienes y 5–9 servicios
+  // (rechazo -110/-111 si un servicio se suma como mercancía, 17-nov-2026)
+  const totals = { servTaxed: new D(0), servExempt: new D(0), goodsTaxed: new D(0), goodsExempt: new D(0), discounts: new D(0), tax: new D(0) }
   const byRate = new Map<TaxRate, Prisma.Decimal>()
   const lines = d.lines.map((l, i) => {
     if (!/^\d{13}$/.test(l.cabys)) throw new Error(`Línea ${i + 1} (${l.description}): falta el código CABYS de 13 dígitos`)
+    const service = /^[5-9]/.test(l.cabys)
     const quantity = new D(l.quantity)
     const gross = quantity.times(l.unitPrice).toDecimalPlaces(5) // MontoTotal = cantidad × precio unitario
     const discount = new D(l.discount)
     const subtotal = new D(l.subtotal)
     const tax = new D(l.taxAmount)
-    if (l.taxRate === "EXEMPT") totals.exempt = totals.exempt.plus(gross)
-    else totals.taxed = totals.taxed.plus(gross)
+    const exempt = l.taxRate === "EXEMPT"
+    if (service) totals[exempt ? "servExempt" : "servTaxed"] = totals[exempt ? "servExempt" : "servTaxed"].plus(gross)
+    else totals[exempt ? "goodsExempt" : "goodsTaxed"] = totals[exempt ? "goodsExempt" : "goodsTaxed"].plus(gross)
     totals.discounts = totals.discounts.plus(discount)
     totals.tax = totals.tax.plus(tax)
     byRate.set(l.taxRate, (byRate.get(l.taxRate) ?? new D(0)).plus(tax))
@@ -103,7 +107,8 @@ export function buildEInvoiceXml(d: EInvoiceData) {
       el("NumeroLinea", String(i + 1)),
       el("CodigoCABYS", l.cabys),
       el("Cantidad", qty(quantity)),
-      el("UnidadMedida", UNIT_CODE[l.unit]),
+      // un servicio "por unidad" va como Os (otro tipo de servicio); las demás unidades se mantienen
+      el("UnidadMedida", service && l.unit === "UNIT" ? "Os" : UNIT_CODE[l.unit]),
       el("Detalle", text(l.description.padEnd(3, "."), 200)),
       el("PrecioUnitario", money(l.unitPrice)),
       el("MontoTotal", money(gross)),
@@ -126,7 +131,10 @@ export function buildEInvoiceXml(d: EInvoiceData) {
   })
 
   // ---------- resumen ----------
-  const sale = totals.taxed.plus(totals.exempt)
+  const taxed = totals.servTaxed.plus(totals.goodsTaxed)
+  const exempt = totals.servExempt.plus(totals.goodsExempt)
+  const hasServices = totals.servTaxed.plus(totals.servExempt).greaterThan(0)
+  const sale = taxed.plus(exempt)
   const net = sale.minus(totals.discounts)
   const total = net.plus(totals.tax)
   // medios de pago: uno por método (máximo 4); en contado con un solo medio, el total exacto
@@ -170,10 +178,13 @@ export function buildEInvoiceXml(d: EInvoiceData) {
     `<DetalleServicio>${lines.join("")}</DetalleServicio>`,
     "<ResumenFactura>",
     `<CodigoTipoMoneda>${el("CodigoMoneda", d.currency)}${el("TipoCambio", money(d.exchangeRate ?? 1))}</CodigoTipoMoneda>`,
-    el("TotalMercanciasGravadas", money(totals.taxed)),
-    el("TotalMercanciasExentas", money(totals.exempt)),
-    el("TotalGravado", money(totals.taxed)),
-    el("TotalExento", money(totals.exempt)),
+    // en el orden del XSD: servicios (solo si hay), mercancías y los totales de las dos
+    hasServices ? el("TotalServGravados", money(totals.servTaxed)) : "",
+    hasServices ? el("TotalServExentos", money(totals.servExempt)) : "",
+    el("TotalMercanciasGravadas", money(totals.goodsTaxed)),
+    el("TotalMercanciasExentas", money(totals.goodsExempt)),
+    el("TotalGravado", money(taxed)),
+    el("TotalExento", money(exempt)),
     el("TotalVenta", money(sale)),
     el("TotalDescuentos", money(totals.discounts)),
     el("TotalVentaNeta", money(net)),

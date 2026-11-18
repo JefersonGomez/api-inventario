@@ -19,7 +19,9 @@ import { assertCreditAllowed, createCreditInstallments, creditPlanSchema, dueDat
 const D = Prisma.Decimal
 type HttpError = Error & { status?: number; code?: string }
 const fail = (message: string, status: number, code?: string): HttpError => Object.assign(new Error(message), { status, ...(code && { code }) })
-const OFFICE_TERMINAL = "00000" // la oficina no es una caja: su propia numeración de facturas
+// la oficina no es una caja: su propia numeración. Hacienda exige terminal de 00001 en adelante (con 00000
+// rechazó la factura: -79 numeración consecutiva, 17-nov-2026); 99999 no choca con las cajas (empiezan en 00001)
+const OFFICE_TERMINAL = "99999"
 
 const money = z.number().min(0).max(1e12)
 const lineSchema = z

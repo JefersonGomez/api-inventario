@@ -45,9 +45,9 @@ describe("Factura desde la oficina", () => {
     })
     expect(res.status).toBe(201)
     const doc = res.body.document
-    expect(doc).toMatchObject({ type: "INVOICE", saleCondition: "CASH", terminalCode: "00000", customer: expect.objectContaining({ name: "Constructora Los Pinos S.A." }) })
+    expect(doc).toMatchObject({ type: "INVOICE", saleCondition: "CASH", terminalCode: "99999", customer: expect.objectContaining({ name: "Constructora Los Pinos S.A." }) })
     expect(Number(doc.total)).toBe(22600) // 2 × 5650 + 11300
-    expect(doc.consecutive).toMatch(/^0010000001\d{10}$/) // sucursal 001, terminal de oficina 00000, factura 01
+    expect(doc.consecutive).toMatch(/^0019999901\d{10}$/) // sucursal 001, terminal de oficina 99999, factura 01
     // la mercadería sale del stock; el flete no lleva producto
     expect(await stockAt(hammerId, main)).toBe(8)
     const moves = await prisma.stockMovement.findMany({ where: { sourceId: doc.id } })

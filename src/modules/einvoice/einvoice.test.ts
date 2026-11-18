@@ -205,6 +205,16 @@ describe("Facturación electrónica", () => {
     expect(invoiceNote).toContain("<Receptor>")
     expect(await validateEInvoiceXml("CREDIT_NOTE", await signXml(invoiceNote, key))).toEqual([])
     expect(() => buildEInvoiceXml(sample({ type: "CREDIT_NOTE", reference: null }))).toThrow(/clave del comprobante/)
+    // un servicio (CABYS de las secciones 5–9) va en los totales de servicios y con unidad Os (rechazo -110/-111)
+    const withService = buildEInvoiceXml(invoice({
+      receiver,
+      lines: [sample().lines[0]!, { cabys: "6511900009900", quantity: 1, unit: "UNIT", description: "Flete", unitPrice: "5000", discount: 0, taxRate: "RATE_13", subtotal: "5000", taxAmount: "650" }],
+      payments: [{ method: "TRANSFER", amount: 7797 }],
+    }))
+    expect(withService).toContain("<CodigoCABYS>6511900009900</CodigoCABYS><Cantidad>1.000</Cantidad><UnidadMedida>Os</UnidadMedida>")
+    expect(withService).toContain("<TotalServGravados>5000.00000</TotalServGravados><TotalServExentos>0.00000</TotalServExentos><TotalMercanciasGravadas>2000.00000</TotalMercanciasGravadas><TotalMercanciasExentas>0.00000</TotalMercanciasExentas><TotalGravado>7000.00000</TotalGravado>")
+    expect(await validateEInvoiceXml("INVOICE", await signXml(withService, key))).toEqual([])
+    expect(xml).not.toContain("TotalServGravados") // sin servicios no se ponen
     // sin cliente no hay factura; el tiquete nunca lleva Receptor
     expect(() => buildEInvoiceXml(invoice({ receiver: null }))).toThrow(/cliente/)
     expect(buildEInvoiceXml(sample({ receiver }))).not.toContain("<Receptor>")

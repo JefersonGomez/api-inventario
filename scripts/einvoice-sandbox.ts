@@ -4,7 +4,8 @@
 // Con --nota: el tiquete lleva 2 unidades y, aceptado, se envía una NOTA DE CRÉDITO que devuelve 1 (código 06).
 // Con --sin-internet: el tiquete va como venta hecha sin conexión hace 40 minutos (situación 3 en la clave).
 // Con --receptor: emite una FACTURA a nombre del mismo titular y, aceptada, le responde con el MENSAJE RECEPTOR (aceptación).
-// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet] [-- --receptor]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
+// Con --servicio: una FACTURA con un producto y un servicio (totales de servicios y unidad Os).
+// Uso: npm run einvoice:sandbox [-- --nota] [-- --sin-internet] [-- --receptor] [-- --servicio]  (lee HACIENDA_* del .env; se niega a correr con HACIENDA_ENV=produccion)
 // Nunca imprime la clave, el PIN ni el token.
 import "dotenv/config"
 import { readFileSync } from "node:fs"
@@ -22,6 +23,7 @@ if (env.HACIENDA_ENV !== "pruebas") throw new Error("Este script solo corre con 
 const withNote = process.argv.includes("--nota")
 const offline = process.argv.includes("--sin-internet")
 const withReceiver = process.argv.includes("--receptor")
+const withService = process.argv.includes("--servicio") // factura con un martillo + un flete (servicio, CABYS 6…)
 const creds = { env: "pruebas" as const, username: env.HACIENDA_USER!, password: env.HACIENDA_PASSWORD! }
 const key = await loadSigningKey(readFileSync(env.HACIENDA_P12_PATH!), env.HACIENDA_P12_PIN!)
 const id = key.holderId
@@ -61,8 +63,11 @@ async function run(label: string, type: DocumentType, units: number, reference: 
     },
     currency: "CRC", saleCondition: "CASH", reference,
     ...(type === "INVOICE" && { receiver: { name: key.holderName || "Receptor de prueba", idType, idNumber: id } }),
-    lines: [{ cabys, quantity: units, unit: "UNIT", description: "Martillo de prueba", unitPrice: "1000", discount: 0, taxRate: "RATE_13", subtotal: String(1000 * units), taxAmount: String(130 * units) }],
-    payments: [{ method: "CASH", amount: 1130 * units }],
+    lines: [
+      { cabys, quantity: units, unit: "UNIT", description: "Martillo de prueba", unitPrice: "1000", discount: 0, taxRate: "RATE_13", subtotal: String(1000 * units), taxAmount: String(130 * units) },
+      ...(withService && type === "INVOICE" ? [{ cabys: "6511900009900", quantity: 1, unit: "UNIT" as const, description: "Flete de prueba", unitPrice: "5000", discount: 0, taxRate: "RATE_13" as const, subtotal: "5000", taxAmount: "650" }] : []),
+    ],
+    payments: [{ method: "CASH", amount: 1130 * units + (withService && type === "INVOICE" ? 5650 : 0) }],
   })
   const signed = await signXml(xml, key, issuedAt)
   const schemaErrors = await validateEInvoiceXml(type, signed)
@@ -119,6 +124,11 @@ async function receiver(invoice: { clave: string }) {
     }
   }
   return false
+}
+
+if (withService) {
+  const invoice = await run("Factura con un servicio (flete)", "INVOICE", 1)
+  process.exit(invoice ? 0 : 1)
 }
 
 if (withReceiver) {
