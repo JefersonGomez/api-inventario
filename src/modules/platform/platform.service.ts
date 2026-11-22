@@ -170,3 +170,62 @@ export { setAiBudget };
 // acción del dueño sobre la plataforma (no sobre una empresa): queda en su registro de acciones
 export const logPlatformAction = (userId: string, key: string, changes: Record<string, unknown>) =>
   logAudit(userId, "UPDATE", "PlatformSetting", key, { ...changes, by: "platform" } as Prisma.InputJsonValue);
+
+// Monitoreo de facturación electrónica (facturación como servicio, parte 2): comprobantes de los clientes
+// que necesitan atención, para ayudarlos antes de que lo noten. Solo estado y motivo de Hacienda:
+// ni montos ni clientes (el panel no expone datos del negocio de cada empresa).
+//  - rechazados por Hacienda en los últimos 30 días;
+//  - con error (no se pudieron armar o enviar: falta CABYS, credenciales, llave…);
+//  - pendientes que ya fallaron 3 veces o más (Hacienda caída, credenciales vencidas…);
+//  - enviados hace más de una hora sin respuesta de Hacienda.
+// Además, llaves criptográficas que vencen en los próximos 30 días (o ya vencieron).
+export async function einvoiceIssues(now = new Date()) {
+  const [rows, keys] = await Promise.all([
+    prismaRoot.eInvoice.findMany({
+      where: {
+        OR: [
+          { status: "REJECTED", updatedAt: { gte: new Date(now.getTime() - 30 * DAY) } },
+          { status: "ERROR" },
+          { status: "PENDING", attempts: { gte: 3 } },
+          { status: "SENT", sentAt: { lt: new Date(now.getTime() - 3_600_000) } },
+        ],
+      },
+      select: {
+        id: true, status: true, message: true, lastError: true, attempts: true, environment: true, sentAt: true, updatedAt: true,
+        company: { select: { id: true, name: true } },
+        document: { select: { type: true, consecutive: true, issuedAt: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    }),
+    prismaRoot.eInvoiceSettings.findMany({
+      where: { enabled: true, keyExpiresAt: { lte: new Date(now.getTime() + 30 * DAY) } },
+      select: { keyExpiresAt: true, environment: true, company: { select: { id: true, name: true } } },
+      orderBy: { keyExpiresAt: "asc" },
+    }),
+  ]);
+  const issues = rows.map((r) => ({
+    id: r.id,
+    company: r.company,
+    type: r.document.type,
+    consecutive: r.document.consecutive,
+    issuedAt: r.document.issuedAt,
+    environment: r.environment,
+    status: r.status,
+    // por qué: el motivo de Hacienda, o el último error al armarlo o enviarlo
+    reason: (r.message || r.lastError || "").slice(0, 300) || null,
+    attempts: r.attempts,
+    kind: r.status === "SENT" ? "NO_ANSWER" : r.status === "PENDING" ? "RETRYING" : r.status,
+    updatedAt: r.updatedAt,
+  }));
+  return {
+    issues,
+    byCompany: Object.values(
+      issues.reduce<Record<string, { company: { id: string; name: string }; count: number }>>((acc, i) => {
+        (acc[i.company.id] ??= { company: i.company, count: 0 }).count++;
+        return acc;
+      }, {})
+    ).sort((a, b) => b.count - a.count),
+    expiringKeys: keys.map((k) => ({ company: k.company, environment: k.environment, keyExpiresAt: k.keyExpiresAt, expired: k.keyExpiresAt! < now })),
+  };
+}

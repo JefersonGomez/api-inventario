@@ -5,7 +5,7 @@ import { validate } from "../../middlewares/validate.middleware.ts";
 import { validateQuery } from "../../middlewares/validate.middleware.ts";
 import { aiBudgetSchema, aiUsageQuerySchema, setPlanSchema, setSuspendedSchema } from "./platform.schema.ts";
 import {
-  aiUsageHandler, listCompaniesHandler, overviewHandler, ownerActionsHandler, setAiBudgetHandler, setPlanHandler, setSuspendedHandler,
+  aiUsageHandler, einvoiceIssuesHandler, listCompaniesHandler, overviewHandler, ownerActionsHandler, setAiBudgetHandler, setPlanHandler, setSuspendedHandler,
 } from "./platform.controller.ts";
 
 export const platformRouter = Router();
@@ -17,3 +17,4 @@ platformRouter.get("/overview", Authenticated, PlatformOwner, overviewHandler);
 platformRouter.get("/ai-usage", validateQuery(aiUsageQuerySchema), Authenticated, PlatformOwner, aiUsageHandler);
 platformRouter.put("/ai-budget", validate(aiBudgetSchema), Authenticated, PlatformOwner, setAiBudgetHandler);
 platformRouter.get("/actions", Authenticated, PlatformOwner, ownerActionsHandler);
+platformRouter.get("/einvoice-issues", Authenticated, PlatformOwner, einvoiceIssuesHandler);

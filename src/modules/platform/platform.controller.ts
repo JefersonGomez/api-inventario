@@ -63,3 +63,12 @@ export async function ownerActionsHandler(_req: Request, res: Response) {
     res.status(500).json({ error: (error as Error).message });
   }
 }
+
+// Monitoreo de facturación electrónica de los clientes (facturación como servicio, parte 2)
+export async function einvoiceIssuesHandler(_req: Request, res: Response) {
+  try {
+    res.json(await service.einvoiceIssues());
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}

@@ -1471,6 +1471,15 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
 
   # ---------------------------------------------------------------- Plataforma
+  /platform/einvoice-issues:
+    get:
+      tags: [Plataforma]
+      summary: Comprobantes de los clientes que necesitan atención (solo el dueño de la plataforma)
+      description: "Rechazados en los últimos 30 días, ERROR, PENDING con 3+ intentos (RETRYING) y SENT hace más de una hora sin respuesta (NO_ANSWER); más las llaves criptográficas que vencen en 30 días. Solo estado y motivo: ni montos ni clientes."
+      responses:
+        '200': { description: "{ issues: [{ id, company { id, name }, type, consecutive, issuedAt, environment, status, kind, reason, attempts, updatedAt }], byCompany: [{ company, count }], expiringKeys: [{ company, environment, keyExpiresAt, expired }] }" }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /platform/companies:
     get:
       tags: [Plataforma]
@@ -3082,6 +3091,8 @@ paths:
         Pasos calculados con los datos reales: fiscal (datos para facturar), branch (dirección de la sucursal principal),
         categories, products, taxes (CABYS en todos y ninguno "por completar"; meta con lo que falta), team (otro miembro o una
         invitación), cashCodes (alguien con código de caja). Respuesta { steps: [{ key, link, done, meta? }], completed, total, dismissed }.
+        Plan Solo facturación (mode: "invoicing"): fiscal, einvoice (credenciales + .p12 + envío encendido; meta.credentials),
+        catalog (algo que vender, todo con CABYS; meta.withoutCabys), customer (con cédula) y firstInvoice (un comprobante aceptado).
       responses:
         "200": { description: Estado de la guía }
         "403": { $ref: "#/components/responses/Forbidden" }

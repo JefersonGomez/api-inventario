@@ -3,9 +3,12 @@
 // Último paso (7D-2): crear una caja y abrir el primer turno.
 import { prisma, prismaRoot } from "../../config/database.ts"
 import { currentCompanyId } from "../../shared/tenant.ts"
+import { PLANS } from "../../config/plans.ts"
 
 export async function onboardingStatus() {
   const companyId = currentCompanyId()
+  const owner = await prismaRoot.company.findUniqueOrThrow({ where: { id: companyId }, select: { owner: { select: { plan: true } } } })
+  if (PLANS[owner.owner.plan].invoicingOnly) return invoicingOnboarding(companyId)
   const [company, branch, categories, products, withoutCabys, pending, members, invitations, withPin, sessions] = await Promise.all([
     prismaRoot.company.findUniqueOrThrow({
       where: { id: companyId },
@@ -40,6 +43,38 @@ export async function onboardingStatus() {
     completed: steps.filter((s) => s.done).length,
     total: steps.length,
     dismissed: company.onboardingDismissedAt !== null,
+  }
+}
+
+// Plan "Solo facturación" (facturación como servicio, parte 2): el camino hasta la primera factura aceptada
+// por Hacienda, en orden. Cada paso se marca solo con los datos reales.
+async function invoicingOnboarding(companyId: string) {
+  const [company, settings, products, withoutCabys, customers, accepted] = await Promise.all([
+    prismaRoot.company.findUniqueOrThrow({
+      where: { id: companyId },
+      select: { legalName: true, idNumber: true, economicActivity: true, province: true, onboardingDismissedAt: true },
+    }),
+    prisma.eInvoiceSettings.findFirst({ select: { enabled: true, username: true, passwordEnc: true, p12Enc: true, pinEnc: true } }),
+    prisma.product.count({ where: { deletedAt: null } }),
+    prisma.product.count({ where: { deletedAt: null, OR: [{ cabys: null }, { cabys: "" }] } }),
+    prisma.customer.count({ where: { deletedAt: null, idNumber: { not: null } } }),
+    prisma.eInvoice.count({ where: { status: "ACCEPTED" } }),
+  ])
+  const credentials = Boolean(settings?.username && settings.passwordEnc && settings.p12Enc && settings.pinEnc)
+  const steps = [
+    { key: "fiscal", link: "/settings?tab=fiscal", done: Boolean(company.legalName && company.idNumber && company.economicActivity && company.province) },
+    // usuario y contraseña de Hacienda + llave criptográfica (.p12) con su PIN, y el envío automático encendido
+    { key: "einvoice", link: "/settings?tab=einvoice", done: credentials && Boolean(settings?.enabled), meta: { credentials } },
+    { key: "catalog", link: "/products", done: products > 0 && withoutCabys === 0, meta: { withoutCabys } },
+    { key: "customer", link: "/customers", done: customers > 0 },
+    { key: "firstInvoice", link: "/sales/new-invoice", done: accepted > 0 },
+  ]
+  return {
+    steps,
+    completed: steps.filter((s) => s.done).length,
+    total: steps.length,
+    dismissed: company.onboardingDismissedAt !== null,
+    mode: "invoicing" as const,
   }
 }
 
