@@ -1471,6 +1471,14 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
 
   # ---------------------------------------------------------------- Plataforma
+  /plans:
+    get:
+      tags: [Plataforma]
+      summary: Límites de cada plan (público, para la landing)
+      security: []
+      description: "En orden INVOICING, BASIC, PRO, BUSINESS: code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth (null = sin límite). Sin precios (viven en la configuración de la landing)."
+      responses:
+        '200': { description: "[{ code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth }]" }
   /platform/einvoice-issues:
     get:
       tags: [Plataforma]

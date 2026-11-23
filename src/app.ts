@@ -29,6 +29,7 @@ import { notificationsRouter } from "./modules/notifications/notifications.route
 import { companyRouter, companiesRouter } from "./modules/company/company.routes.ts"
 import { invitationRouter } from "./modules/invitations/invitation.routes.ts"
 import { platformRouter } from "./modules/platform/platform.routes.ts"
+import { plansRouter } from "./modules/plans/plans.routes.ts"
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -88,6 +89,7 @@ app.use("/company", companyRouter)
 app.use("/companies", companiesRouter)
 app.use("/invitations", invitationRouter)
 app.use("/platform", platformRouter)
+app.use("/plans", plansRouter) // público: límites de los planes para la landing
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })
