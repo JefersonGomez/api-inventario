@@ -42,6 +42,7 @@ Node + TypeScript (ESM) + Express + PostgreSQL (Docker) + Prisma (generador `pri
 - Cada `functionResponse` debe incluir `id` (obligatorio en Gemini 3.x para emparejar con su `functionCall`).
 - El turno del modelo con function calls debe reenviarse tal cual vino en `response.candidates[0].content`, nunca reconstruido a mano desde `response.functionCalls` — Gemini 3 agrega un `thought_signature` como hermano de `functionCall` dentro del `Part`, y reconstruirlo a mano lo pierde, causando un 400.
 - El asistente es de **solo lectura** — nunca debe ganar tools que ejecuten acciones (crear, editar, borrar).
+- El asistente solo habla del negocio de quien pregunta: las barreras viven en `assistant.guard.ts` (filtro previo con el modelo liviano, instrucciones estrictas, `sanitizeToolResult`, `looksLikeCode` en la salida). Toda tool nueva debe consultar con `prisma` (con tenant), nunca `prismaRoot`. Prueba en vivo: `npx tsx scripts/assistant-redteam.ts <companyId>`.
 
 ---
 
