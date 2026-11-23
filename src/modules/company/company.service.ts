@@ -1,6 +1,7 @@
 // company.service.ts — empresa activa y empresas del usuario (datos de plataforma: prismaRoot)
 import { prismaRoot } from "../../config/database.ts";
 import { PLANS } from "../../config/plans.ts";
+import { MODELS } from "../ai/ai.service.ts";
 import { MAIN_LOCATION } from "../locations/location.service.ts";
 import { currentCompanyId } from "../../shared/tenant.ts";
 import { logAudit } from "../audit/audit.service.ts";
@@ -16,8 +17,12 @@ export async function getCompany() {
   });
   const { owner, ...rest } = company;
   const limits = PLANS[owner.plan];
-  // con cupo mensual de comprobantes: cuántos lleva este mes (lo muestra Configuración y Facturar)
-  const usage = limits.documentsPerMonth === null ? null : { documentsThisMonth: await documentsThisMonth(company.id) };
+  // lo usado este mes: preguntas al asistente y, si el plan tiene cupo, comprobantes (Configuración y Facturar)
+  const [aiChatsThisMonth, documents] = await Promise.all([
+    aiChatsThisMonthOf(company.id),
+    limits.documentsPerMonth === null ? null : documentsThisMonth(company.id),
+  ]);
+  const usage = { aiChatsThisMonth, ...(documents !== null && { documentsThisMonth: documents }) };
   return { ...rest, plan: owner.plan, limits, usage };
 }
 
@@ -29,10 +34,31 @@ function documentsThisMonth(companyId: string) {
   return prismaRoot.document.count({ where: { companyId, type: { in: [...QUOTA_TYPES] }, issuedAt: { gte: from } } });
 }
 
+// Preguntas al asistente este mes: cada pregunta pasa una vez por el filtro (modelo liviano), así que se cuentan esas
+function aiChatsThisMonthOf(companyId: string) {
+  const now = new Date();
+  return prismaRoot.aiUsage.count({
+    where: { companyId, feature: "CHAT", model: MODELS.light, createdAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } },
+  });
+}
+
+// Antes de preguntarle al asistente: tope mensual del plan
+export async function assertAiChatQuota() {
+  const { limits, usage } = await getCompany();
+  if (usage.aiChatsThisMonth >= limits.aiChatsPerMonth) {
+    throw Object.assign(
+      new Error(limits.aiChatsPerMonth === 0
+        ? "Tu plan no incluye el asistente con IA."
+        : `Ya usaste las ${limits.aiChatsPerMonth} preguntas al asistente de este mes que incluye tu plan. El 1.º del próximo mes se renuevan; si necesitas más, mejora tu plan.`),
+      { status: 429, code: "AI_CHAT_QUOTA" }
+    );
+  }
+}
+
 // Antes de emitir un comprobante: si el plan tiene cupo mensual y ya se usó, no se emite
 export async function assertDocumentQuota() {
   const { limits, usage } = await getCompany();
-  if (limits.documentsPerMonth === null || !usage) return;
+  if (limits.documentsPerMonth === null || usage.documentsThisMonth === undefined) return;
   if (usage.documentsThisMonth >= limits.documentsPerMonth) {
     throw Object.assign(
       new Error(`Llegaste a los ${limits.documentsPerMonth} comprobantes de este mes que incluye tu plan. El 1.º del próximo mes se renueva; si necesitas más, mejora tu plan.`),

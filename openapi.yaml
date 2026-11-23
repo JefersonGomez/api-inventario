@@ -279,14 +279,15 @@ components:
             maxUsersPerCompany: { type: integer, nullable: true }
             maxProducts: { type: integer, nullable: true, description: null = sin límite }
             aiImportsPerMonth: { type: integer }
+            aiChatsPerMonth: { type: integer, description: "Preguntas al asistente con IA al mes; al llegar, POST /assistant/chat responde 429 AI_CHAT_QUOTA" }
             invoicingOnly: { type: boolean, description: "Solo facturación: facturar y devolver no mueven stock, sin cajas ni entrada de mercadería de facturas de proveedor (409 PLAN_NO_STOCK)" }
             documentsPerMonth: { type: integer, nullable: true, description: "Facturas, tiquetes y notas de débito al mes (las notas de crédito no cuentan); al llegar, 409 PLAN_DOCUMENTS" }
         usage:
           type: object
-          nullable: true
-          description: Solo con cupo mensual de comprobantes
+          description: Lo usado este mes
           properties:
-            documentsThisMonth: { type: integer }
+            aiChatsThisMonth: { type: integer }
+            documentsThisMonth: { type: integer, description: Solo con cupo mensual de comprobantes }
 
     Location:
       type: object
@@ -1476,7 +1477,7 @@ paths:
       tags: [Plataforma]
       summary: Límites de cada plan (público, para la landing)
       security: []
-      description: "En orden INVOICING, BASIC, PRO, BUSINESS: code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth (null = sin límite). Sin precios (viven en la configuración de la landing)."
+      description: "En orden INVOICING, BASIC, PRO, BUSINESS: code, aiChatsPerMonth, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth (null = sin límite). Sin precios (viven en la configuración de la landing)."
       responses:
         '200': { description: "[{ code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth }]" }
   /platform/einvoice-issues:

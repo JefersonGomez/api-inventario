@@ -86,6 +86,18 @@ describe("Asistente: solo el negocio de quien pregunta", () => {
     expect(looksLikeCode("Para registrar una venta: abre la caja, busca el producto y toca Cobrar.")).toBe(false)
   })
 
+  it("respeta el tope mensual de preguntas del plan (y no gasta IA al rechazar)", async () => {
+    const { PLANS } = await import("../../config/plans.ts")
+    const max = PLANS.BASIC.aiChatsPerMonth
+    await prisma.aiUsage.createMany({
+      data: Array.from({ length: max }, () => ({ companyId, feature: "CHAT" as const, model: MODELS.light, inputTokens: 300, outputTokens: 10, costUsd: 0.0001 })),
+    })
+    const model = fakeModel('{"inScope": true, "lang": "es"}', [{ text: "no debería llegar" }])
+    await expect(ask("¿Cuánto vendí?", model)).rejects.toMatchObject({ status: 429, code: "AI_CHAT_QUOTA" })
+    expect(model.seen).toHaveLength(0)
+    await prisma.aiUsage.deleteMany({ where: { companyId } })
+  })
+
   it("quita identificadores sensibles a cualquier profundidad", () => {
     expect(sanitizeToolResult({ companyId: "x", items: [{ name: "A", companyId: "x", category: { companyId: "x", name: "B" } }] }))
       .toEqual({ items: [{ name: "A", category: { name: "B" } }] })

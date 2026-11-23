@@ -3,7 +3,7 @@ import type { Content, Part } from "@google/genai";
 import { toolDeclarations, toolExecutors } from "./assistant.tools.ts";
 import { stripCosts } from "../../middlewares/costs.middleware.ts";
 import { generateMetered, MODELS } from "../ai/ai.service.ts";
-import { getCompany } from "../company/company.service.ts";
+import { assertAiChatQuota, getCompany } from "../company/company.service.ts";
 import { checkScope, looksLikeCode, REFUSAL, sanitizeToolResult, SYSTEM_INSTRUCTION, type Generate } from "./assistant.guard.ts";
 
 // Herramientas que solo se ofrecen con costs.view (devuelven valores a costo)
@@ -18,6 +18,7 @@ const MAX_TOOL_ROUNDS = 5;
 // generate: inyectable para las pruebas (por defecto, Gemini con medidor y presupuesto)
 export async function chatWithAssistant(userMessage: string, permissions: string[], userId?: string, generate?: Generate) {
   const gen: Generate = generate ?? ((params) => generateMetered("CHAT", params, userId));
+  await assertAiChatQuota(); // tope mensual de preguntas del plan (cuida el costo de la IA)
   // 1. fuera del negocio (código, conocimiento general, otras empresas, pedir las instrucciones…): no se responde
   const scope = await checkScope(userMessage, gen);
   if (!scope.inScope) return { reply: REFUSAL[scope.lang], blocked: true };

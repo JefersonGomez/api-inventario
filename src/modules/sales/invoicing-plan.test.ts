@@ -46,14 +46,14 @@ describe("Plan Solo facturación", () => {
   it("la empresa sabe que es solo facturación y cuánto cupo lleva", async () => {
     const res = await request(app).get("/company").set(admin.auth)
     expect(res.body.limits).toMatchObject({ invoicingOnly: true, documentsPerMonth: 100, maxRegistersPerBranch: 0 })
-    expect(res.body.usage).toEqual({ documentsThisMonth: 0 })
+    expect(res.body.usage).toMatchObject({ documentsThisMonth: 0 })
   })
 
   it("facturar no mueve el stock (aunque no haya existencias)", async () => {
     const res = await invoice()
     expect(res.status).toBe(201)
     expect(await prisma.stockMovement.count({ where: { sourceId: res.body.document.id } })).toBe(0)
-    expect((await request(app).get("/company").set(admin.auth)).body.usage).toEqual({ documentsThisMonth: 1 })
+    expect((await request(app).get("/company").set(admin.auth)).body.usage).toMatchObject({ documentsThisMonth: 1 })
   })
 
   it("la nota de crédito la hace el administrador sin código de caja y no devuelve nada al stock", async () => {
