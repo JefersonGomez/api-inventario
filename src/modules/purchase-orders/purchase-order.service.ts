@@ -277,7 +277,7 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
   });
   if (!order) throw new Error("Orden de compra no encontrada");
   if (!order.supplier.email) throw new Error("El proveedor no tiene email cargado");
-  const { name: company, currency } = await getCompany();
+  const { name: company, currency, invoiceEmail } = await getCompany();
   if (!company) throw new Error("Configura el nombre de la empresa en Configuración antes de enviar");
 
   const total = order.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.unitCost), 0);
@@ -306,6 +306,8 @@ export async function sendPurchaseOrderEmail(id: string, userId: string) {
     to: order.supplier.email,
     subject: `Orden de compra ${orderNumber(order.id)} — ${company}`,
     html,
+    senderName: company,
+    replyTo: invoiceEmail,
   });
 
   const updated = await prisma.purchaseOrder.update({

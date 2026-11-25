@@ -322,7 +322,10 @@ describe("Facturación electrónica", () => {
       const done = (await einvoiceOf(id))!
       expect(done).toMatchObject({ status: "ACCEPTED", emailedTo: "compras@pinos.cr", emailError: null })
       const email = JSON.parse(calls.filter((c) => c.url.startsWith("https://api.resend.com")).at(-1)!.body)
-      expect(email).toMatchObject({ to: "compras@pinos.cr", from: "Stockly <facturas@prueba.cr>" })
+      // sale a nombre del negocio y la respuesta del cliente le llega al negocio (su correo de comprobantes)
+      const company = await prisma.company.findUniqueOrThrow({ where: { id: admin.companyId } })
+      expect(email).toMatchObject({ to: "compras@pinos.cr", from: `"${company.name} vía Cubivo" <facturas@prueba.cr>` })
+      expect(email.reply_to).toBe("ventas@prueba.cr")
       expect(email.subject).toMatch(/^Factura electrónica 0010000101/)
       expect(email.attachments.map((a: { filename: string }) => a.filename)).toEqual([`${e.clave}.xml`, `${e.clave}-respuesta-hacienda.xml`])
       expect(Buffer.from(email.attachments[0].content, "base64").toString("utf8")).toBe(signed)

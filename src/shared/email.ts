@@ -3,7 +3,20 @@
 // y solo al correo de la cuenta: en ese modo todo va a EMAIL_TEST_TO y el asunto indica el destinatario real.
 export type EmailAttachment = { filename: string; content: string } // content en base64
 
-export async function sendEmail({ to, subject, html, attachments }: { to: string; subject: string; html: string; attachments?: EmailAttachment[] }) {
+// Los comprobantes y órdenes los manda CADA NEGOCIO: con `senderName` el correo sale como
+// "Ferretería X vía Cubivo <facturas@cubivo.org>" y con `replyTo` la respuesta le llega al negocio, no a Cubivo.
+export const validEmail = (s: string | null | undefined): s is string => !!s && /^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(s.trim());
+
+function fromWithName(from: string, senderName?: string) {
+  const name = senderName?.replace(/["<>\\]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!name) return from;
+  const address = from.match(/<([^>]+)>/)?.[1] ?? from.trim();
+  return `"${name} vía Cubivo" <${address}>`;
+}
+
+export async function sendEmail({ to, subject, html, attachments, senderName, replyTo }: {
+  to: string; subject: string; html: string; attachments?: EmailAttachment[]; senderName?: string; replyTo?: string | null;
+}) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("Falta RESEND_API_KEY en el servidor");
 
@@ -16,7 +29,7 @@ export async function sendEmail({ to, subject, html, attachments }: { to: string
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(
       from
-        ? { from, to, subject, html, ...(attachments?.length && { attachments }) }
+        ? { from: fromWithName(from, senderName), to, subject, html, ...(validEmail(replyTo) && { reply_to: replyTo.trim() }), ...(attachments?.length && { attachments }) }
         : { from: "onboarding@resend.dev", to: testTo, subject: `[Prueba → ${to}] ${subject}`, html, ...(attachments?.length && { attachments }) }
     ),
   });

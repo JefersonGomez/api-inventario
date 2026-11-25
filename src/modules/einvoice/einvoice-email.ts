@@ -3,7 +3,7 @@
 // Si no se puede (cliente sin correo, correo del servidor sin configurar) queda anotado el motivo y se
 // puede reintentar desde la venta. Nunca hace fallar el envío a Hacienda.
 import { prisma } from "../../config/database.ts"
-import { escapeHtml, sendEmail } from "../../shared/email.ts"
+import { escapeHtml, sendEmail, validEmail } from "../../shared/email.ts"
 import { formatMoney } from "../../shared/money.ts"
 import { getCompany } from "../company/company.service.ts"
 
@@ -11,7 +11,6 @@ type HttpError = Error & { status?: number; code?: string }
 const fail = (message: string, status: number, code?: string): HttpError => Object.assign(new Error(message), { status, ...(code && { code }) })
 
 const TYPE_LABEL = { TICKET: "Tiquete electrónico", INVOICE: "Factura electrónica", CREDIT_NOTE: "Nota de crédito electrónica", DEBIT_NOTE: "Nota de débito electrónica" } as const
-const validEmail = (s: string | null | undefined) => !!s && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim())
 
 // Envía el comprobante aceptado al correo del cliente. manual = lo pidió alguien (errores como 409).
 export async function emailDocument(documentId: string, manual = false) {
@@ -58,7 +57,7 @@ export async function emailDocument(documentId: string, manual = false) {
     ...(e.responseXml ? [{ filename: `${e.clave}-respuesta-hacienda.xml`, content: Buffer.from(e.responseXml, "utf8").toString("base64") }] : []),
   ]
   try {
-    await sendEmail({ to: to!, subject: `${title} ${doc.consecutive} · ${issuer}`, html, attachments })
+    await sendEmail({ to: to!, subject: `${title} ${doc.consecutive} · ${issuer}`, html, attachments, senderName: company.name, replyTo: company.invoiceEmail })
   } catch (err) {
     return note(`No se pudo enviar el correo: ${(err as Error).message}`.slice(0, 500))
   }
