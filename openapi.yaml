@@ -895,6 +895,44 @@ paths:
         '200': { description: La suscripción actualizada (mismo formato que el GET) }
         '403': { description: BILLING_OWNER_ONLY o BILLING_DEMO }
         '409': { description: BILLING_PAID_CHANGE (con periodo pagado el cambio es la fase C5) }
+  /billing/card-setup:
+    get:
+      tags: [Billing]
+      summary: Llave pública de ONVO y cliente de ONVO de la cuenta (se crea la primera vez). Solo el dueño.
+      description: El navegador registra la tarjeta DIRECTO en ONVO (POST https://api.onvopay.com/v1/payment-methods con esa llave y customerId); a Cubivo solo llega el id.
+      responses:
+        '200': { description: "{ publishableKey, customerId }" }
+        '403': { description: BILLING_OWNER_ONLY o BILLING_DEMO }
+        '409': { description: BILLING_DISABLED o BILLING_EXEMPT }
+        '503': { description: ONVO_NOT_CONFIGURED }
+  /billing/pay:
+    post:
+      tags: [Billing]
+      summary: Cobra el plan y periodo elegidos con la tarjeta registrada (o la guardada si no se manda id)
+      description: |
+        La tarjeta debe pertenecer al cliente de ONVO de la cuenta (403 BILLING_CARD_OWNER). Monto = precio mensual o
+        anual × 12 (colones con IVA; a ONVO va en céntimos). Aprobado → el periodo se suma desde el fin de lo pagado o de la
+        prueba que queda. Si el banco pide 3DS devuelve redirectUrl; al volver a /subscription?payment=<id> se llama a sync.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { paymentMethodId: { type: string } } }
+      responses:
+        '201': { description: "{ payment: { id, status: PENDING|SUCCEEDED|FAILED, amount, plan, interval, cardBrand, cardLast4, periodStart, periodEnd, failureMessage }, redirectUrl? }" }
+        '409': { description: BILLING_PAYMENT_PENDING (hay uno esperando la verificación del banco) }
+  /billing/payments/{id}/sync:
+    post:
+      tags: [Billing]
+      summary: Consulta a ONVO cómo terminó un pago pendiente (vuelta del 3DS) y aplica el periodo una sola vez
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: El pago }
+  /billing/payments:
+    get:
+      tags: [Billing]
+      summary: Historial de pagos de la suscripción (últimos 50). Solo el dueño.
+      responses:
+        '200': { description: Lista de pagos }
   /auth/registration:
     get:
       tags: [Auth]

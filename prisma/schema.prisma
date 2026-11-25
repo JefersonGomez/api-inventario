@@ -402,15 +402,52 @@ enum BillingInterval {
 // Suscripción de la cuenta del dueño (fase de cobro, C1). El plan sigue en User.plan; acá van las fechas.
 // El estado (prueba, al día, gracia, vencida) se CALCULA con ellas: src/modules/billing/billing.state.ts
 model Subscription {
-  id          String          @id @default(uuid())
-  userId      String          @unique
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  interval    BillingInterval @default(MONTHLY)
-  trialEndsAt DateTime // fin de la prueba gratis del plan elegido
-  paidUntil   DateTime? // fin del último periodo pagado (lo llena el cobro, C2)
-  exempt      Boolean         @default(false) // cuenta interna: nunca vence (la demo se exime sola por isDemo)
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id              String                @id @default(uuid())
+  userId          String                @unique
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interval        BillingInterval       @default(MONTHLY)
+  trialEndsAt     DateTime // fin de la prueba gratis del plan elegido
+  paidUntil       DateTime? // fin del último periodo pagado (lo llena el cobro, C2)
+  exempt          Boolean               @default(false) // cuenta interna: nunca vence (la demo se exime sola por isDemo)
+  // ONVO (C2): cliente y tarjeta guardada para renovar (C4). La tarjeta la registra el navegador con la llave
+  // pública directo en ONVO: acá solo quedan el id y lo que se muestra (marca y últimos 4).
+  onvoCustomerId  String?
+  paymentMethodId String?
+  cardBrand       String?
+  cardLast4       String?
+  payments        SubscriptionPayment[]
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING // creado o esperando la verificación del banco (3DS)
+  SUCCEEDED
+  FAILED
+}
+
+// Cada cobro de la suscripción (C2). El periodo se aplica UNA sola vez, al pasar a SUCCEEDED.
+model SubscriptionPayment {
+  id              String                    @id @default(uuid())
+  subscriptionId  String
+  subscription    Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  onvoIntentId    String?                   @unique
+  method          String                    @default("CARD") // CARD (C2) | SINPE (C3)
+  plan            PlanCode
+  interval        BillingInterval
+  amount          Int // colones con IVA
+  status          SubscriptionPaymentStatus @default(PENDING)
+  failureMessage  String?
+  paymentMethodId String? // tarjeta con la que se cobró: pasa a ser la de renovar al confirmarse
+  cardBrand       String?
+  cardLast4       String?
+  periodStart     DateTime? // lo que cubre (se llena al confirmarse)
+  periodEnd       DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@index([subscriptionId, createdAt])
 }
 
 // Empresa (tenant). Todo dato de negocio pertenece a una; los usuarios entran por Membership.

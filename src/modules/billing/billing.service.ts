@@ -6,6 +6,7 @@ import { BILLING, PRICES } from "../../config/plans.ts";
 import type { BillingInterval, PlanCode } from "../../generated/prisma/enums.ts";
 import { logAudit } from "../audit/audit.service.ts";
 import { subscriptionState, trialEnd, type SubscriptionDates } from "./billing.state.ts";
+import { onvoConfigured } from "./onvo.client.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (message: string, status: number, code: string): HttpError => Object.assign(new Error(message), { status, code });
@@ -41,7 +42,16 @@ export async function getSubscription(companyId: string, viewerId: string) {
   };
   if (!base.enabled) return base;
   const sub = owner.isDemo ? { ...DEMO, interval: "MONTHLY" as BillingInterval } : owner.subscription ?? (await ensureSubscription(ownerId));
-  return { ...base, interval: sub.interval, trialEndsAt: sub.trialEndsAt, paidUntil: sub.paidUntil, ...subscriptionState(sub) };
+  const card = "cardLast4" in sub && sub.cardLast4 ? { brand: sub.cardBrand, last4: sub.cardLast4 } : null;
+  return {
+    ...base,
+    interval: sub.interval,
+    trialEndsAt: sub.trialEndsAt,
+    paidUntil: sub.paidUntil,
+    ...subscriptionState(sub),
+    cardPayments: onvoConfigured(), // el servidor tiene las llaves de ONVO (C2)
+    card, // tarjeta guardada para renovar (solo marca y últimos 4)
+  };
 }
 
 // El dueño elige plan y periodo (mensual / anual) mientras no tenga un periodo pagado vigente.

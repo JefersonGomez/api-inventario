@@ -1,4 +1,5 @@
-// Fase de cobro C1: prueba gratis, elegir plan y periodo, días de gracia y solo lectura al vencer
+// Fase de cobro C1: prueba gratis, elegir plan y periodo, días de gracia y solo lectura al vencer. C2: pago con tarjeta
+import { jest } from "@jest/globals"
 import request from "supertest"
 import app from "../../app.ts"
 import { prismaRoot as prisma } from "../../config/database.ts"
@@ -114,5 +115,144 @@ describe("suscripción de la cuenta", () => {
     const internal = await createUser("ADMIN")
     await prisma.subscription.create({ data: { userId: internal.user.id, trialEndsAt: ago(100), exempt: true } })
     expect((await request(app).post("/categories").set(internal.auth).send({ name: "Interna" })).status).toBe(201)
+  })
+})
+
+// Pago con tarjeta (C2): ONVO simulado (las respuestas imitan las reales del modo prueba del 25-nov-2026)
+describe("pago con tarjeta (ONVO)", () => {
+  type Call = { method: string; url: string; body: Record<string, unknown> | null }
+  let calls: Call[] = []
+  // cómo responde ONVO al confirmar
+  let confirmAs: "ok" | "3ds" | "declined" = "ok"
+  let pmCustomer = "cus_1"
+  let n = 0
+
+  beforeEach(async () => {
+    await resetDb()
+    calls = []
+    confirmAs = "ok"
+    pmCustomer = "cus_1"
+    process.env.BILLING_ENABLED = "1"
+    process.env.ONVO_SECRET_KEY = "onvo_test_secret_key_x"
+    process.env.ONVO_PUBLISHABLE_KEY = "onvo_test_publishable_key_x"
+    jest.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method ?? "GET"
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null
+      calls.push({ method, url, body })
+      const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status })
+      const card = { id: "pm_1", customerId: pmCustomer, status: "active", card: { brand: "Visa", last4: "4242" } }
+      if (url.endsWith("/v1/customers")) return json({ id: "cus_1" }, 201)
+      if (url.includes("/v1/payment-methods/")) return json(card)
+      if (method === "POST" && url.endsWith("/v1/payment-intents")) return json({ id: `pi_${++n}`, status: "requires_payment_method", amount: body!.amount }, 201)
+      if (url.endsWith("/confirm")) {
+        const id = url.split("/").at(-2)
+        if (confirmAs === "ok") return json({ id, status: "succeeded", paymentMethod: card }, 201)
+        if (confirmAs === "3ds") return json({ id, status: "requires_action", nextAction: { type: "redirect_to_url", redirectToUrl: { url: "https://checkout.onvopay.com/authorize/test_x" } } }, 201)
+        return json({ id, status: "requires_payment_method", lastPaymentError: { code: "card_declined", message: "Tarjeta rechazada" } }, 201)
+      }
+      if (url.includes("/v1/payment-intents/")) return json({ id: url.split("/").at(-1), status: "succeeded", paymentMethod: card })
+      return json({ message: "no simulado" }, 404)
+    })
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+    delete process.env.ONVO_SECRET_KEY
+    delete process.env.ONVO_PUBLISHABLE_KEY
+    delete process.env.BILLING_ENABLED
+  })
+
+  async function owner() {
+    const admin = await createUser("ADMIN")
+    await prisma.subscription.create({ data: { userId: admin.user.id, trialEndsAt: inDays(5) } })
+    return admin
+  }
+
+  it("registra la tarjeta, cobra el plan y la cuenta queda al día sin perder los días de prueba", async () => {
+    const admin = await owner()
+    const setup = await request(app).get("/billing/card-setup").set(admin.auth)
+    expect(setup.body).toEqual({ publishableKey: "onvo_test_publishable_key_x", customerId: "cus_1" })
+    // la segunda vez no crea otro cliente en ONVO
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    expect(calls.filter((c) => c.url.endsWith("/v1/customers"))).toHaveLength(1)
+
+    const paid = await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })
+    expect(paid.status).toBe(201)
+    expect(paid.body.payment).toMatchObject({ status: "SUCCEEDED", amount: 14900, plan: "BASIC", interval: "MONTHLY", cardLast4: "4242" })
+    expect(paid.body.redirectUrl).toBeUndefined()
+    // a ONVO va en céntimos, en colones, con el cliente de la cuenta, y vuelve a /subscription
+    const intent = calls.find((c) => c.method === "POST" && c.url.endsWith("/v1/payment-intents"))!
+    expect(intent.body).toMatchObject({ amount: 1490000, currency: "CRC", customerId: "cus_1" })
+    expect(String(calls.find((c) => c.url.endsWith("/confirm"))!.body!.returnUrl)).toMatch(/\/subscription\?payment=/)
+
+    const sub = await request(app).get("/billing/subscription").set(admin.auth)
+    expect(sub.body).toMatchObject({ state: "active", card: { brand: "Visa", last4: "4242" }, cardPayments: true })
+    // el mes empieza cuando termina la prueba (quedaban 5 días)
+    expect(new Date(sub.body.paidUntil).getTime()).toBeGreaterThan(inDays(5 + 27).getTime())
+    expect((await request(app).get("/billing/payments").set(admin.auth)).body).toHaveLength(1)
+
+    // el mes siguiente: sin mandar tarjeta se cobra a la guardada
+    const again = await request(app).post("/billing/pay").set(admin.auth).send({})
+    expect(again.body.payment).toMatchObject({ status: "SUCCEEDED", cardLast4: "4242" })
+    expect(calls.filter((c) => c.url.endsWith("/confirm")).at(-1)!.body!.paymentMethodId).toBe("pm_1")
+  })
+
+  it("anual cobra los 12 meses con el precio anual", async () => {
+    const admin = await owner()
+    await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "PRO", interval: "ANNUAL" })
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    const paid = await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })
+    expect(paid.body.payment).toMatchObject({ status: "SUCCEEDED", amount: 24900 * 12, plan: "PRO", interval: "ANNUAL" })
+    const sub = await prisma.subscription.findUniqueOrThrow({ where: { userId: admin.user.id } })
+    expect(sub.paidUntil!.getTime()).toBeGreaterThan(inDays(5 + 360).getTime())
+  })
+
+  it("si el banco pide verificar (3DS): devuelve la URL y al volver se confirma una sola vez", async () => {
+    const admin = await owner()
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    confirmAs = "3ds"
+    const res = await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })
+    expect(res.body).toMatchObject({ payment: { status: "PENDING" }, redirectUrl: "https://checkout.onvopay.com/authorize/test_x" })
+    // la tarjeta para renovar cambia solo cuando el banco confirma
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body.card).toBeNull()
+    // mientras tanto no deja empezar otro cobro
+    expect((await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })).body.code).toBe("BILLING_PAYMENT_PENDING")
+
+    const id = res.body.payment.id
+    expect((await request(app).post(`/billing/payments/${id}/sync`).set(admin.auth)).body).toMatchObject({ status: "SUCCEEDED" })
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body.card).toEqual({ brand: "Visa", last4: "4242" })
+    const until = (await prisma.subscription.findUniqueOrThrow({ where: { userId: admin.user.id } })).paidUntil
+    // volver a sincronizar no suma otro mes
+    await request(app).post(`/billing/payments/${id}/sync`).set(admin.auth)
+    expect((await prisma.subscription.findUniqueOrThrow({ where: { userId: admin.user.id } })).paidUntil).toEqual(until)
+  })
+
+  it("tarjeta rechazada: el pago queda fallido con el motivo y la cuenta sigue igual", async () => {
+    const admin = await owner()
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    confirmAs = "declined"
+    const res = await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })
+    expect(res.body.payment).toMatchObject({ status: "FAILED", failureMessage: expect.stringMatching(/rechazó/) })
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body).toMatchObject({ state: "trial", card: null })
+  })
+
+  it("no se puede pagar con una tarjeta de otra cuenta, ni si no es el dueño", async () => {
+    const admin = await owner()
+    const cashier = await createUser("CASHIER", admin.companyId)
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    pmCustomer = "cus_de_otro"
+    expect((await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })).body.code).toBe("BILLING_CARD_OWNER")
+    expect(calls.some((c) => c.url.endsWith("/v1/payment-intents"))).toBe(false)
+    expect((await request(app).get("/billing/card-setup").set(cashier.auth)).body.code).toBe("BILLING_OWNER_ONLY")
+    expect((await request(app).get("/billing/payments").set(cashier.auth)).status).toBe(403)
+  })
+
+  it("una cuenta vencida (solo lectura) puede pagar y vuelve a funcionar", async () => {
+    const admin = await createUser("ADMIN")
+    await prisma.subscription.create({ data: { userId: admin.user.id, trialEndsAt: ago(10) } })
+    expect((await request(app).post("/categories").set(admin.auth).send({ name: "X" })).status).toBe(402)
+    await request(app).get("/billing/card-setup").set(admin.auth)
+    expect((await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })).body.payment.status).toBe("SUCCEEDED")
+    expect((await request(app).post("/categories").set(admin.auth).send({ name: "X" })).status).toBe(201)
   })
 })
