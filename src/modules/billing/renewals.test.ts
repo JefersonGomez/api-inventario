@@ -182,3 +182,18 @@ it("la demo y las cuentas internas no se cobran ni reciben avisos", async () => 
 function HOURS(h: number) {
   return h * 60 * 60 * 1000
 }
+
+it("C5: cancelada no se cobra ni recibe recordatorio; con un cambio programado la renovación cobra el plan nuevo", async () => {
+  const cancelled = await paidOwner(new Date(Date.now() + HOURS(2)))
+  await prisma.subscription.update({ where: { id: cancelled.sub.id }, data: { cancelAtPeriodEnd: true } })
+  const downgrade = await paidOwner(new Date(Date.now() + HOURS(2)))
+  await prisma.user.update({ where: { id: downgrade.admin.user.id }, data: { plan: "PRO" } })
+  await prisma.subscription.update({ where: { id: downgrade.sub.id }, data: { nextPlan: "BASIC" } })
+  await processBilling()
+  expect(await prisma.subscriptionPayment.count({ where: { subscriptionId: cancelled.sub.id } })).toBe(0)
+  const p = await prisma.subscriptionPayment.findFirstOrThrow({ where: { subscriptionId: downgrade.sub.id } })
+  expect(p).toMatchObject({ plan: "BASIC", amount: 14900, status: "SUCCEEDED" })
+  expect((await prisma.user.findUniqueOrThrow({ where: { id: downgrade.admin.user.id } })).plan).toBe("BASIC")
+  expect((await subOf(downgrade.sub.id)).nextPlan).toBeNull()
+})
+

@@ -402,23 +402,33 @@ enum BillingInterval {
 // Suscripción de la cuenta del dueño (fase de cobro, C1). El plan sigue en User.plan; acá van las fechas.
 // El estado (prueba, al día, gracia, vencida) se CALCULA con ellas: src/modules/billing/billing.state.ts
 model Subscription {
-  id              String                @id @default(uuid())
-  userId          String                @unique
-  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  interval        BillingInterval       @default(MONTHLY)
-  trialEndsAt     DateTime // fin de la prueba gratis del plan elegido
-  paidUntil       DateTime? // fin del último periodo pagado (lo llena el cobro, C2)
-  exempt          Boolean               @default(false) // cuenta interna: nunca vence (la demo se exime sola por isDemo)
+  id                String                @id @default(uuid())
+  userId            String                @unique
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interval          BillingInterval       @default(MONTHLY)
+  trialEndsAt       DateTime // fin de la prueba gratis del plan elegido
+  paidUntil         DateTime? // fin del último periodo pagado (lo llena el cobro, C2)
+  exempt            Boolean               @default(false) // cuenta interna: nunca vence (la demo se exime sola por isDemo)
   // ONVO (C2): cliente y tarjeta guardada para renovar (C4). La tarjeta la registra el navegador con la llave
   // pública directo en ONVO: acá solo quedan el id y lo que se muestra (marca y últimos 4).
-  onvoCustomerId  String?
-  paymentMethodId String?
-  cardBrand       String?
-  cardLast4       String?
-  payments        SubscriptionPayment[]
-  notices         BillingNotice[]
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  onvoCustomerId    String?
+  paymentMethodId   String?
+  cardBrand         String?
+  cardLast4         String?
+  // C5: cambios que esperan al próximo periodo (bajar de plan o cambiar mensual/anual con un periodo pagado)
+  // y cancelación (no se renueva; al vencer sigue la gracia y luego solo lectura)
+  nextPlan          PlanCode?
+  nextInterval      BillingInterval?
+  cancelAtPeriodEnd Boolean               @default(false)
+  payments          SubscriptionPayment[]
+  notices           BillingNotice[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+}
+
+enum SubscriptionPaymentKind {
+  PERIOD
+  UPGRADE
 }
 
 enum SubscriptionPaymentStatus {
@@ -442,6 +452,7 @@ model SubscriptionPayment {
   paymentMethodId     String? // tarjeta con la que se cobró: pasa a ser la de renovar al confirmarse
   sinpeIdentification String? // SINPE (C3): identificación de quien transfiere, con el formato de ONVO
   automatic           Boolean                   @default(false) // C4: cobro automático de la renovación (no lo inició el dueño)
+  kind                SubscriptionPaymentKind   @default(PERIOD) // C5: PERIOD suma un periodo; UPGRADE paga la diferencia al subir de plan
   cardBrand           String?
   cardLast4           String?
   periodStart         DateTime? // lo que cubre (se llena al confirmarse)

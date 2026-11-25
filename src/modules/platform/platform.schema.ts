@@ -14,3 +14,9 @@ export const aiBudgetSchema = z.object({
   alertPercent: z.number().int().min(1).max(100),
 });
 export const aiUsageQuerySchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() });
+
+// Suscripciones (C5): regalar días y marcar cuenta interna
+export const adminSubscriptionSchema = z
+  .object({ extendDays: z.number().int().min(1).max(365).optional(), exempt: z.boolean().optional() })
+  .strict()
+  .refine((b) => b.extendDays !== undefined || b.exempt !== undefined, { message: "Indica los días o si es cuenta interna" });

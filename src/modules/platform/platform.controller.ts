@@ -1,6 +1,7 @@
 // platform.controller.ts
 import type { Request, Response } from "express";
 import * as service from "./platform.service.ts";
+import { adminUpdateSubscription, listSubscriptions } from "../billing/platform-billing.service.ts";
 
 export async function listCompaniesHandler(_req: Request, res: Response) {
   try {
@@ -70,5 +71,23 @@ export async function einvoiceIssuesHandler(_req: Request, res: Response) {
     res.json(await service.einvoiceIssues());
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+// Suscripciones de todas las cuentas (C5)
+export async function listSubscriptionsHandler(_req: Request, res: Response) {
+  try {
+    res.json(await listSubscriptions());
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+}
+
+export async function adminSubscriptionHandler(req: Request, res: Response) {
+  try {
+    await adminUpdateSubscription(String(req.params.userId), req.body, req.user!.id);
+    res.status(204).send();
+  } catch (error) {
+    res.status((error as { status?: number }).status ?? 400).json({ error: (error as Error).message });
   }
 }

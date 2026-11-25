@@ -83,6 +83,7 @@ async function chargeDueCards(now: Date) {
   const due = await prisma.subscription.findMany({
     where: {
       exempt: false,
+      cancelAtPeriodEnd: false,
       paymentMethodId: { not: null },
       onvoCustomerId: { not: null },
       // vence en las próximas 6 horas o ya venció, pero todavía dentro de la gracia
@@ -105,11 +106,13 @@ async function chargeDueCards(now: Date) {
       const anyPending = await prisma.subscriptionPayment.count({ where: { subscriptionId: sub.id, status: "PENDING" } });
       if (anyPending) return;
 
-      const plan = sub.user.plan;
-      const amount = amountFor(plan, sub.interval);
+      // lo programado (bajar de plan o cambiar de periodo) rige desde esta renovación
+      const plan = sub.nextPlan ?? sub.user.plan;
+      const interval = sub.nextInterval ?? sub.interval;
+      const amount = amountFor(plan, interval);
       const payment = await prisma.subscriptionPayment.create({
         data: {
-          subscriptionId: sub.id, method: "CARD", automatic: true, plan, interval: sub.interval, amount,
+          subscriptionId: sub.id, method: "CARD", automatic: true, plan, interval, amount,
           paymentMethodId: sub.paymentMethodId, cardBrand: sub.cardBrand, cardLast4: sub.cardLast4,
         },
       });
@@ -118,8 +121,8 @@ async function chargeDueCards(now: Date) {
         const intent = await onvo.createIntent({
           amount: amount * 100,
           customerId: sub.onvoCustomerId!,
-          description: `Cubivo plan ${plan} ${sub.interval === "ANNUAL" ? "anual" : "mensual"} (renovación)`,
-          metadata: { paymentId: payment.id, userId: sub.userId, plan, interval: sub.interval, automatic: "1" },
+          description: `Cubivo plan ${plan} ${interval === "ANNUAL" ? "anual" : "mensual"} (renovación)`,
+          metadata: { paymentId: payment.id, userId: sub.userId, plan, interval, automatic: "1" },
         });
         await prisma.subscriptionPayment.update({ where: { id: payment.id }, data: { onvoIntentId: intent.id } });
         const confirmed = await onvo.confirmIntent(intent.id, {
@@ -165,9 +168,10 @@ async function sendNotices(now: Date) {
         await notifyOnce(sub.id, `trial-ending:${iso(endsAt)}`, () => mail.trialEndingEmail(sub.user, sub.user.plan, endsAt));
       }
       // sin tarjeta guardada (paga por SINPE): recordatorio 3 días antes de vencer el periodo pagado
-      if (state === "active" && sub.paidUntil && !sub.paymentMethodId && endsAt) {
-        const amount = amountFor(sub.user.plan, sub.interval);
-        await notifyOnce(sub.id, `renew-reminder:${iso(endsAt)}`, () => mail.renewalReminderEmail(sub.user, sub.user.plan, amount, endsAt));
+      if (state === "active" && sub.paidUntil && !sub.paymentMethodId && !sub.cancelAtPeriodEnd && endsAt) {
+        const plan = sub.nextPlan ?? sub.user.plan;
+        const amount = amountFor(plan, sub.nextInterval ?? sub.interval);
+        await notifyOnce(sub.id, `renew-reminder:${iso(endsAt)}`, () => mail.renewalReminderEmail(sub.user, plan, amount, endsAt));
       }
       if (state === "expired" && endsAt) {
         await notifyOnce(sub.id, `expired:${iso(endsAt)}`, () => mail.expiredEmail(sub.user));

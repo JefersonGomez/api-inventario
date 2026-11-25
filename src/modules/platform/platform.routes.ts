@@ -3,9 +3,9 @@ import { Router } from "express";
 import { Authenticated, PlatformOwner } from "../../middlewares/authenticate.middleware.ts";
 import { validate } from "../../middlewares/validate.middleware.ts";
 import { validateQuery } from "../../middlewares/validate.middleware.ts";
-import { aiBudgetSchema, aiUsageQuerySchema, setPlanSchema, setSuspendedSchema } from "./platform.schema.ts";
+import { adminSubscriptionSchema, aiBudgetSchema, aiUsageQuerySchema, setPlanSchema, setSuspendedSchema } from "./platform.schema.ts";
 import {
-  aiUsageHandler, einvoiceIssuesHandler, listCompaniesHandler, overviewHandler, ownerActionsHandler, setAiBudgetHandler, setPlanHandler, setSuspendedHandler,
+  adminSubscriptionHandler, aiUsageHandler, einvoiceIssuesHandler, listSubscriptionsHandler, listCompaniesHandler, overviewHandler, ownerActionsHandler, setAiBudgetHandler, setPlanHandler, setSuspendedHandler,
 } from "./platform.controller.ts";
 
 export const platformRouter = Router();
@@ -18,3 +18,5 @@ platformRouter.get("/ai-usage", validateQuery(aiUsageQuerySchema), Authenticated
 platformRouter.put("/ai-budget", validate(aiBudgetSchema), Authenticated, PlatformOwner, setAiBudgetHandler);
 platformRouter.get("/actions", Authenticated, PlatformOwner, ownerActionsHandler);
 platformRouter.get("/einvoice-issues", Authenticated, PlatformOwner, einvoiceIssuesHandler);
+platformRouter.get("/subscriptions", Authenticated, PlatformOwner, listSubscriptionsHandler);
+platformRouter.patch("/subscriptions/:userId", validate(adminSubscriptionSchema), Authenticated, PlatformOwner, adminSubscriptionHandler);

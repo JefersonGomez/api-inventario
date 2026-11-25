@@ -908,7 +908,7 @@ paths:
   /billing/pay:
     post:
       tags: [Billing]
-      summary: Cobra el plan y periodo elegidos con la tarjeta registrada (o la guardada si no se manda id)
+      summary: Cobra el plan y periodo elegidos (o lo programado al renovar) con la tarjeta registrada o la guardada; con upgradeTo cobra la diferencia para subir de plan (C5)
       description: |
         La tarjeta debe pertenecer al cliente de ONVO de la cuenta (403 BILLING_CARD_OWNER). Monto = precio mensual o
         anual × 12 (colones con IVA; a ONVO va en céntimos). Aprobado → el periodo se suma desde el fin de lo pagado o de la
@@ -942,6 +942,33 @@ paths:
         '201': { description: "{ payment } con sinpe { to, amount, identification }" }
         '400': { description: BILLING_SINPE_ID o BILLING_SINPE_PHONE }
         '409': { description: BILLING_PAYMENT_PENDING }
+  /billing/cancel:
+    put:
+      tags: [Billing]
+      summary: "C5: cancelar ({ cancel: true }) o reactivar la renovación. Solo con un periodo pagado; sigue hasta el fin de lo pagado"
+      responses:
+        '200': { description: La suscripción (cancelAtPeriodEnd) }
+        '409': { description: BILLING_NOT_ACTIVE }
+  /billing/upgrade-quote:
+    get:
+      tags: [Billing]
+      summary: "C5: cuánto cuesta subir a un plan ahora (diferencia proporcional a los días que quedan; < ₡300 = 0)"
+      parameters: [{ name: plan, in: query, required: true, schema: { type: string, enum: [INVOICING, BASIC, PRO, BUSINESS] } }]
+      responses:
+        '200': { description: "{ plan, amount, until }" }
+  /platform/subscriptions:
+    get:
+      tags: [Plataforma]
+      summary: "C5: suscripciones de todas las cuentas, totales (ingreso mensual, cobrado este mes, por estado) y últimos 30 pagos"
+      responses:
+        '200': { description: "{ enabled, totals, subscriptions, payments }" }
+  /platform/subscriptions/{userId}:
+    patch:
+      tags: [Plataforma]
+      summary: "C5 soporte: regalar días ({ extendDays }) a la prueba o al periodo pagado, y marcar cuenta interna ({ exempt })"
+      parameters: [{ name: userId, in: path, required: true, schema: { type: string } }]
+      responses:
+        '204': { description: Hecho }
   /billing/payments/{id}/sync:
     post:
       tags: [Billing]

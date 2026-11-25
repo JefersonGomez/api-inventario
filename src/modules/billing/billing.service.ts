@@ -7,6 +7,7 @@ import type { BillingInterval, PlanCode } from "../../generated/prisma/enums.ts"
 import { logAudit } from "../audit/audit.service.ts";
 import { subscriptionState, trialEnd, type SubscriptionDates } from "./billing.state.ts";
 import { onvoConfigured } from "./onvo.client.ts";
+import { PLAN_RANK, upgradeQuote } from "./payments.service.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (message: string, status: number, code: string): HttpError => Object.assign(new Error(message), { status, code });
@@ -50,6 +51,9 @@ export async function getSubscription(companyId: string, viewerId: string) {
     paidUntil: sub.paidUntil,
     ...subscriptionState(sub),
     cardPayments: onvoConfigured(), // el servidor tiene las llaves de ONVO (C2)
+    nextPlan: "nextPlan" in sub ? sub.nextPlan : null, // C5: cambios que rigen al renovar
+    nextInterval: "nextInterval" in sub ? sub.nextInterval : null,
+    cancelAtPeriodEnd: "cancelAtPeriodEnd" in sub ? sub.cancelAtPeriodEnd : false,
     card, // tarjeta guardada para renovar (solo marca y últimos 4)
   };
 }
@@ -64,11 +68,51 @@ export async function updateSubscription(companyId: string, viewerId: string, in
   if (ownerId !== viewerId) throw fail("Solo el dueño de la cuenta puede cambiar el plan", 403, "BILLING_OWNER_ONLY");
   if (owner.isDemo) throw fail("La demo no cambia de plan", 403, "BILLING_DEMO");
   const sub = owner.subscription ?? (await ensureSubscription(ownerId));
+  if (sub.exempt) throw fail("Esta cuenta no cambia de plan", 409, "BILLING_EXEMPT");
   if (subscriptionState(sub).state === "active") {
-    throw fail("Ya tienes un periodo pagado: el cambio de plan con pago llega pronto. Escríbenos a hola@cubivo.org", 409, "BILLING_PAID_CHANGE");
+    // con un periodo pagado (C5): subir se paga ya (la diferencia); bajar o cambiar el periodo rige al renovar
+    const current = (await prisma.user.findUniqueOrThrow({ where: { id: ownerId }, select: { plan: true } })).plan;
+    if (input.plan && PLAN_RANK[input.plan] > PLAN_RANK[current]) {
+      const amount = await upgradeQuote(sub, current, input.plan);
+      if (amount > 0) throw Object.assign(fail("Subir de plan se paga: la diferencia por los días que quedan", 409, "BILLING_UPGRADE_PAYMENT"), { amount });
+      await prisma.user.update({ where: { id: ownerId }, data: { plan: input.plan } });
+      await prisma.subscription.update({ where: { id: sub.id }, data: { nextPlan: null } });
+    } else if (input.plan) {
+      await prisma.subscription.update({ where: { id: sub.id }, data: { nextPlan: input.plan === current ? null : input.plan } });
+    }
+    if (input.interval) await prisma.subscription.update({ where: { id: sub.id }, data: { nextInterval: input.interval === sub.interval ? null : input.interval } });
+    await logAudit(viewerId, "UPDATE", "Subscription", sub.id, { ...input, scheduled: true });
+    return getSubscription(companyId, viewerId);
   }
   if (input.plan) await prisma.user.update({ where: { id: ownerId }, data: { plan: input.plan } });
   if (input.interval) await prisma.subscription.update({ where: { userId: ownerId }, data: { interval: input.interval } });
   await logAudit(viewerId, "UPDATE", "Subscription", sub.id, { ...input });
   return getSubscription(companyId, viewerId);
+}
+
+// Cancelar (no se renueva: sigue funcionando hasta el fin de lo pagado, luego gracia y solo lectura) o reactivar
+export async function setCancellation(companyId: string, viewerId: string, cancel: boolean) {
+  const { ownerId, owner } = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    select: { ownerId: true, owner: { select: { isDemo: true } } },
+  });
+  if (ownerId !== viewerId) throw fail("Solo el dueño de la cuenta puede cancelar", 403, "BILLING_OWNER_ONLY");
+  if (owner.isDemo) throw fail("La demo no se cancela", 403, "BILLING_DEMO");
+  const sub = await ensureSubscription(ownerId);
+  if (subscriptionState(sub).state !== "active") throw fail("Solo se cancela un plan pagado", 409, "BILLING_NOT_ACTIVE");
+  await prisma.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: cancel } });
+  await logAudit(viewerId, "UPDATE", "Subscription", sub.id, { cancelAtPeriodEnd: cancel });
+  return getSubscription(companyId, viewerId);
+}
+
+// Cuánto cuesta subir a un plan ahora (la diferencia por los días que quedan del periodo pagado)
+export async function quoteUpgrade(companyId: string, viewerId: string, plan: PlanCode) {
+  const { ownerId, owner } = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    select: { ownerId: true, owner: { select: { plan: true } } },
+  });
+  if (ownerId !== viewerId) throw fail("Solo el dueño de la cuenta", 403, "BILLING_OWNER_ONLY");
+  const sub = await ensureSubscription(ownerId);
+  if (PLAN_RANK[plan] <= PLAN_RANK[owner.plan]) throw fail("Ese plan no es superior al actual", 400, "BILLING_NOT_UPGRADE");
+  return { plan, amount: await upgradeQuote(sub, owner.plan, plan), until: sub.paidUntil };
 }

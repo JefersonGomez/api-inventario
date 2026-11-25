@@ -76,9 +76,9 @@ describe("suscripción de la cuenta", () => {
     expect((await request(app).get("/billing/subscription").set(cashier.auth)).body).toMatchObject({ isOwner: false, plan: "PRO", state: "trial" })
     expect((await request(app).put("/billing/subscription").set(cashier.auth).send({ plan: "BASIC" })).body.code).toBe("BILLING_OWNER_ONLY")
     expect((await request(app).put("/billing/subscription").set(admin.auth).send({})).status).toBe(400)
-    // con un periodo pagado vigente el cambio es de la fase C5
+    // con un periodo pagado vigente (C5): bajar de plan queda programado para la renovación
     await prisma.subscription.update({ where: { userId: admin.user.id }, data: { paidUntil: inDays(20) } })
-    expect((await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "BASIC" })).body.code).toBe("BILLING_PAID_CHANGE")
+    expect((await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "BASIC" })).body).toMatchObject({ plan: "PRO", nextPlan: "BASIC" })
   })
 
   it("al vencer: 3 días de gracia con todo funcionando, después solo lectura", async () => {
@@ -288,4 +288,87 @@ describe("pago con tarjeta (ONVO)", () => {
     const pm = calls.filter((c) => c.method === "POST" && c.url.endsWith("/v1/payment-methods")).at(-1)!
     expect(pm.body!.mobileNumber).toEqual({ identification: "3-101-123456", identificationType: 3, number: "+50670123456" })
   })
+
+  // ---- C5: cambios de plan y cancelación con un periodo pagado ----
+  async function paidOwner(plan: "BASIC" | "PRO" = "BASIC") {
+    const admin = await createUser("ADMIN")
+    await prisma.user.update({ where: { id: admin.user.id }, data: { plan } })
+    const start = new Date(Date.now() - 15 * DAY)
+    const end = new Date(Date.now() + 15 * DAY)
+    const sub = await prisma.subscription.create({
+      data: { userId: admin.user.id, trialEndsAt: new Date(Date.now() - 40 * DAY), paidUntil: end, onvoCustomerId: "cus_1", paymentMethodId: "pm_1", cardBrand: "Visa", cardLast4: "4242" },
+    })
+    // el periodo pagado: 30 días, van 15 (queda la mitad)
+    await prisma.subscriptionPayment.create({
+      data: { subscriptionId: sub.id, plan, interval: "MONTHLY", amount: 14900, status: "SUCCEEDED", periodStart: start, periodEnd: end, paidAt: start },
+    })
+    return admin
+  }
+
+  it("subir de plan con un periodo pagado cobra la diferencia por los días que quedan y rige ya", async () => {
+    const admin = await paidOwner("BASIC")
+    // directo no se puede: dice cuánto cuesta
+    const direct = await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "PRO" })
+    expect(direct.status).toBe(409)
+    expect(direct.body).toMatchObject({ code: "BILLING_UPGRADE_PAYMENT", amount: 7500 }) // (29 900 − 14 900) × ½
+    expect((await request(app).get("/billing/upgrade-quote?plan=PRO").set(admin.auth)).body).toMatchObject({ plan: "PRO", amount: 7500 })
+    expect((await request(app).get("/billing/upgrade-quote?plan=INVOICING").set(admin.auth)).body.code).toBe("BILLING_NOT_UPGRADE")
+
+    const before = (await prisma.subscription.findUniqueOrThrow({ where: { userId: admin.user.id } })).paidUntil
+    const paid = await request(app).post("/billing/pay").set(admin.auth).send({ upgradeTo: "PRO" })
+    expect(paid.body.payment).toMatchObject({ status: "SUCCEEDED", kind: "UPGRADE", plan: "PRO", amount: 7500 })
+    expect(calls.filter((c) => c.method === "POST" && c.url.endsWith("/v1/payment-intents")).at(-1)!.body).toMatchObject({ amount: 750000 })
+    // ya es Pro, y la fecha pagada no cambia
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body).toMatchObject({ plan: "PRO", state: "active" })
+    expect((await prisma.subscription.findUniqueOrThrow({ where: { userId: admin.user.id } })).paidUntil).toEqual(before)
+  })
+
+  it("bajar de plan o pasar a anual queda programado y la renovación cobra eso", async () => {
+    const admin = await paidOwner("PRO")
+    const res = await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "BASIC", interval: "ANNUAL" })
+    expect(res.body).toMatchObject({ plan: "PRO", interval: "MONTHLY", nextPlan: "BASIC", nextInterval: "ANNUAL" })
+    // volver a elegir el actual deshace lo programado
+    expect((await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "PRO" })).body.nextPlan).toBeNull()
+    await request(app).put("/billing/subscription").set(admin.auth).send({ plan: "BASIC" })
+    // pagar el próximo periodo cobra lo programado (Básico anual) y lo aplica
+    const paid = await request(app).post("/billing/pay").set(admin.auth).send({})
+    expect(paid.body.payment).toMatchObject({ kind: "PERIOD", plan: "BASIC", interval: "ANNUAL", amount: 12400 * 12 })
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body).toMatchObject({ plan: "BASIC", interval: "ANNUAL", nextPlan: null, nextInterval: null })
+  })
+
+  it("cancelar: sigue hasta el fin de lo pagado; reactivar lo deshace; pagar otro periodo también", async () => {
+    const admin = await paidOwner()
+    expect((await request(app).put("/billing/cancel").set(admin.auth).send({ cancel: true })).body).toMatchObject({ cancelAtPeriodEnd: true, state: "active" })
+    expect((await request(app).put("/billing/cancel").set(admin.auth).send({ cancel: false })).body.cancelAtPeriodEnd).toBe(false)
+    await request(app).put("/billing/cancel").set(admin.auth).send({ cancel: true })
+    await request(app).post("/billing/pay").set(admin.auth).send({})
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body.cancelAtPeriodEnd).toBe(false)
+    // en prueba gratis no hay nada que cancelar
+    const trial = await owner()
+    expect((await request(app).put("/billing/cancel").set(trial.auth).send({ cancel: true })).body.code).toBe("BILLING_NOT_ACTIVE")
+  })
+
+  it("panel de plataforma: ve todas las suscripciones, ingresos y pagos; regala días y marca cuenta interna", async () => {
+    const platform = await createUser("ADMIN")
+    await prisma.user.update({ where: { id: platform.user.id }, data: { isPlatformOwner: true } })
+    const paying = await paidOwner("PRO")
+    const trial = await owner()
+    const list = await request(app).get("/platform/subscriptions").set(platform.auth)
+    expect(list.status).toBe(200)
+    const row = (id: string) => list.body.subscriptions.find((s: { userId: string }) => s.userId === id)
+    expect(row(paying.user.id)).toMatchObject({ state: "active", plan: "PRO", method: "Visa ••4242" })
+    expect(row(trial.user.id)).toMatchObject({ state: "trial" })
+    expect(list.body.totals).toMatchObject({ mrr: 29900, active: 1, trial: 1 })
+    expect(list.body.payments.length).toBeGreaterThan(0)
+    // un cliente no entra
+    expect((await request(app).get("/platform/subscriptions").set(trial.auth)).status).toBe(403)
+
+    const before = (await prisma.subscription.findUniqueOrThrow({ where: { userId: trial.user.id } })).trialEndsAt
+    expect((await request(app).patch(`/platform/subscriptions/${trial.user.id}`).set(platform.auth).send({ extendDays: 7 })).status).toBe(204)
+    const after = (await prisma.subscription.findUniqueOrThrow({ where: { userId: trial.user.id } })).trialEndsAt
+    expect(Math.round((after.getTime() - before.getTime()) / DAY)).toBe(7)
+    await request(app).patch(`/platform/subscriptions/${paying.user.id}`).set(platform.auth).send({ exempt: true })
+    expect((await request(app).get("/billing/subscription").set(paying.auth)).body.state).toBe("exempt")
+  })
 })
+

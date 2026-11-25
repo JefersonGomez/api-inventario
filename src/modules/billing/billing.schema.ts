@@ -10,7 +10,13 @@ export const updateSubscriptionSchema = z
 
 // el navegador manda solo el id de la tarjeta que registró en ONVO (nunca los datos de la tarjeta);
 // sin id se cobra a la tarjeta guardada de la cuenta
-export const paySchema = z.object({ paymentMethodId: z.string().trim().min(3).max(100).regex(/^[A-Za-z0-9_-]+$/).optional() }).strict();
+const planCode = z.enum(["INVOICING", "BASIC", "PRO", "BUSINESS"]);
+export const paySchema = z
+  .object({
+    paymentMethodId: z.string().trim().min(3).max(100).regex(/^[A-Za-z0-9_-]+$/).optional(),
+    upgradeTo: planCode.optional(), // C5: pagar la diferencia para subir de plan
+  })
+  .strict();
 
 // pagar por SINPE Móvil: quién transfiere (la identificación de la cuenta que manda la plata) y desde qué teléfono
 export const paySinpeSchema = z
@@ -18,5 +24,9 @@ export const paySinpeSchema = z
     idType: z.enum(["FISICA", "DIMEX", "JURIDICA"]),
     idNumber: z.string().trim().min(9).max(20),
     phone: z.string().trim().min(8).max(20),
+    upgradeTo: planCode.optional(),
   })
   .strict();
+
+export const cancelSchema = z.object({ cancel: z.boolean() }).strict();
+export const upgradeQuoteSchema = z.object({ plan: planCode });

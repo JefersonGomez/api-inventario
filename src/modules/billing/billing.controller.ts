@@ -1,11 +1,12 @@
 import type { Request, Response } from "express";
-import { getSubscription, updateSubscription } from "./billing.service.ts";
+import { getSubscription, quoteUpgrade, setCancellation, updateSubscription } from "./billing.service.ts";
 import { cardSetup, listPayments, pay, paySinpe, syncPayment } from "./payments.service.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (res: Response, err: unknown) => {
   const e = err as HttpError;
-  res.status(e.status ?? 500).json({ error: e.message, ...(e.code && { code: e.code }) });
+  const amount = (e as { amount?: number }).amount;
+  res.status(e.status ?? 500).json({ error: e.message, ...(e.code && { code: e.code }), ...(amount !== undefined && { amount }) });
 };
 
 export async function getSubscriptionHandler(req: Request, res: Response) {
@@ -33,7 +34,9 @@ const handle = (fn: (req: Request) => Promise<unknown>, status = 200) => async (
 };
 
 export const cardSetupHandler = handle((req) => cardSetup(req.user!.companyId, req.user!.id));
-export const payHandler = handle((req) => pay(req.user!.companyId, req.user!.id, req.body?.paymentMethodId), 201);
+export const payHandler = handle((req) => pay(req.user!.companyId, req.user!.id, req.body?.paymentMethodId, req.body?.upgradeTo), 201);
 export const syncPaymentHandler = handle((req) => syncPayment(req.user!.companyId, req.user!.id, String(req.params.id)));
 export const listPaymentsHandler = handle((req) => listPayments(req.user!.companyId, req.user!.id));
 export const paySinpeHandler = handle((req) => paySinpe(req.user!.companyId, req.user!.id, req.body), 201);
+export const cancelHandler = handle((req) => setCancellation(req.user!.companyId, req.user!.id, req.body.cancel));
+export const upgradeQuoteHandler = handle((req) => quoteUpgrade(req.user!.companyId, req.user!.id, req.res!.locals.query.plan));

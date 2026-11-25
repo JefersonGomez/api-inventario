@@ -71,12 +71,57 @@ async function assertNoPending(subscriptionId: string) {
   );
 }
 
+// Orden de los planes por precio: subir = inmediato (se paga la diferencia); bajar = al próximo periodo
+export const PLAN_RANK: Record<PlanCode, number> = { INVOICING: 0, BASIC: 1, PRO: 2, BUSINESS: 3 };
+const MIN_CHARGE = 300; // ONVO no cobra menos de USD 0,50: una diferencia menor se regala
+
+// Diferencia proporcional por los días que le quedan al periodo pagado (C5)
+export async function upgradeQuote(sub: { id: string; paidUntil: Date | null; interval: BillingInterval }, from: PlanCode, to: PlanCode, now = new Date()) {
+  if (!sub.paidUntil || sub.paidUntil <= now) return 0;
+  const last = await prisma.subscriptionPayment.findFirst({
+    where: { subscriptionId: sub.id, status: "SUCCEEDED", kind: "PERIOD", periodEnd: sub.paidUntil },
+    orderBy: { paidAt: "desc" },
+  });
+  // sin el pago a mano (p. ej. un periodo puesto por soporte): se asume que el periodo dura un mes o un año
+  const length = addPeriod(sub.paidUntil, sub.interval).getTime() - sub.paidUntil.getTime();
+  const start = last?.periodStart ?? new Date(sub.paidUntil.getTime() - length);
+  const total = sub.paidUntil.getTime() - start.getTime();
+  const left = Math.min(total, sub.paidUntil.getTime() - now.getTime());
+  const diff = amountFor(to, sub.interval) - amountFor(from, sub.interval);
+  const amount = total > 0 ? Math.ceil((diff * left) / total) : diff;
+  return amount < MIN_CHARGE ? 0 : amount;
+}
+
+type Charge = { kind: "PERIOD" | "UPGRADE"; plan: PlanCode; interval: BillingInterval; amount: number };
+
+// Qué se cobra: la diferencia si sube de plan con un periodo pagado; si no, un periodo con lo programado
+async function chargeFor(
+  owner: { plan: PlanCode },
+  sub: { id: string; paidUntil: Date | null; interval: BillingInterval; nextPlan: PlanCode | null; nextInterval: BillingInterval | null; trialEndsAt: Date; exempt: boolean },
+  upgradeTo?: PlanCode,
+): Promise<Charge> {
+  const active = !!sub.paidUntil && sub.paidUntil > new Date();
+  if (upgradeTo) {
+    if (!active) throw fail("Sin un periodo pagado el plan se cambia sin costo", 409, "BILLING_NOT_ACTIVE");
+    if (PLAN_RANK[upgradeTo] <= PLAN_RANK[owner.plan]) throw fail("Ese plan no es superior al actual", 400, "BILLING_NOT_UPGRADE");
+    const amount = await upgradeQuote(sub, owner.plan, upgradeTo);
+    if (!amount) throw fail("La diferencia es mínima: el cambio se aplica sin cobro", 409, "BILLING_UPGRADE_FREE");
+    return { kind: "UPGRADE", plan: upgradeTo, interval: sub.interval, amount };
+  }
+  const plan = active ? sub.nextPlan ?? owner.plan : owner.plan;
+  const interval = active ? sub.nextInterval ?? sub.interval : sub.interval;
+  return { kind: "PERIOD", plan, interval, amount: amountFor(plan, interval) };
+}
+
+const describe = (c: Charge) =>
+  c.kind === "UPGRADE" ? `Cubivo cambio a plan ${c.plan}` : `Cubivo plan ${c.plan} ${c.interval === "ANNUAL" ? "anual" : "mensual"}`;
+
 export async function cardSetup(companyId: string, viewerId: string) {
   const { owner, sub } = await payer(companyId, viewerId);
   return { publishableKey: onvo.onvoPublishableKey(), customerId: await ensureCustomer(sub, owner) };
 }
 
-export async function pay(companyId: string, viewerId: string, chosenMethodId?: string) {
+export async function pay(companyId: string, viewerId: string, chosenMethodId?: string, upgradeTo?: PlanCode) {
   const { owner, ownerId, sub } = await payer(companyId, viewerId);
   if (!sub.onvoCustomerId) throw fail("Primero registra la tarjeta", 409, "BILLING_NO_CUSTOMER");
   const paymentMethodId = chosenMethodId ?? sub.paymentMethodId;
@@ -88,18 +133,17 @@ export async function pay(companyId: string, viewerId: string, chosenMethodId?: 
 
   await assertNoPending(sub.id);
 
-  const plan = owner.plan;
-  const interval = sub.interval;
-  const amount = amountFor(plan, interval);
+  const charge = await chargeFor(owner, sub, upgradeTo);
+  const { kind, plan, interval, amount } = charge;
   const payment = await prisma.subscriptionPayment.create({
-    data: { subscriptionId: sub.id, plan, interval, amount, paymentMethodId, cardBrand: pm.card?.brand ?? null, cardLast4: pm.card?.last4 ?? null },
+    data: { subscriptionId: sub.id, kind, plan, interval, amount, paymentMethodId, cardBrand: pm.card?.brand ?? null, cardLast4: pm.card?.last4 ?? null },
   });
   try {
     const intent = await onvo.createIntent({
       amount: amount * 100,
       customerId: sub.onvoCustomerId,
-      description: `Cubivo plan ${plan} ${interval === "ANNUAL" ? "anual" : "mensual"}`,
-      metadata: { paymentId: payment.id, userId: ownerId, plan, interval },
+      description: describe(charge),
+      metadata: { paymentId: payment.id, userId: ownerId, plan, interval, kind },
     });
     await prisma.subscriptionPayment.update({ where: { id: payment.id }, data: { onvoIntentId: intent.id } });
     const confirmed = await onvo.confirmIntent(intent.id, {
@@ -149,26 +193,25 @@ export const sinpeInstructions = (amount: number, identification: string) => ({
   identification,
 });
 
-export async function paySinpe(companyId: string, viewerId: string, input: { idType: SinpeIdType; idNumber: string; phone: string }) {
+export async function paySinpe(companyId: string, viewerId: string, input: { idType: SinpeIdType; idNumber: string; phone: string; upgradeTo?: PlanCode }) {
   const { owner, ownerId, sub } = await payer(companyId, viewerId);
   const identification = sinpeIdentification(input.idType, input.idNumber);
   const phone = input.phone.replace(/\D/g, "").replace(/^506(?=\d{8}$)/, "");
   if (!/^[5-8]\d{7}$/.test(phone)) throw fail("El teléfono del SINPE Móvil tiene 8 números", 400, "BILLING_SINPE_PHONE");
   await assertNoPending(sub.id);
 
+  const charge = await chargeFor(owner, sub, input.upgradeTo);
+  const { kind, plan, interval, amount } = charge;
   const customerId = await ensureCustomer(sub, owner);
-  const plan = owner.plan;
-  const interval = sub.interval;
-  const amount = amountFor(plan, interval);
   const payment = await prisma.subscriptionPayment.create({
-    data: { subscriptionId: sub.id, method: "SINPE", plan, interval, amount, sinpeIdentification: identification },
+    data: { subscriptionId: sub.id, method: "SINPE", kind, plan, interval, amount, sinpeIdentification: identification },
   });
   try {
     const intent = await onvo.createIntent({
       amount: amount * 100,
       customerId,
-      description: `Cubivo plan ${plan} ${interval === "ANNUAL" ? "anual" : "mensual"}`,
-      metadata: { paymentId: payment.id, userId: ownerId, plan, interval },
+      description: describe(charge),
+      metadata: { paymentId: payment.id, userId: ownerId, plan, interval, kind },
     });
     await prisma.subscriptionPayment.update({ where: { id: payment.id }, data: { onvoIntentId: intent.id } });
     const pm = await onvo.createSinpeMethod({ customerId, identification, identificationType: SINPE_ID_TYPE[input.idType], number: `+506${phone}` });
@@ -226,6 +269,13 @@ async function markSucceeded(paymentId: string) {
     if (claimed.count === 0) return { payment, claimed: false };
     const sub = payment.subscription;
     const now = new Date();
+    if (payment.kind === "UPGRADE") {
+      // pagó la diferencia: el plan nuevo rige ya hasta el fin del periodo pagado (no suma tiempo)
+      await tx.user.update({ where: { id: sub.userId }, data: { plan: payment.plan } });
+      await tx.subscription.update({ where: { id: sub.id }, data: { nextPlan: null } });
+      const updated = await tx.subscriptionPayment.update({ where: { id: paymentId }, data: { periodStart: now, periodEnd: sub.paidUntil }, include: { subscription: true } });
+      return { payment: updated, claimed: true };
+    }
     // el periodo empieza al terminar lo ya pagado o la prueba que queda (no se pierden días); si venció hace poco
     // (dentro de la gracia) sigue desde el vencimiento, para que la renovación sea continua; si no, desde ahora
     const future = [sub.paidUntil, sub.trialEndsAt].filter((d): d is Date => !!d && d > now).sort((a, b) => b.getTime() - a.getTime())[0];
@@ -238,6 +288,9 @@ async function markSucceeded(paymentId: string) {
       data: {
         paidUntil: periodEnd,
         interval: payment.interval,
+        nextPlan: null,
+        nextInterval: null,
+        cancelAtPeriodEnd: false, // pagar otro periodo deshace la cancelación
         ...(payment.paymentMethodId && { paymentMethodId: payment.paymentMethodId, cardBrand: payment.cardBrand, cardLast4: payment.cardLast4 }),
       },
     });
@@ -250,6 +303,7 @@ async function markSucceeded(paymentId: string) {
 type PaymentRow = Awaited<ReturnType<typeof prisma.subscriptionPayment.findUniqueOrThrow>>;
 const view = (p: PaymentRow) => ({
   automatic: p.automatic,
+  kind: p.kind,
   id: p.id,
   status: p.status,
   method: p.method,
