@@ -90,3 +90,11 @@ En la VPS el HTTPS no lo hace Caddy: lo hace el **nginx del servidor** con certb
   Después de cambiar el `.env`: `docker compose -f docker-compose.prod.yml up -d api`.
 - Respaldos de lo anterior en `/root/*.respaldo-*` y `/opt/stockly/.env.respaldo-*`.
 - Entrar a la VPS: llave SSH `~/.ssh/cubivo_vps` (sin contraseña).
+
+## En la VPS: correo desde cubivo.org (24-nov-2026)
+
+- Dominio verificado en Resend con 4 registros en DonDominio (el campo Nombre va corto, el panel agrega `.cubivo.org`):
+  `resend._domainkey` TXT (DKIM), `rsend` y `send` CNAME → `rsend.forge.rmta.net.` / `send.forge.rmta.net.`, `_dmarc` TXT `v=DMARC1; p=none;`.
+- `/opt/stockly/.env`: `RESEND_API_KEY=...` y `EMAIL_FROM=Cubivo <facturas@cubivo.org>` (sin `EMAIL_TEST_TO`: los correos llegan al destinatario real).
+- Tras cambiar el `.env`: `docker compose -f docker-compose.prod.yml up -d api`.
+- `facturas@cubivo.org` solo envía; para recibir respuestas hace falta un buzón aparte.
