@@ -34,6 +34,21 @@ describe("POST /auth/register", () => {
     expect(response.body.companyId).toBeTruthy()
   })
 
+  it("con REGISTRATION_CLOSED=1 no se crean cuentas nuevas y GET /auth/registration lo dice", async () => {
+    expect((await request(app).get("/auth/registration")).body).toEqual({ open: true })
+    process.env.REGISTRATION_CLOSED = "1"
+    try {
+      expect((await request(app).get("/auth/registration")).body).toEqual({ open: false })
+      const res = await request(app).post("/auth/register")
+        .send({ acceptTerms: true, name: "Test", email: "cerrado@example.com", password: "Clave-segura-1" })
+      expect(res.status).toBe(403)
+      expect(res.body.code).toBe("REGISTRATION_CLOSED")
+      expect(await prisma.user.count({ where: { email: "cerrado@example.com" } })).toBe(0)
+    } finally {
+      delete process.env.REGISTRATION_CLOSED
+    }
+  })
+
   it("debería rechazar un registro con email ya existente", async () => {
     // Primero creamos el usuario
     await request(app)

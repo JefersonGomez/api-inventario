@@ -3,7 +3,19 @@ import { pinStatus } from "../users/pin.service.ts";
 import { Register, Login, refreshAccessToken, logout, switchCompany, openSession } from "./auth.service.ts";
 import { DEMO_CODES, demoUser } from "../demo/demo.service.ts";
 
+// Registro público de empresas: se cierra con REGISTRATION_CLOSED=1 (p. ej. mientras no esté listo el cobro).
+// Las invitaciones a empleados (cuentas nuevas por enlace) siguen funcionando.
+export const registrationOpen = () => process.env.REGISTRATION_CLOSED !== "1";
+
+export function registrationStatusHandler(_req: Request, res: Response) {
+  res.json({ open: registrationOpen() });
+}
+
 export async function RegisterController(req: Request, res: Response) {
+  if (!registrationOpen()) {
+    res.status(403).json({ code: "REGISTRATION_CLOSED", error: "El registro de cuentas nuevas abre muy pronto. Mientras tanto puedes probar la demo." });
+    return;
+  }
   try {
     const { name, email, password, phone, company, plan } = req.body;
     const userCreated = await Register(name, email, password, { phone, company, plan });

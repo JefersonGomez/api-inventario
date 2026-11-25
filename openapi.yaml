@@ -868,6 +868,13 @@ paths:
               schema: { $ref: '#/components/schemas/User' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /auth/registration:
+    get:
+      tags: [Auth]
+      summary: ¿Se pueden crear cuentas nuevas? (REGISTRATION_CLOSED=1 lo cierra; POST /auth/register responde 403 REGISTRATION_CLOSED)
+      security: []
+      responses:
+        '200': { description: "{ open: boolean }" }
   /auth/demo:
     get:
       tags: [Auth]
