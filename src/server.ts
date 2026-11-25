@@ -7,6 +7,7 @@ import { notifyOverdue } from "./modules/receivables/receivables.service.ts"
 import { notifyPayablesDue } from "./modules/payables/payables.service.ts"
 import { processEInvoices } from "./modules/einvoice/einvoice.service.ts"
 import { processReceiverMessages } from "./modules/payables/receiver-message.service.ts"
+import { processBilling } from "./modules/billing/renewals.service.ts"
 
 // falla al arrancar (con un mensaje claro) si falta algo crítico
 assertEnv()
@@ -33,3 +34,8 @@ const einvoices = () => {
   processReceiverMessages().catch((e) => console.error("mensaje receptor:", e)) // respuestas a facturas de proveedores
 }
 setInterval(einvoices, 60_000).unref()
+// suscripciones (C4, solo con BILLING_ENABLED=1): pagos pendientes, renovación con tarjeta y avisos por correo.
+// Al arrancar y cada hora
+const billing = () => processBilling().catch((e) => console.error("cobro de suscripciones:", e))
+billing()
+setInterval(billing, 3_600_000).unref()

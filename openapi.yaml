@@ -951,6 +951,11 @@ paths:
         '200': { description: El pago }
   /billing/payments:
     get:
+      description: |
+        Incluye `automatic: true` en los cobros de renovación (C4). La renovación corre cada hora en el servidor
+        (renewals.service processBilling, solo con BILLING_ENABLED=1): cobra la tarjeta guardada al vencer (hasta 3
+        intentos, uno por día, dentro de la gracia; 3DS → correo con el enlace), cancela en ONVO los pagos pendientes de
+        más de 24 h y manda una sola vez los correos de prueba por terminar, recordatorio SINPE y solo lectura.
       tags: [Billing]
       summary: Historial de pagos de la suscripción (últimos 50). Solo el dueño.
       responses:

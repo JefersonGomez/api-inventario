@@ -11,6 +11,8 @@ import type { BillingInterval, PlanCode } from "../../generated/prisma/enums.ts"
 import { logAudit } from "../audit/audit.service.ts";
 import { billingEnabled, ensureSubscription } from "./billing.service.ts";
 import * as onvo from "./onvo.client.ts";
+import { BILLING } from "../../config/plans.ts";
+import { paymentReceivedEmail } from "./billing-email.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (message: string, status: number, code: string): HttpError => Object.assign(new Error(message), { status, code });
@@ -197,7 +199,17 @@ const DECLINED = "El banco rechazó el pago. Revisa los datos o usa otra tarjeta
 
 // Pasa el resultado de ONVO al pago. Aprobado → aplica el periodo (una sola vez, en transacción).
 export async function applyIntent(paymentId: string, intent: onvo.OnvoIntent) {
-  if (intent.status === "succeeded") return view(await markSucceeded(paymentId));
+  if (intent.status === "succeeded") {
+    const { payment, claimed } = await markSucceeded(paymentId);
+    // comprobante por correo al dueño, una sola vez (la factura electrónica llega en la C6)
+    if (claimed && payment.periodEnd) {
+      const owner = await prisma.user.findUniqueOrThrow({ where: { id: payment.subscription.userId }, select: { name: true, email: true } });
+      await paymentReceivedEmail(owner, payment.plan, payment.amount, payment.method, payment.periodEnd).catch((e) =>
+        console.error("correo de pago recibido:", (e as Error).message),
+      );
+    }
+    return view(payment);
+  }
   const failed = intent.status === "requires_payment_method" || intent.status === "failed" || intent.status === "canceled";
   if (failed) {
     const message = intent.lastPaymentError?.message ? `${DECLINED} (${intent.lastPaymentError.message})` : DECLINED;
@@ -211,11 +223,14 @@ async function markSucceeded(paymentId: string) {
     // solo el primero que lo ve PENDING lo aplica (vuelta del 3DS y webhook pueden llegar juntos)
     const claimed = await tx.subscriptionPayment.updateMany({ where: { id: paymentId, status: "PENDING" }, data: { status: "SUCCEEDED", paidAt: new Date() } });
     const payment = await tx.subscriptionPayment.findUniqueOrThrow({ where: { id: paymentId }, include: { subscription: true } });
-    if (claimed.count === 0) return payment;
+    if (claimed.count === 0) return { payment, claimed: false };
     const sub = payment.subscription;
     const now = new Date();
-    // el periodo empieza al terminar lo ya pagado o la prueba que queda (no se pierden días), o ahora si venció
-    const base = [sub.paidUntil, sub.trialEndsAt].filter((d): d is Date => !!d && d > now).sort((a, b) => b.getTime() - a.getTime())[0] ?? now;
+    // el periodo empieza al terminar lo ya pagado o la prueba que queda (no se pierden días); si venció hace poco
+    // (dentro de la gracia) sigue desde el vencimiento, para que la renovación sea continua; si no, desde ahora
+    const future = [sub.paidUntil, sub.trialEndsAt].filter((d): d is Date => !!d && d > now).sort((a, b) => b.getTime() - a.getTime())[0];
+    const inGrace = sub.paidUntil && sub.paidUntil <= now && sub.paidUntil.getTime() > now.getTime() - BILLING.graceDays * 86_400_000 ? sub.paidUntil : null;
+    const base = future ?? inGrace ?? now;
     const periodEnd = addPeriod(base, payment.interval);
     // la tarjeta con que se pagó bien queda como la de renovar (C4)
     await tx.subscription.update({
@@ -227,12 +242,14 @@ async function markSucceeded(paymentId: string) {
       },
     });
     await tx.user.update({ where: { id: sub.userId }, data: { plan: payment.plan } });
-    return tx.subscriptionPayment.update({ where: { id: paymentId }, data: { periodStart: base, periodEnd } });
+    const updated = await tx.subscriptionPayment.update({ where: { id: paymentId }, data: { periodStart: base, periodEnd }, include: { subscription: true } });
+    return { payment: updated, claimed: true };
   });
 }
 
 type PaymentRow = Awaited<ReturnType<typeof prisma.subscriptionPayment.findUniqueOrThrow>>;
 const view = (p: PaymentRow) => ({
+  automatic: p.automatic,
   id: p.id,
   status: p.status,
   method: p.method,

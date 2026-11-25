@@ -72,4 +72,7 @@ export const createIntent = (data: { amount: number; customerId: string; descrip
 export const confirmIntent = (id: string, data: { paymentMethodId: string; returnUrl?: string }) =>
   onvo<OnvoIntent>("POST", `/payment-intents/${encodeURIComponent(id)}/confirm`, data);
 
+// Cancelar una intención que nadie terminó (SINPE que no llegó, 3DS abandonado): ya no acepta el pago (probado 25-nov)
+export const cancelIntent = (id: string) => onvo<OnvoIntent>("POST", `/payment-intents/${encodeURIComponent(id)}/cancel`);
+
 export const getIntent = (id: string) => onvo<OnvoIntent>("GET", `/payment-intents/${encodeURIComponent(id)}`);
