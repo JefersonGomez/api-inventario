@@ -47,14 +47,31 @@ async function payer(companyId: string, viewerId: string) {
 }
 
 // Cliente de ONVO de la cuenta (se crea la primera vez) + llave pública para que el navegador registre la tarjeta
+async function ensureCustomer(sub: { id: string; onvoCustomerId: string | null }, owner: { name: string; email: string }) {
+  if (sub.onvoCustomerId) return sub.onvoCustomerId;
+  const id = (await onvo.createCustomer({ name: owner.name, email: owner.email })).id;
+  await prisma.subscription.update({ where: { id: sub.id }, data: { onvoCustomerId: id } });
+  return id;
+}
+
+// un cobro a la vez (el que espera la verificación del banco o la transferencia SINPE vale 30 minutos)
+async function assertNoPending(subscriptionId: string) {
+  const pending = await prisma.subscriptionPayment.findFirst({
+    where: { subscriptionId, status: "PENDING", createdAt: { gt: new Date(Date.now() - 30 * 60_000) } },
+  });
+  if (!pending) return;
+  throw fail(
+    pending.method === "SINPE"
+      ? "Ya hay un pago por SINPE Móvil esperando la transferencia. Hazla o espera 30 minutos para generar otro."
+      : "Ya hay un pago esperando la verificación del banco. Termínalo o espera unos minutos.",
+    409,
+    "BILLING_PAYMENT_PENDING",
+  );
+}
+
 export async function cardSetup(companyId: string, viewerId: string) {
   const { owner, sub } = await payer(companyId, viewerId);
-  let customerId = sub.onvoCustomerId;
-  if (!customerId) {
-    customerId = (await onvo.createCustomer({ name: owner.name, email: owner.email })).id;
-    await prisma.subscription.update({ where: { id: sub.id }, data: { onvoCustomerId: customerId } });
-  }
-  return { publishableKey: onvo.onvoPublishableKey(), customerId };
+  return { publishableKey: onvo.onvoPublishableKey(), customerId: await ensureCustomer(sub, owner) };
 }
 
 export async function pay(companyId: string, viewerId: string, chosenMethodId?: string) {
@@ -67,11 +84,7 @@ export async function pay(companyId: string, viewerId: string, chosenMethodId?: 
   const pm = await onvo.getPaymentMethod(paymentMethodId);
   if (pm.customerId !== sub.onvoCustomerId) throw fail("La tarjeta no pertenece a esta cuenta", 403, "BILLING_CARD_OWNER");
 
-  // un cobro a la vez: si hay uno esperando la verificación del banco, se usa ese
-  const pending = await prisma.subscriptionPayment.findFirst({
-    where: { subscriptionId: sub.id, status: "PENDING", createdAt: { gt: new Date(Date.now() - 30 * 60_000) } },
-  });
-  if (pending) throw fail("Ya hay un pago esperando la verificación del banco. Termínalo o espera unos minutos.", 409, "BILLING_PAYMENT_PENDING");
+  await assertNoPending(sub.id);
 
   const plan = owner.plan;
   const interval = sub.interval;
@@ -100,6 +113,71 @@ export async function pay(companyId: string, viewerId: string, chosenMethodId?: 
   } catch (err) {
     await prisma.subscriptionPayment.updateMany({
       where: { id: payment.id, status: "PENDING", onvoIntentId: null },
+      data: { status: "FAILED", failureMessage: (err as Error).message.slice(0, 300) },
+    });
+    throw err;
+  }
+}
+
+// ---- SINPE Móvil (C3) ----
+// Formato que exige ONVO (con guiones) según quién transfiere: persona física, residente (DIMEX) o empresa.
+const SINPE_ID_TYPE = { FISICA: 0, DIMEX: 1, JURIDICA: 3 } as const;
+export type SinpeIdType = keyof typeof SINPE_ID_TYPE;
+
+export function sinpeIdentification(idType: SinpeIdType, raw: string) {
+  const d = raw.replace(/\D/g, "");
+  if (idType === "FISICA") {
+    const n = d.length === 10 && d.startsWith("0") ? d.slice(1) : d;
+    if (n.length !== 9) throw fail("La cédula física tiene 9 números (ej. 1-1393-1919)", 400, "BILLING_SINPE_ID");
+    return `0${n[0]}-${n.slice(1, 5)}-${n.slice(5)}`;
+  }
+  if (idType === "JURIDICA") {
+    if (d.length !== 10) throw fail("La cédula jurídica tiene 10 números (ej. 3-101-123456)", 400, "BILLING_SINPE_ID");
+    return `${d[0]}-${d.slice(1, 4)}-${d.slice(4)}`;
+  }
+  if (d.length < 11 || d.length > 12) throw fail("El DIMEX tiene 11 o 12 números", 400, "BILLING_SINPE_ID");
+  return d;
+}
+
+const dash4 = (n: string) => `${n.slice(0, 4)}-${n.slice(4)}`;
+
+export const sinpeInstructions = (amount: number, identification: string) => ({
+  to: dash4(onvo.sinpeDestination().replace(/^\+506/, "")),
+  amount,
+  identification,
+});
+
+export async function paySinpe(companyId: string, viewerId: string, input: { idType: SinpeIdType; idNumber: string; phone: string }) {
+  const { owner, ownerId, sub } = await payer(companyId, viewerId);
+  const identification = sinpeIdentification(input.idType, input.idNumber);
+  const phone = input.phone.replace(/\D/g, "").replace(/^506(?=\d{8}$)/, "");
+  if (!/^[5-8]\d{7}$/.test(phone)) throw fail("El teléfono del SINPE Móvil tiene 8 números", 400, "BILLING_SINPE_PHONE");
+  await assertNoPending(sub.id);
+
+  const customerId = await ensureCustomer(sub, owner);
+  const plan = owner.plan;
+  const interval = sub.interval;
+  const amount = amountFor(plan, interval);
+  const payment = await prisma.subscriptionPayment.create({
+    data: { subscriptionId: sub.id, method: "SINPE", plan, interval, amount, sinpeIdentification: identification },
+  });
+  try {
+    const intent = await onvo.createIntent({
+      amount: amount * 100,
+      customerId,
+      description: `Cubivo plan ${plan} ${interval === "ANNUAL" ? "anual" : "mensual"}`,
+      metadata: { paymentId: payment.id, userId: ownerId, plan, interval },
+    });
+    await prisma.subscriptionPayment.update({ where: { id: payment.id }, data: { onvoIntentId: intent.id } });
+    const pm = await onvo.createSinpeMethod({ customerId, identification, identificationType: SINPE_ID_TYPE[input.idType], number: `+506${phone}` });
+    // queda en "processing": ONVO espera la transferencia por el monto exacto desde esa identificación
+    const confirmed = await onvo.confirmIntent(intent.id, { paymentMethodId: pm.id });
+    const result = await applyIntent(payment.id, confirmed);
+    await logAudit(viewerId, "CREATE", "SubscriptionPayment", payment.id, { amount, plan, interval, method: "SINPE", status: result.status });
+    return { payment: result };
+  } catch (err) {
+    await prisma.subscriptionPayment.updateMany({
+      where: { id: payment.id, status: "PENDING" },
       data: { status: "FAILED", failureMessage: (err as Error).message.slice(0, 300) },
     });
     throw err;
@@ -168,6 +246,7 @@ const view = (p: PaymentRow) => ({
   paidAt: p.paidAt,
   failureMessage: p.failureMessage,
   createdAt: p.createdAt,
+  ...(p.method === "SINPE" && p.status === "PENDING" && p.sinpeIdentification && { sinpe: sinpeInstructions(p.amount, p.sinpeIdentification) }),
 });
 
 export async function listPayments(companyId: string, viewerId: string) {

@@ -54,10 +54,22 @@ export const createCustomer = (data: { name: string; email: string }) => onvo<{ 
 
 export const getPaymentMethod = (id: string) => onvo<OnvoPaymentMethod>("GET", `/payment-methods/${encodeURIComponent(id)}`);
 
+// SINPE Móvil (C3): el método lleva la identificación de QUIEN transfiere (con guiones) y su teléfono; ONVO
+// acepta la transferencia que coincida en identificación y monto exacto con una intención en "processing".
+export const createSinpeMethod = (data: { customerId: string; identification: string; identificationType: number; number: string }) =>
+  onvo<OnvoPaymentMethod>("POST", "/payment-methods", {
+    type: "mobile_number",
+    customerId: data.customerId,
+    mobileNumber: { identification: data.identification, identificationType: data.identificationType, number: data.number },
+  });
+
+// Número al que se transfiere (por defecto el de ONVO; su soporte puede asignar uno propio)
+export const sinpeDestination = () => process.env.ONVO_SINPE_NUMBER || "+50670196686";
+
 export const createIntent = (data: { amount: number; customerId: string; description: string; metadata: Record<string, string> }) =>
   onvo<OnvoIntent>("POST", "/payment-intents", { ...data, currency: "CRC" });
 
-export const confirmIntent = (id: string, data: { paymentMethodId: string; returnUrl: string }) =>
+export const confirmIntent = (id: string, data: { paymentMethodId: string; returnUrl?: string }) =>
   onvo<OnvoIntent>("POST", `/payment-intents/${encodeURIComponent(id)}/confirm`, data);
 
 export const getIntent = (id: string) => onvo<OnvoIntent>("GET", `/payment-intents/${encodeURIComponent(id)}`);

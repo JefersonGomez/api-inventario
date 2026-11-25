@@ -428,24 +428,25 @@ enum SubscriptionPaymentStatus {
 
 // Cada cobro de la suscripción (C2). El periodo se aplica UNA sola vez, al pasar a SUCCEEDED.
 model SubscriptionPayment {
-  id              String                    @id @default(uuid())
-  subscriptionId  String
-  subscription    Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  onvoIntentId    String?                   @unique
-  method          String                    @default("CARD") // CARD (C2) | SINPE (C3)
-  plan            PlanCode
-  interval        BillingInterval
-  amount          Int // colones con IVA
-  status          SubscriptionPaymentStatus @default(PENDING)
-  failureMessage  String?
-  paymentMethodId String? // tarjeta con la que se cobró: pasa a ser la de renovar al confirmarse
-  cardBrand       String?
-  cardLast4       String?
-  periodStart     DateTime? // lo que cubre (se llena al confirmarse)
-  periodEnd       DateTime?
-  paidAt          DateTime?
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
+  id                  String                    @id @default(uuid())
+  subscriptionId      String
+  subscription        Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  onvoIntentId        String?                   @unique
+  method              String                    @default("CARD") // CARD (C2) | SINPE (C3)
+  plan                PlanCode
+  interval            BillingInterval
+  amount              Int // colones con IVA
+  status              SubscriptionPaymentStatus @default(PENDING)
+  failureMessage      String?
+  paymentMethodId     String? // tarjeta con la que se cobró: pasa a ser la de renovar al confirmarse
+  sinpeIdentification String? // SINPE (C3): identificación de quien transfiere, con el formato de ONVO
+  cardBrand           String?
+  cardLast4           String?
+  periodStart         DateTime? // lo que cubre (se llena al confirmarse)
+  periodEnd           DateTime?
+  paidAt              DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
 
   @@index([subscriptionId, createdAt])
 }

@@ -920,6 +920,28 @@ paths:
       responses:
         '201': { description: "{ payment: { id, status: PENDING|SUCCEEDED|FAILED, amount, plan, interval, cardBrand, cardLast4, periodStart, periodEnd, failureMessage }, redirectUrl? }" }
         '409': { description: BILLING_PAYMENT_PENDING (hay uno esperando la verificación del banco) }
+  /billing/pay-sinpe:
+    post:
+      tags: [Billing]
+      summary: Genera el cobro por SINPE Móvil (C3) y devuelve a qué número y cuánto transferir
+      description: |
+        ONVO acepta la transferencia que coincida en identificación (con guiones: física 0#-####-####, jurídica
+        3-###-######, DIMEX sin guiones) y monto exacto. El pago queda PENDING con `sinpe { to, amount, identification }`
+        hasta que llega; el navegador consulta /billing/payments/{id}/sync cada 5 s.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idType, idNumber, phone]
+              properties:
+                idType: { type: string, enum: [FISICA, DIMEX, JURIDICA] }
+                idNumber: { type: string }
+                phone: { type: string, description: 8 dígitos (con o sin +506) }
+      responses:
+        '201': { description: "{ payment } con sinpe { to, amount, identification }" }
+        '400': { description: BILLING_SINPE_ID o BILLING_SINPE_PHONE }
+        '409': { description: BILLING_PAYMENT_PENDING }
   /billing/payments/{id}/sync:
     post:
       tags: [Billing]

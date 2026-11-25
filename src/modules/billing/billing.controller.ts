@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { getSubscription, updateSubscription } from "./billing.service.ts";
-import { cardSetup, listPayments, pay, syncPayment } from "./payments.service.ts";
+import { cardSetup, listPayments, pay, paySinpe, syncPayment } from "./payments.service.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (res: Response, err: unknown) => {
@@ -36,3 +36,4 @@ export const cardSetupHandler = handle((req) => cardSetup(req.user!.companyId, r
 export const payHandler = handle((req) => pay(req.user!.companyId, req.user!.id, req.body?.paymentMethodId), 201);
 export const syncPaymentHandler = handle((req) => syncPayment(req.user!.companyId, req.user!.id, String(req.params.id)));
 export const listPaymentsHandler = handle((req) => listPayments(req.user!.companyId, req.user!.id));
+export const paySinpeHandler = handle((req) => paySinpe(req.user!.companyId, req.user!.id, req.body), 201);

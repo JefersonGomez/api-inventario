@@ -123,7 +123,7 @@ describe("pago con tarjeta (ONVO)", () => {
   type Call = { method: string; url: string; body: Record<string, unknown> | null }
   let calls: Call[] = []
   // cómo responde ONVO al confirmar
-  let confirmAs: "ok" | "3ds" | "declined" = "ok"
+  let confirmAs: "ok" | "3ds" | "declined" | "sinpe" = "ok"
   let pmCustomer = "cus_1"
   let n = 0
 
@@ -144,9 +144,11 @@ describe("pago con tarjeta (ONVO)", () => {
       const card = { id: "pm_1", customerId: pmCustomer, status: "active", card: { brand: "Visa", last4: "4242" } }
       if (url.endsWith("/v1/customers")) return json({ id: "cus_1" }, 201)
       if (url.includes("/v1/payment-methods/")) return json(card)
+      if (method === "POST" && url.endsWith("/v1/payment-methods")) return json({ id: "pm_sinpe", type: "mobile_number", customerId: body!.customerId }, 201)
       if (method === "POST" && url.endsWith("/v1/payment-intents")) return json({ id: `pi_${++n}`, status: "requires_payment_method", amount: body!.amount }, 201)
       if (url.endsWith("/confirm")) {
         const id = url.split("/").at(-2)
+        if (confirmAs === "sinpe") return json({ id, status: "processing" }, 201)
         if (confirmAs === "ok") return json({ id, status: "succeeded", paymentMethod: card }, 201)
         if (confirmAs === "3ds") return json({ id, status: "requires_action", nextAction: { type: "redirect_to_url", redirectToUrl: { url: "https://checkout.onvopay.com/authorize/test_x" } } }, 201)
         return json({ id, status: "requires_payment_method", lastPaymentError: { code: "card_declined", message: "Tarjeta rechazada" } }, 201)
@@ -254,5 +256,36 @@ describe("pago con tarjeta (ONVO)", () => {
     await request(app).get("/billing/card-setup").set(admin.auth)
     expect((await request(app).post("/billing/pay").set(admin.auth).send({ paymentMethodId: "pm_1" })).body.payment.status).toBe("SUCCEEDED")
     expect((await request(app).post("/categories").set(admin.auth).send({ name: "X" })).status).toBe(201)
+  })
+
+  it("SINPE Móvil: da el número y el monto exacto, y al llegar la transferencia la cuenta queda al día", async () => {
+    const admin = await owner()
+    confirmAs = "sinpe"
+    const res = await request(app).post("/billing/pay-sinpe").set(admin.auth).send({ idType: "FISICA", idNumber: "1-1393-1919", phone: "8888-8888" })
+    expect(res.status).toBe(201)
+    expect(res.body.payment).toMatchObject({ status: "PENDING", method: "SINPE", amount: 14900, sinpe: { to: "7019-6686", amount: 14900, identification: "01-1393-1919" } })
+    // a ONVO: identificación con guiones (formato de ONVO), tipo 0 (física) y el teléfono con +506
+    const pm = calls.find((c) => c.method === "POST" && c.url.endsWith("/v1/payment-methods"))!
+    expect(pm.body).toMatchObject({ type: "mobile_number", customerId: "cus_1", mobileNumber: { identification: "01-1393-1919", identificationType: 0, number: "+50688888888" } })
+    // mientras espera, el historial muestra las instrucciones y no deja generar otro
+    expect((await request(app).get("/billing/payments").set(admin.auth)).body[0].sinpe.to).toBe("7019-6686")
+    expect((await request(app).post("/billing/pay-sinpe").set(admin.auth).send({ idType: "FISICA", idNumber: "113931919", phone: "88888888" })).body.code).toBe("BILLING_PAYMENT_PENDING")
+
+    // llegó la transferencia: ONVO la da por buena
+    const synced = await request(app).post(`/billing/payments/${res.body.payment.id}/sync`).set(admin.auth)
+    expect(synced.body).toMatchObject({ status: "SUCCEEDED", method: "SINPE" })
+    expect(synced.body.sinpe).toBeUndefined()
+    expect((await request(app).get("/billing/subscription").set(admin.auth)).body).toMatchObject({ state: "active", card: null })
+  })
+
+  it("SINPE Móvil: formato de cédula jurídica y datos mal escritos", async () => {
+    const admin = await owner()
+    confirmAs = "sinpe"
+    const bad = (body: object) => request(app).post("/billing/pay-sinpe").set(admin.auth).send(body)
+    expect((await bad({ idType: "FISICA", idNumber: "1234567890", phone: "88888888" })).body.code).toBe("BILLING_SINPE_ID")
+    expect((await bad({ idType: "FISICA", idNumber: "113931919", phone: "2222-3333" })).body.code).toBe("BILLING_SINPE_PHONE")
+    await bad({ idType: "JURIDICA", idNumber: "3101123456", phone: "+506 7012-3456" })
+    const pm = calls.filter((c) => c.method === "POST" && c.url.endsWith("/v1/payment-methods")).at(-1)!
+    expect(pm.body!.mobileNumber).toEqual({ identification: "3-101-123456", identificationType: 3, number: "+50670123456" })
   })
 })
