@@ -74,3 +74,19 @@ docker compose -f docker-compose.prod.yml exec -T db psql -U stockly -d stockly 
 docker compose -f docker-compose.prod.yml exec -T db psql -U stockly -d stockly -c \
   "insert into \"Location\" (id, \"companyId\", name, type, code, \"updatedAt\") select gen_random_uuid()::text, c.id, 'Sucursal principal', 'BRANCH', '001', now() from \"Company\" c where not exists (select 1 from \"Location\" l where l.\"companyId\" = c.id);"
 ```
+
+## En la VPS: dominio cubivo.org (24-nov-2026)
+
+En la VPS el HTTPS no lo hace Caddy: lo hace el **nginx del servidor** con certbot, que atiende varios sitios
+(portafolio, rifas, techrag y Cubivo). Caddy del compose corre con `SITE_ADDRESS=:80` y solo escucha en
+`127.0.0.1:8080`.
+
+- DNS (DonDominio): `cubivo.org A 169.58.105.198` y `www.cubivo.org CNAME cubivo.org.`
+- `/etc/nginx/sites-available/cubivo`: `cubivo.org` y `www.cubivo.org` → `127.0.0.1:8080`; `www` redirige a
+  `https://cubivo.org`. Certificado con `certbot --nginx -d cubivo.org -d www.cubivo.org` (se renueva solo).
+- `/etc/nginx/sites-enabled/stockly`: la dirección vieja `stockly-jeferson.duckdns.org` redirige (301) a
+  `https://cubivo.org` (mismo camino).
+- `/opt/stockly/.env`: `APP_URL=https://cubivo.org` y `CORS_ORIGIN=https://cubivo.org,https://stockly-jeferson.duckdns.org`.
+  Después de cambiar el `.env`: `docker compose -f docker-compose.prod.yml up -d api`.
+- Respaldos de lo anterior en `/root/*.respaldo-*` y `/opt/stockly/.env.respaldo-*`.
+- Entrar a la VPS: llave SSH `~/.ssh/cubivo_vps` (sin contraseña).
