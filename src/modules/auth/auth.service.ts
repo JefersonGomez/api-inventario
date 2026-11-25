@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { jwtSecret } from "../../config/env.ts";
 import { TERMS_VERSION } from "../../config/legal.ts";
 import { MAIN_LOCATION } from "../locations/location.service.ts";
+import { trialEnd } from "../billing/billing.state.ts";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
@@ -49,6 +50,8 @@ export async function Register(
     await tx.category.create({ data: { companyId: company.id, name: "General" } });
     await tx.membership.create({ data: { userId: user.id, companyId: company.id, role: "ADMIN" } });
     await tx.user.update({ where: { id: user.id }, data: { lastCompanyId: company.id } });
+    // la prueba gratis del plan elegido empieza al crear la cuenta
+    await tx.subscription.create({ data: { userId: user.id, trialEndsAt: trialEnd() } });
     return { ...user, role: "ADMIN" as const, companyId: company.id };
   });
 }

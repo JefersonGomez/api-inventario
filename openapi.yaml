@@ -868,6 +868,33 @@ paths:
               schema: { $ref: '#/components/schemas/User' }
         '400': { $ref: '#/components/responses/BadRequest' }
 
+  /billing/subscription:
+    get:
+      tags: [Billing]
+      summary: Suscripción de la cuenta dueña de la empresa activa (cualquier miembro la ve)
+      description: |
+        Con BILLING_ENABLED apagado devuelve { enabled: false, isOwner, ownerName, plan, prices, trialDays, graceDays }.
+        Encendido agrega interval (MONTHLY|ANNUAL), trialEndsAt, paidUntil, state (trial|active|grace|expired|exempt),
+        endsAt, graceEndsAt y daysLeft. Una cuenta sin suscripción empieza su prueba de 14 días la primera vez que se mira.
+        Vencida (pasados los 3 días de gracia) la empresa queda en solo lectura: toda escritura fuera de /billing,
+        /auth/switch-company, /profile y /platform responde 402 SUBSCRIPTION_EXPIRED.
+      responses:
+        '200': { description: Estado de la suscripción }
+    put:
+      tags: [Billing]
+      summary: El dueño elige plan y/o periodo (sin periodo pagado vigente)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan: { type: string, enum: [INVOICING, BASIC, PRO, BUSINESS] }
+                interval: { type: string, enum: [MONTHLY, ANNUAL] }
+      responses:
+        '200': { description: La suscripción actualizada (mismo formato que el GET) }
+        '403': { description: BILLING_OWNER_ONLY o BILLING_DEMO }
+        '409': { description: BILLING_PAID_CHANGE (con periodo pagado el cambio es la fase C5) }
   /auth/registration:
     get:
       tags: [Auth]
@@ -1482,11 +1509,11 @@ paths:
   /plans:
     get:
       tags: [Plataforma]
-      summary: Límites de cada plan (público, para la landing)
+      summary: Límites y precios de cada plan (público, para la landing y Mi suscripción)
       security: []
-      description: "En orden INVOICING, BASIC, PRO, BUSINESS: code, aiChatsPerMonth, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth (null = sin límite). Sin precios (viven en la configuración de la landing)."
+      description: "En orden INVOICING, BASIC, PRO, BUSINESS: code, aiChatsPerMonth, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth (null = sin límite), prices { monthly, annual } (colones con IVA; annual = por mes pagando el año) y trialDays."
       responses:
-        '200': { description: "[{ code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth }]" }
+        '200': { description: "[{ code, maxCompanies, maxBranches, maxRegistersPerBranch, maxUsersPerCompany, maxProducts, invoicingOnly, documentsPerMonth, aiChatsPerMonth, prices, trialDays }]" }
   /platform/einvoice-issues:
     get:
       tags: [Plataforma]

@@ -25,3 +25,15 @@ export const PLANS: Record<PlanCode, PlanLimits> = {
   BUSINESS: { maxCompanies: 5, maxBranches: null, maxRegistersPerBranch: null, maxUsersPerCompany: null, maxProducts: null, aiImportsPerMonth: 100, aiChatsPerMonth: 1000, invoicingOnly: false, documentsPerMonth: null },
   INVOICING: { maxCompanies: 1, maxBranches: 1, maxRegistersPerBranch: 0, maxUsersPerCompany: 2, maxProducts: null, aiImportsPerMonth: 0, aiChatsPerMonth: 30, invoicingOnly: true, documentsPerMonth: 100 },
 };
+
+// Precios (colones, IVA incluido; decididos el 22-nov-2026). annual = precio POR MES pagando el año (≈ 2 meses gratis).
+// Fuente única: la landing y "Mi suscripción" los leen de GET /plans.
+export const PRICES: Record<PlanCode, { monthly: number; annual: number }> = {
+  INVOICING: { monthly: 5900, annual: 4900 },
+  BASIC: { monthly: 14900, annual: 12400 },
+  PRO: { monthly: 29900, annual: 24900 },
+  BUSINESS: { monthly: 59900, annual: 49900 },
+};
+
+// Prueba gratis y días de gracia después de vencer (decisiones del usuario, 24/25-nov-2026)
+export const BILLING = { trialDays: 14, graceDays: 3 } as const;

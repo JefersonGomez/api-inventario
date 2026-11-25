@@ -30,6 +30,7 @@ import { companyRouter, companiesRouter } from "./modules/company/company.routes
 import { invitationRouter } from "./modules/invitations/invitation.routes.ts"
 import { platformRouter } from "./modules/platform/platform.routes.ts"
 import { plansRouter } from "./modules/plans/plans.routes.ts"
+import { billingRouter } from "./modules/billing/billing.routes.ts"
 import fs from "fs"
 import {parse} from "yaml"
 import swaggerUi from "swagger-ui-express"
@@ -89,7 +90,8 @@ app.use("/company", companyRouter)
 app.use("/companies", companiesRouter)
 app.use("/invitations", invitationRouter)
 app.use("/platform", platformRouter)
-app.use("/plans", plansRouter) // público: límites de los planes para la landing
+app.use("/plans", plansRouter) // público: límites y precios de los planes para la landing
+app.use("/billing", billingRouter) // suscripción de la cuenta (fase de cobro)
 app.get("/health",(req, res)=>{
     res.status(200).json({"status":"ok"})
 })

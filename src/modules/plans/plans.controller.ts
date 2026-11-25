@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { PLANS } from "../../config/plans.ts";
+import { BILLING, PLANS, PRICES } from "../../config/plans.ts";
 
 // Orden en que se ofrecen; aiImportsPerMonth no se publica (es un detalle interno); aiChatsPerMonth sí
 const ORDER = ["INVOICING", "BASIC", "PRO", "BUSINESS"] as const;
@@ -9,7 +9,7 @@ export function publicPlansHandler(_req: Request, res: Response) {
   res.json(
     ORDER.map((code) => {
       const { aiImportsPerMonth: _ai, ...limits } = PLANS[code];
-      return { code, ...limits };
+      return { code, ...limits, prices: PRICES[code], trialDays: BILLING.trialDays };
     })
   );
 }

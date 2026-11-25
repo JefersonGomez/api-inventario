@@ -4,6 +4,7 @@ import { prismaRoot } from "../config/database.ts";
 import { runWithCompany } from "../shared/tenant.ts";
 import { jwtSecret } from "../config/env.ts";
 import { effectivePermissions, type Permission } from "../config/permissions.ts";
+import { billingEnabled, ownerState } from "../modules/billing/billing.service.ts";
 
 // Rutas que siguen disponibles con la empresa suspendida
 const SUSPENDED_ALLOWED = new Set([
@@ -13,6 +14,11 @@ const SUSPENDED_ALLOWED = new Set([
   "GET /company",
   "GET /profile/me",
 ]);
+
+// Suscripción vencida (pasados los días de gracia): la empresa queda en SOLO LECTURA. Se puede ver y
+// exportar todo; de lo que escribe solo pasa esto (pagar, cambiar de empresa, su perfil y el panel del dueño).
+const EXPIRED_WRITE_ALLOWED = ["/billing", "/auth/switch-company", "/profile", "/platform"];
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 // Token = { id, companyId }. El rol y si sigue activo se leen de la membresía en cada
 // petición: quitar a alguien de una empresa o cambiarle el rol aplica al instante.
@@ -39,7 +45,13 @@ export async function Authenticated(
       where: { userId_companyId: { userId: payload.id, companyId: payload.companyId } },
       include: {
         user: { select: { isActive: true, isPlatformOwner: true, isDemo: true } },
-        company: { select: { suspendedAt: true, suspensionReason: true } },
+        company: {
+          select: {
+            suspendedAt: true,
+            suspensionReason: true,
+            owner: { select: { id: true, isDemo: true, subscription: { select: { trialEndsAt: true, paidUntil: true, exempt: true } } } },
+          },
+        },
       },
     });
     if (!membership || !membership.isActive || !membership.user.isActive) {
@@ -55,6 +67,19 @@ export async function Authenticated(
           code: "COMPANY_SUSPENDED",
           error: membership.company.suspensionReason || "La cuenta de esta empresa está suspendida. Contacta a soporte.",
         });
+      }
+    }
+
+    if (billingEnabled() && !READ_METHODS.has(req.method)) {
+      const path = req.originalUrl.split("?")[0]!;
+      if (!EXPIRED_WRITE_ALLOWED.some((p) => path === p || path.startsWith(`${p}/`))) {
+        const { state } = await ownerState(membership.company.owner);
+        if (state === "expired") {
+          return res.status(402).json({
+            code: "SUBSCRIPTION_EXPIRED",
+            error: "La suscripción venció: la cuenta está en solo lectura. Puedes ver y exportar tus datos; para seguir vendiendo y facturando, paga tu plan.",
+          });
+        }
       }
     }
 
