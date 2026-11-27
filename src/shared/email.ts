@@ -9,7 +9,7 @@ export const validEmail = (s: string | null | undefined): s is string => !!s && 
 
 function fromWithName(from: string, senderName?: string) {
   const name = senderName?.replace(/["<>\\]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
-  if (!name) return from;
+  if (!name || /^cubivo$/i.test(name)) return from;
   const address = from.match(/<([^>]+)>/)?.[1] ?? from.trim();
   return `"${name} vía Cubivo" <${address}>`;
 }

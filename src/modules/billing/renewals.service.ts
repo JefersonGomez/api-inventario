@@ -12,6 +12,7 @@ import { subscriptionState } from "./billing.state.ts";
 import * as mail from "./billing-email.ts";
 import * as onvo from "./onvo.client.ts";
 import { amountFor, applyIntent } from "./payments.service.ts";
+import { invoicePendingPayments } from "./subscription-invoice.service.ts";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -54,6 +55,7 @@ export async function processBilling(now = new Date()) {
   await settlePending(now);
   if (onvo.onvoConfigured()) await chargeDueCards(now);
   await sendNotices(now);
+  await safe("facturas", () => invoicePendingPayments()); // C6: pagos confirmados que quedaron sin factura
 }
 
 // 1. pagos pendientes de hace más de 10 minutos (el dueño cerró la página): se le pregunta a ONVO

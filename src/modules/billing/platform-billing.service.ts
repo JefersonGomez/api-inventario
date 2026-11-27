@@ -6,6 +6,7 @@ import { logAudit } from "../audit/audit.service.ts";
 import { billingEnabled, ensureSubscription } from "./billing.service.ts";
 import { subscriptionState } from "./billing.state.ts";
 import { amountFor } from "./payments.service.ts";
+import { platformCompanyId } from "./subscription-invoice.service.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -60,11 +61,13 @@ export async function listSubscriptions(now = new Date()) {
   const count = (s: string) => rows.filter((r) => r.state === s).length;
   return {
     enabled: billingEnabled(),
+    invoicing: !!platformCompanyId(), // C6: hay empresa emisora configurada
     totals: { mrr, monthRevenue: month._sum.amount ?? 0, monthPayments: month._count, active: count("active"), trial: count("trial"), grace: count("grace"), expired: count("expired") },
     subscriptions: rows,
     payments: recent.map((p) => ({
       id: p.id, owner: p.subscription.user.name, email: p.subscription.user.email, amount: p.amount, method: p.method, kind: p.kind,
       plan: p.plan, interval: p.interval, status: p.status, automatic: p.automatic, failureMessage: p.failureMessage, at: p.paidAt ?? p.createdAt,
+      invoice: p.documentId ? "OK" : p.status === "SUCCEEDED" ? (p.invoiceError ? "ERROR" : "PENDING") : null, invoiceError: p.invoiceError,
     })),
   };
 }

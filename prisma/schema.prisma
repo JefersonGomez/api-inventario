@@ -453,6 +453,11 @@ model SubscriptionPayment {
   sinpeIdentification String? // SINPE (C3): identificación de quien transfiere, con el formato de ONVO
   automatic           Boolean                   @default(false) // C4: cobro automático de la renovación (no lo inició el dueño)
   kind                SubscriptionPaymentKind   @default(PERIOD) // C5: PERIOD suma un periodo; UPGRADE paga la diferencia al subir de plan
+  // C6: la factura electrónica de Cubivo por este pago (la emite la empresa de la plataforma, PLATFORM_COMPANY_ID)
+  documentId          String?                   @unique
+  invoicingAt         DateTime? // se está emitiendo (evita emitirla dos veces)
+  invoiceAttempts     Int                       @default(0)
+  invoiceError        String?
   cardBrand           String?
   cardLast4           String?
   periodStart         DateTime? // lo que cubre (se llena al confirmarse)

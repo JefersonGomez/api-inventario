@@ -13,6 +13,7 @@ import { billingEnabled, ensureSubscription } from "./billing.service.ts";
 import * as onvo from "./onvo.client.ts";
 import { BILLING } from "../../config/plans.ts";
 import { paymentReceivedEmail } from "./billing-email.ts";
+import { invoiceSubscriptionPayment } from "./subscription-invoice.service.ts";
 
 type HttpError = Error & { status?: number; code?: string };
 const fail = (message: string, status: number, code: string): HttpError => Object.assign(new Error(message), { status, code });
@@ -244,7 +245,9 @@ const DECLINED = "El banco rechazó el pago. Revisa los datos o usa otra tarjeta
 export async function applyIntent(paymentId: string, intent: onvo.OnvoIntent) {
   if (intent.status === "succeeded") {
     const { payment, claimed } = await markSucceeded(paymentId);
-    // comprobante por correo al dueño, una sola vez (la factura electrónica llega en la C6)
+    // la factura electrónica de Cubivo (C6), en segundo plano: si falla, la revisión de cada hora reintenta
+    if (claimed) setImmediate(() => invoiceSubscriptionPayment(paymentId).catch((e) => console.error("factura de suscripción:", (e as Error).message)));
+    // aviso por correo al dueño, una sola vez (la factura le llega aparte cuando Hacienda la acepta)
     if (claimed && payment.periodEnd) {
       const owner = await prisma.user.findUniqueOrThrow({ where: { id: payment.subscription.userId }, select: { name: true, email: true } });
       await paymentReceivedEmail(owner, payment.plan, payment.amount, payment.method, payment.periodEnd).catch((e) =>
@@ -304,6 +307,7 @@ type PaymentRow = Awaited<ReturnType<typeof prisma.subscriptionPayment.findUniqu
 const view = (p: PaymentRow) => ({
   automatic: p.automatic,
   kind: p.kind,
+  invoiced: !!p.documentId, // C6: ya tiene su factura electrónica
   id: p.id,
   status: p.status,
   method: p.method,
